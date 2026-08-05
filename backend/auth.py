@@ -9,29 +9,37 @@ import json
 from database import get_db
 from models import User
 from schemas import RegisterRequest, LoginRequest, UserOut, TokenOut
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import os, secrets, hashlib
 from models import PasswordResetCode
 from schemas import ForgotPasswordRequest, ForgotPasswordVerify, ForgotPasswordReset
 from email_utils import send_reset_code
 from schemas import load_policy
+from auth_identity import (
+    JWT_ALGORITHM,
+    JWT_SECRET,
+    get_current_user,
+)
+from competition_authz import (
+    require_account_changes_enabled,
+    require_competition_role,
+    require_current_edition_user,
+)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
-
-# 简单配置（建议后续改为环境变量管理）
-JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET 未配置（请在后端 .env 中设置）")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+competition_router = APIRouter(prefix="/auth", tags=["auth"])
+
 ACCESS_TOKEN_EXPIRE_DAYS = int(os.getenv("ACCESS_TOKEN_EXPIRE_DAYS", "7"))
 
 RESET_CODE_COOLDOWN_SEC = 60  # 邮箱验证码冷却时间，单位秒
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
 
 
 @router.get("/password-policy")
+@competition_router.get("/password-policy")
 def password_policy():
     p = load_policy().get("password", {})
     return {
@@ -80,6 +88,7 @@ def allowed_info(name: str = Query(..., description="中文姓名（精确匹配
     - 不暴露全名单
     - 仅返回该姓名是否允许注册，以及对应 alias/role（如果允许）
     """
+    require_account_changes_enabled(feature_flag="LMATELAB_REGISTRATION_ENABLED")
     wl = load_whitelist()
     u = find_allowed_user(name, wl)
     if not u:
@@ -90,27 +99,6 @@ def allowed_info(name: str = Query(..., description="中文姓名（精确匹配
         "aliasEN": u.get("aliasEN", ""),
         "role": u.get("role", "user"),
     }
-
-
-# ---------- 鉴权：JWT ----------
-
-def get_current_user(
-    creds: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-) -> User:
-    token = creds.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="无效令牌")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="认证失败")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="用户不存在")
-    return user
 
 
 def hash_password(password: str) -> str:
@@ -137,6 +125,7 @@ def norm_email(s: str) -> str:
 
 @router.post("/register", response_model=UserOut)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+    require_account_changes_enabled(feature_flag="LMATELAB_REGISTRATION_ENABLED")
     # 0) 两次密码一致（如果 schemas.py 已强制 password2 必填，这里保留兜底）
     if payload.password2 is None:
         raise HTTPException(status_code=400, detail="请再次确认密码")
@@ -182,6 +171,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenOut)
+@competition_router.post("/login", response_model=TokenOut)
 def login(login_req: LoginRequest, db: Session = Depends(get_db)):
     email_in = norm_email(login_req.email)
 
@@ -191,6 +181,8 @@ def login(login_req: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误"
         )
+
+    require_competition_role(user)
 
     token = create_access_token({
         "sub": user.id,
@@ -207,7 +199,8 @@ def login(login_req: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserOut)
-def me(current_user: User = Depends(get_current_user)):
+@competition_router.get("/me", response_model=UserOut)
+def me(current_user: User = Depends(require_current_edition_user)):
     """
     用于前端启动时校验 token：
     - token 有效：返回当前用户信息
@@ -231,6 +224,7 @@ def sha256(s: str) -> str:
 
 @router.post("/forgot-password/request")
 def forgot_password_request(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    require_account_changes_enabled(feature_flag="LMATELAB_PASSWORD_RESET_ENABLED")
     email_in = norm_email(payload.email)
 
     # 不暴露“邮箱是否存在”：统一返回
@@ -287,6 +281,7 @@ def forgot_password_request(payload: ForgotPasswordRequest, db: Session = Depend
 
 @router.post("/forgot-password/verify")
 def forgot_password_verify(payload: ForgotPasswordVerify, db: Session = Depends(get_db)):
+    require_account_changes_enabled(feature_flag="LMATELAB_PASSWORD_RESET_ENABLED")
     email_in = norm_email(payload.email)
     code_in = (payload.code or "").strip()
 
@@ -336,6 +331,7 @@ def forgot_password_verify(payload: ForgotPasswordVerify, db: Session = Depends(
 
 @router.post("/forgot-password/reset")
 def forgot_password_reset(payload: ForgotPasswordReset, db: Session = Depends(get_db)):
+    require_account_changes_enabled(feature_flag="LMATELAB_PASSWORD_RESET_ENABLED")
     if payload.new_password != payload.new_password2:
         raise HTTPException(status_code=400, detail="两次输入的密码不一致")
 

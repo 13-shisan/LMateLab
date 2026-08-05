@@ -77,21 +77,29 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         runtime = self.require_runtime()
         modules = {module_name for module_name, _router_name in runtime.CORE_ROUTER_IMPORTS}
 
+        self.assertIn(("auth", "competition_router"), runtime.CORE_ROUTER_IMPORTS)
+
         self.assertEqual(
             {
                 "auth",
-                "routers.projects",
-                "routers.notes",
-                "routers.files",
-                "routers.vasp_db",
-                "routers.changelog",
-                "routers.issues",
-                "routers.academic_reports",
                 "routers.health",
             },
             modules,
         )
-        for disabled in ("agents", "papers", "qe_epw", "server_monitor", "dailypapers"):
+        for disabled in (
+            "projects",
+            "notes",
+            "files",
+            "vasp_db",
+            "changelog",
+            "issues",
+            "academic_reports",
+            "agents",
+            "papers",
+            "qe_epw",
+            "server_monitor",
+            "dailypapers",
+        ):
             self.assertFalse(any(disabled in module_name for module_name in modules))
 
     def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):
@@ -103,6 +111,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         self.assertIn("resolve_frontend_file", source)
         self.assertIn("assert_unique_routes", source)
         self.assertIn('APIRouter(prefix="/api")', source)
+        self.assertIn("require_business_access", source)
 
     def test_sqlite_connection_pragmas_are_nfs_friendly(self):
         runtime = self.require_runtime()

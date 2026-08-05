@@ -2,6 +2,9 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import api from '../api/client';
+import { clearAuthState } from '../api/auth';
+import { activeEdition } from '../config/appNavigation';
+import { isCompetitionRole } from '../config/competitionAccess';
 
 export default function RequireAuth({ children }) {
   const location = useLocation();
@@ -23,13 +26,20 @@ export default function RequireAuth({ children }) {
       try {
         // ✅ 用后端最终裁决 token 是否有效
         const res = await api.get('/auth/me');
+        if (activeEdition === '107cup' && !isCompetitionRole(res.data?.role)) {
+          clearAuthState();
+          if (!alive) return;
+          setOk(false);
+          setChecking(false);
+          return;
+        }
         // 可选：同步刷新本地 user，避免 Dashboard 显示空
         localStorage.setItem('user', JSON.stringify(res.data));
 
         if (!alive) return;
         setOk(true);
         setChecking(false);
-      } catch (e) {
+      } catch {
         // 401/网络错误：统一视为不通过（401 会被 axios 拦截器清 token 并跳转）
         if (!alive) return;
         setOk(false);

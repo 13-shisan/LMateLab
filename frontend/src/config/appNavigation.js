@@ -153,10 +153,6 @@ const fullNavigationGroups = [
 
 const competitionNavigationKeys = new Set([
   'dashboard',
-  'journal',
-  'db-group',
-  'db-personal-vasp',
-  'academic-reports',
 ]);
 
 export function navigationGroupsForEdition(edition = '') {
@@ -170,12 +166,12 @@ export function navigationGroupsForEdition(edition = '') {
     .filter((group) => group.items.length > 0);
 }
 
-const activeEdition = import.meta.env?.VITE_LMATELAB_EDITION || '';
+export const activeEdition = import.meta.env?.VITE_LMATELAB_EDITION || '';
 
 export const navigationGroups = navigationGroupsForEdition(activeEdition);
 
 export function dashboardShortcutsForEdition(edition = '') {
-  if (edition === '107cup') return ['db-personal-vasp', 'journal'];
+  if (edition === '107cup') return [];
   return ['db-personal', 'servers', 'journal', 'general-chat'];
 }
 

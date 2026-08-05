@@ -6,7 +6,7 @@
       "asedbname": "pb23030683",
       "asedbdir": "/home/scc/pb23030683/lmatelab-107cup/data/vasp/personal",
       "qe_epwdbdir": "",
-      "role": "root",
+      "role": "operator",
       "enabled": true
     }
   ]
