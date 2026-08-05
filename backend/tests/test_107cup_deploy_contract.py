@@ -27,7 +27,6 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "#SBATCH --partition=P107-RTX5090",
             "#SBATCH --qos=qos_p107-rtx5090",
             "SLURM_JOB_ID",
-            "python3 -m venv",
             "requirements-107cup.txt",
             "npm ci",
             "npm run build",
@@ -40,6 +39,76 @@ class CompetitionDeployContractTests(unittest.TestCase):
         ):
             self.assertIn(required, source)
         self.assertNotIn("#SBATCH --gres", source)
+
+    def test_build_job_uses_module_python_with_a_valid_pip_environment(self):
+        source = self.read_required("build.slurm")
+        module_init = "source /etc/profile.d/modules.sh"
+        module_load = "module load miniconda/py312"
+        backups_directory = '"$root/backups"'
+        module_python_base = (
+            "module_python_base=$(python -c "
+            "'import os, sys; print(os.path.realpath(sys.base_prefix))')"
+        )
+        validation_condition = "\n".join(
+            (
+                'if ! test -x "$python_env/bin/python" \\',
+                '  || ! test "$("$python_env/bin/python" -c '
+                "'import os, sys; print(os.path.realpath(sys.base_prefix))')\" "
+                '= "$module_python_base" \\',
+                '  || ! "$python_env/bin/python" -m pip --version '
+                ">/dev/null 2>&1; then",
+            )
+        )
+        backup_recovery = "\n".join(
+            (
+                '  if test -e "$python_env" || test -L "$python_env"; then',
+                '    invalid_python_env="$root/backups/'
+                'python-invalid-$SLURM_JOB_ID"',
+                '    test ! -e "$invalid_python_env"',
+                '    test ! -L "$invalid_python_env"',
+                '    mv "$python_env" "$invalid_python_env"',
+                "  fi",
+                '  python -m venv "$python_env"',
+                "fi",
+            )
+        )
+        pip_gate = '"$python_env/bin/python" -m pip --version'
+        activation = 'source "$python_env/bin/activate"'
+        pip_upgrade = "python -m pip install --upgrade pip"
+        requirements_install = (
+            'python -m pip install --requirement '
+            '"$project/backend/requirements-107cup.txt"'
+        )
+        postcondition_install = "\n".join(
+            (pip_gate, activation, pip_upgrade, requirements_install)
+        )
+
+        module_loads = [
+            line.strip()
+            for line in source.splitlines()
+            if line.strip().startswith("module load ")
+        ]
+        self.assertEqual([module_load], module_loads)
+        for required in (
+            module_init,
+            backups_directory,
+            module_python_base,
+            validation_condition,
+            backup_recovery,
+            postcondition_install,
+        ):
+            self.assertIn(required, source)
+
+        positions = [
+            source.index(module_init),
+            source.index(module_load),
+            source.index(backups_directory),
+            source.index(module_python_base),
+            source.index(validation_condition),
+            source.index(backup_recovery),
+            source.index(postcondition_install),
+        ]
+        self.assertEqual(sorted(positions), positions)
 
     def test_service_job_runs_single_uvicorn_and_applies_both_migrations(self):
         source = self.read_required("service.slurm")

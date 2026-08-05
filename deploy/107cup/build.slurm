@@ -15,6 +15,9 @@ set -euo pipefail
 
 : "${SLURM_JOB_ID:?build.slurm must run through Slurm}"
 
+source /etc/profile.d/modules.sh
+module load miniconda/py312
+
 root=/home/scc/pb23030683/lmatelab-107cup
 project=/home/scc/pb23030683/projects/LMateLab-107Cup
 runtime_env="$root/config/runtime.env"
@@ -44,6 +47,8 @@ mkdir -p \
   "$root/data/vasp/personal" \
   "$root/data/issues" \
   "$root/backups"
+
+module_python_base=$(python -c 'import os, sys; print(os.path.realpath(sys.base_prefix))')
 
 commit=$(git -C "$project" rev-parse HEAD)
 release="$root/releases/$commit"
@@ -82,10 +87,19 @@ fi
 
 export PATH="$node_root/bin:$PATH"
 
-if ! test -x "$python_env/bin/python"; then
-  python3 -m venv "$python_env"
+if ! test -x "$python_env/bin/python" \
+  || ! test "$("$python_env/bin/python" -c 'import os, sys; print(os.path.realpath(sys.base_prefix))')" = "$module_python_base" \
+  || ! "$python_env/bin/python" -m pip --version >/dev/null 2>&1; then
+  if test -e "$python_env" || test -L "$python_env"; then
+    invalid_python_env="$root/backups/python-invalid-$SLURM_JOB_ID"
+    test ! -e "$invalid_python_env"
+    test ! -L "$invalid_python_env"
+    mv "$python_env" "$invalid_python_env"
+  fi
+  python -m venv "$python_env"
 fi
 
+"$python_env/bin/python" -m pip --version
 source "$python_env/bin/activate"
 python -m pip install --upgrade pip
 python -m pip install --requirement "$project/backend/requirements-107cup.txt"
