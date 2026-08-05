@@ -10,14 +10,15 @@ DbScope = Literal["all", "personal", "upload", "custom"]
 
 from fastapi import HTTPException, status
 
-ALLOWED_USERS_JSON = Path(__file__).resolve().parent / "var" / "data" / "allowed_users.json"
+DEFAULT_ALLOWED_USERS_JSON = Path(__file__).resolve().parent / "var" / "data" / "allowed_users.json"
+ALLOWED_USERS_JSON = Path(os.getenv("ALLOWED_USERS_PATH", str(DEFAULT_ALLOWED_USERS_JSON))).resolve()
 
 # 上传库根目录（你要求的 docker 固定目录）
-UPLOADS_ROOT = Path("/app/var/uploads").resolve()
+UPLOADS_ROOT = Path(os.getenv("UPLOADS_ROOT", "/app/var/uploads")).resolve()
 
 # 用户自定义数据库目录
-VASP_CUSTOM_DB_ROOT = Path("/app/var/Customized_database/vasp").resolve()
-QE_EPW_CUSTOM_DB_ROOT = Path("/app/var/Customized_database/qe_epw").resolve()  
+VASP_CUSTOM_DB_ROOT = Path(os.getenv("VASP_CUSTOM_DB_ROOT", "/app/var/Customized_database/vasp")).resolve()
+QE_EPW_CUSTOM_DB_ROOT = Path(os.getenv("QE_EPW_CUSTOM_DB_ROOT", "/app/var/Customized_database/qe_epw")).resolve()
 
 
 @dataclass(frozen=True)

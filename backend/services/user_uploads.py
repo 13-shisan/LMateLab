@@ -7,8 +7,8 @@ from pathlib import Path
 
 # 你在容器内的固定路径（你要求的 docker 路径）
 ALLOWED_USERS_JSON = os.getenv(
-    "ALLOWED_USERS_JSON",
-    "/app/var/data/allowed_users.json",
+    "ALLOWED_USERS_PATH",
+    os.getenv("ALLOWED_USERS_JSON", "/app/var/data/allowed_users.json"),
 )
 
 UPLOADS_ROOT = os.getenv(

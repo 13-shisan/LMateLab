@@ -49,7 +49,8 @@ def password_policy():
 
 # ---------- 白名单加载与匹配 ----------
 
-WHITELIST_PATH = Path(__file__).resolve().parent / "var" / "data" / "allowed_users.json"
+DEFAULT_WHITELIST_PATH = Path(__file__).resolve().parent / "var" / "data" / "allowed_users.json"
+WHITELIST_PATH = Path(os.getenv("ALLOWED_USERS_PATH", str(DEFAULT_WHITELIST_PATH))).resolve()
 
 
 def load_whitelist() -> dict:

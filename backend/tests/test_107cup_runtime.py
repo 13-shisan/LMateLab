@@ -1,0 +1,164 @@
+import importlib
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+
+class CompetitionRuntimeContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module_path = BACKEND_ROOT / "competition_runtime.py"
+        cls.runtime = None
+        if cls.module_path.is_file():
+            cls.runtime = importlib.import_module("competition_runtime")
+
+    def require_runtime(self):
+        if self.runtime is None:
+            self.skipTest("competition_runtime.py is not implemented yet")
+        return self.runtime
+
+    def test_competition_runtime_module_exists(self):
+        self.assertTrue(self.module_path.is_file(), str(self.module_path))
+
+    def test_deployment_metadata_contains_only_traceable_runtime_fields(self):
+        runtime = self.require_runtime()
+        environ = {
+            "SLURM_JOB_ID": "32599",
+            "SLURMD_NODENAME": "anode16",
+            "LMATELAB_GIT_COMMIT": "abc1234",
+            "LMATELAB_MANIFEST_SHA256": "def5678",
+            "LMATELAB_STARTED_AT": "2026-08-05T12:00:00+08:00",
+            "JWT_SECRET": "must-not-leak",
+        }
+
+        self.assertEqual(
+            {
+                "job_id": "32599",
+                "node": "anode16",
+                "commit": "abc1234",
+                "manifest_sha256": "def5678",
+                "started_at": "2026-08-05T12:00:00+08:00",
+            },
+            runtime.deployment_metadata(environ),
+        )
+
+    def test_spa_resolver_serves_assets_and_falls_back_to_index(self):
+        runtime = self.require_runtime()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            index = root / "index.html"
+            asset = root / "assets" / "app.js"
+            asset.parent.mkdir()
+            index.write_text("index", encoding="utf-8")
+            asset.write_text("asset", encoding="utf-8")
+
+            self.assertEqual(asset, runtime.resolve_frontend_file(root, "assets/app.js"))
+            self.assertEqual(index, runtime.resolve_frontend_file(root, "dashboard"))
+
+    def test_spa_resolver_rejects_api_fallback_and_path_escape(self):
+        runtime = self.require_runtime()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "index.html").write_text("index", encoding="utf-8")
+
+            with self.assertRaises(LookupError):
+                runtime.resolve_frontend_file(root, "api/missing")
+            with self.assertRaises(ValueError):
+                runtime.resolve_frontend_file(root, "../outside.txt")
+
+    def test_router_allowlist_excludes_undeployed_modules(self):
+        runtime = self.require_runtime()
+        modules = {module_name for module_name, _router_name in runtime.CORE_ROUTER_IMPORTS}
+
+        self.assertEqual(
+            {
+                "auth",
+                "routers.projects",
+                "routers.notes",
+                "routers.files",
+                "routers.vasp_db",
+                "routers.changelog",
+                "routers.issues",
+                "routers.academic_reports",
+                "routers.health",
+            },
+            modules,
+        )
+        for disabled in ("agents", "papers", "qe_epw", "server_monitor", "dailypapers"):
+            self.assertFalse(any(disabled in module_name for module_name in modules))
+
+    def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):
+        entrypoint = BACKEND_ROOT / "main_107cup.py"
+        self.assertTrue(entrypoint.is_file(), str(entrypoint))
+
+        source = entrypoint.read_text(encoding="utf-8")
+        self.assertIn("CORE_ROUTER_IMPORTS", source)
+        self.assertIn("resolve_frontend_file", source)
+        self.assertIn("assert_unique_routes", source)
+        self.assertIn('APIRouter(prefix="/api")', source)
+
+    def test_sqlite_connection_pragmas_are_nfs_friendly(self):
+        runtime = self.require_runtime()
+        self.assertTrue(
+            hasattr(runtime, "SQLITE_CONNECTION_PRAGMAS"),
+            "competition_runtime.SQLITE_CONNECTION_PRAGMAS is missing",
+        )
+        if not hasattr(runtime, "SQLITE_CONNECTION_PRAGMAS"):
+            return
+        self.assertEqual(
+            (
+                "PRAGMA foreign_keys=ON;",
+                "PRAGMA journal_mode=DELETE;",
+                "PRAGMA synchronous=NORMAL;",
+                "PRAGMA busy_timeout=5000;",
+            ),
+            runtime.SQLITE_CONNECTION_PRAGMAS,
+        )
+
+        source = (BACKEND_ROOT / "database.py").read_text(encoding="utf-8")
+        self.assertIn("SQLITE_CONNECTION_PRAGMAS", source)
+
+    def test_runtime_config_paths_are_environment_driven(self):
+        auth_source = (BACKEND_ROOT / "auth.py").read_text(encoding="utf-8")
+        authz_source = (BACKEND_ROOT / "authz_db.py").read_text(encoding="utf-8")
+
+        self.assertIn('os.getenv("ALLOWED_USERS_PATH"', auth_source)
+        for variable in (
+            "ALLOWED_USERS_PATH",
+            "UPLOADS_ROOT",
+            "VASP_CUSTOM_DB_ROOT",
+            "QE_EPW_CUSTOM_DB_ROOT",
+        ):
+            self.assertIn(f'os.getenv("{variable}"', authz_source)
+
+    def test_competition_requirements_exclude_agent_and_ml_runtimes(self):
+        requirements = BACKEND_ROOT / "requirements-107cup.txt"
+        self.assertTrue(requirements.is_file(), str(requirements))
+        packages = {
+            line.split("==", 1)[0].strip().lower()
+            for line in requirements.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        for excluded in (
+            "torch",
+            "transformers",
+            "sentence-transformers",
+            "chromadb",
+            "mineru",
+            "flagembedding",
+        ):
+            self.assertNotIn(excluded, packages)
+        for required in ("fastapi", "uvicorn", "sqlalchemy", "alembic", "ase"):
+            self.assertIn(required, packages)
+
+
+if __name__ == "__main__":
+    unittest.main()
