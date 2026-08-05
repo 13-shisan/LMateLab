@@ -1,4 +1,4 @@
-export const navigationGroups = [
+const fullNavigationGroups = [
   {
     key: 'overview',
     label: '',
@@ -151,12 +151,35 @@ export const navigationGroups = [
   },
 ];
 
-export const dashboardShortcuts = [
-  'db-personal',
-  'servers',
+const competitionNavigationKeys = new Set([
+  'dashboard',
   'journal',
-  'general-chat',
-];
+  'db-group',
+  'db-personal-vasp',
+  'academic-reports',
+]);
+
+export function navigationGroupsForEdition(edition = '') {
+  if (edition !== '107cup') return fullNavigationGroups;
+
+  return fullNavigationGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => competitionNavigationKeys.has(item.key)),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+const activeEdition = import.meta.env?.VITE_LMATELAB_EDITION || '';
+
+export const navigationGroups = navigationGroupsForEdition(activeEdition);
+
+export function dashboardShortcutsForEdition(edition = '') {
+  if (edition === '107cup') return ['db-personal-vasp', 'journal'];
+  return ['db-personal', 'servers', 'journal', 'general-chat'];
+}
+
+export const dashboardShortcuts = dashboardShortcutsForEdition(activeEdition);
 
 function normalizePathname(pathname) {
   if (!pathname || pathname === '/') return '/';

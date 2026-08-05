@@ -1,0 +1,11 @@
+{
+  "password": {
+    "minLength": 10,
+    "requireUpper": true,
+    "requireLower": true,
+    "allowedPattern": "[A-Za-z0-9!@#$%^&*()_+\\-=.]+",
+    "allowedHintShort": "至少10位，包含大小写字母",
+    "allowedDescription": "仅允许字母、数字和常用符号",
+    "allowedExample": "Research2026!"
+  }
+}

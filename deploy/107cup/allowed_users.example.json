@@ -1,0 +1,13 @@
+{
+  "users": [
+    {
+      "nameCN": "107杯管理员",
+      "aliasEN": "pb23030683",
+      "asedbname": "pb23030683",
+      "asedbdir": "/home/scc/pb23030683/lmatelab-107cup/data/vasp/personal",
+      "qe_epwdbdir": "",
+      "role": "root",
+      "enabled": true
+    }
+  ]
+}
