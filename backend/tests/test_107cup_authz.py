@@ -1,11 +1,14 @@
 import importlib.util
 import sqlite3
+import stat
 import sys
 import tempfile
 import unittest
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from fastapi import HTTPException
 
@@ -139,9 +142,24 @@ class CompetitionRoleMigrationTests(unittest.TestCase):
             backups = root / "backups"
             self.create_database(database)
 
-            first = migration.migrate_database(database, backups, "pb23030683")
+            open_calls = []
+            real_open = migration.os.open
+
+            def record_open(path, flags, mode=0o777):
+                open_calls.append((Path(path), flags, mode))
+                return real_open(path, flags, mode)
+
+            with mock.patch.object(migration.os, "open", side_effect=record_open):
+                first = migration.migrate_database(database, backups, "pb23030683")
             self.assertTrue(first.changed)
             self.assertTrue(first.backup_path.is_file())
+            self.assertEqual(0o700, stat.S_IMODE(backups.stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE(first.backup_path.stat().st_mode))
+            self.assertEqual(1, len(open_calls))
+            _, flags, mode = open_calls[0]
+            self.assertTrue(flags & migration.os.O_CREAT)
+            self.assertTrue(flags & migration.os.O_EXCL)
+            self.assertEqual(0o600, mode)
 
             with closing(sqlite3.connect(first.backup_path)) as backup_connection:
                 backup_role = backup_connection.execute(
@@ -169,6 +187,70 @@ class CompetitionRoleMigrationTests(unittest.TestCase):
                 repeated_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
             self.assertEqual(("operator", "unchanged-password-hash"), repeated)
             self.assertEqual(1, repeated_count)
+
+    def test_existing_backup_name_is_not_overwritten_or_migrated(self):
+        migration = self.load_migration()
+        if migration is None:
+            return
+
+        class FixedDateTime:
+            @classmethod
+            def now(cls, tz):
+                return datetime(2026, 8, 6, 2, 0, 0, tzinfo=timezone.utc).astimezone(tz)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            database = root / "eln.db"
+            backups = root / "backups"
+            self.create_database(database)
+            backups.mkdir(mode=0o700)
+            collision = backups / "eln.db.before-competition-roles.20260806T020000000000Z.sqlite"
+            collision.write_bytes(b"existing-evidence")
+
+            with mock.patch.object(migration, "datetime", FixedDateTime):
+                with self.assertRaises(FileExistsError):
+                    migration.migrate_database(database, backups, "pb23030683")
+
+            self.assertEqual(b"existing-evidence", collision.read_bytes())
+            with closing(sqlite3.connect(database)) as connection:
+                role, password_hash = connection.execute(
+                    "SELECT role, password_hash FROM users WHERE alias = ?", ("pb23030683",)
+                ).fetchone()
+            self.assertEqual(("root", "unchanged-password-hash"), (role, password_hash))
+
+    def test_failed_role_update_rolls_back_and_preserves_backup(self):
+        migration = self.load_migration()
+        if migration is None:
+            return
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            database = root / "eln.db"
+            backups = root / "backups"
+            self.create_database(database)
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute(
+                    "CREATE TRIGGER reject_role_update BEFORE UPDATE OF role ON users "
+                    "BEGIN SELECT RAISE(ABORT, 'blocked update'); END"
+                )
+                connection.commit()
+
+            with self.assertRaises(sqlite3.IntegrityError):
+                migration.migrate_database(database, backups, "pb23030683")
+
+            backup_files = list(backups.glob("eln.db.before-competition-roles.*.sqlite"))
+            self.assertEqual(1, len(backup_files))
+            self.assertEqual(0o600, stat.S_IMODE(backup_files[0].stat().st_mode))
+            with closing(sqlite3.connect(backup_files[0])) as backup_connection:
+                backup_role = backup_connection.execute(
+                    "SELECT role FROM users WHERE alias = ?", ("pb23030683",)
+                ).fetchone()[0]
+            with closing(sqlite3.connect(database)) as connection:
+                current = connection.execute(
+                    "SELECT role, password_hash FROM users WHERE alias = ?", ("pb23030683",)
+                ).fetchone()
+            self.assertEqual("root", backup_role)
+            self.assertEqual(("root", "unchanged-password-hash"), current)
 
 
 if __name__ == "__main__":
