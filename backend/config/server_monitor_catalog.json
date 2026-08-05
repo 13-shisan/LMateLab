@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "physical_servers": [
+    {
+      "id": "dell",
+      "display_name": "Dell服务器",
+      "scheduler": "pbs",
+      "accounts": [
+        {
+          "id": "Pwjb",
+          "display_name": "Pwjb",
+          "source_id": "Dell",
+          "legacy_source": "Dell",
+          "login": "Pwjb",
+          "host": "localhost",
+          "mode": "node21_pull",
+          "transport": "local",
+          "expected_interval_minutes": 30,
+          "stale_after_minutes": 90,
+          "snapshot_priority": 10
+        }
+      ]
+    },
+    {
+      "id": "dell-gpu",
+      "display_name": "4090服务器",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "Pwjb",
+          "display_name": "Pwjb",
+          "source_id": "Dell-GPU",
+          "legacy_source": "Dell-GPU",
+          "login": "Pwjb",
+          "host": "localhost",
+          "mode": "node21_pull",
+          "transport": "local",
+          "expected_interval_minutes": 360,
+          "stale_after_minutes": 720,
+          "snapshot_priority": 10
+        }
+      ]
+    },
+    {
+      "id": "dawn4",
+      "display_name": "Dawn4",
+      "scheduler": "pbs",
+      "accounts": [
+        {
+          "id": "Pwjb",
+          "display_name": "Pwjb",
+          "source_id": "Dawn4",
+          "legacy_source": "Dawn4",
+          "login": "Pwjb",
+          "host": "222.195.80.62",
+          "remote_path": "/public/home/Pwjb/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 30,
+          "stale_after_minutes": 90,
+          "snapshot_priority": 10
+        }
+      ]
+    },
+    {
+      "id": "dawn5",
+      "display_name": "Dawn5",
+      "scheduler": "pbs",
+      "accounts": [
+        {
+          "id": "Pwjb",
+          "display_name": "Pwjb",
+          "source_id": "Dawn5",
+          "legacy_source": "Dawn5",
+          "login": "Pwjb",
+          "host": "222.195.80.246",
+          "remote_path": "/public/home/Pwjb/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 30,
+          "stale_after_minutes": 90,
+          "snapshot_priority": 10
+        }
+      ]
+    },
+    {
+      "id": "sugon",
+      "display_name": "曙光服务器",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "Pwjb",
+          "display_name": "Pwjb",
+          "source_id": "Sugon",
+          "legacy_source": "Sugon",
+          "login": "Pwjb",
+          "host": "222.195.95.41",
+          "remote_path": "/home/Pwjb/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 30,
+          "stale_after_minutes": 90
+        }
+      ]
+    },
+    {
+      "id": "jingzhun",
+      "display_name": "精准平台",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "xjwu",
+          "display_name": "xjwu",
+          "source_id": "Jingzhun-xjwu",
+          "legacy_source": "Jingzhun-xjwu",
+          "login": "wuxiaojun",
+          "host": "114.214.255.60",
+          "remote_path": "/public/home/wuxiaojun/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 60,
+          "stale_after_minutes": 180,
+          "snapshot_priority": 10
+        },
+        {
+          "id": "jbwu",
+          "display_name": "jbwu",
+          "source_id": "Jingzhun-jbwu",
+          "legacy_source": "Jingzhun-jbwu",
+          "login": "wujiabao",
+          "host": "114.214.255.60",
+          "remote_path": "/public/home/wujiabao/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 60,
+          "stale_after_minutes": 180,
+          "snapshot_priority": 20
+        }
+      ]
+    },
+    {
+      "id": "jingzhun-gpu",
+      "display_name": "精准平台 GPU",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "jingzhun-gpu-account",
+          "display_name": "账号待确认",
+          "source_id": "Jingzhun-GPU",
+          "legacy_source": "Jingzhun-GPU",
+          "mode": "windows_relay",
+          "transport": "ssh",
+          "expected_interval_minutes": 1440,
+          "stale_after_minutes": 10080,
+          "snapshot_priority": 10,
+          "setup_state": "account_unconfirmed"
+        }
+      ]
+    },
+    {
+      "id": "shuangyiliu-huayuan",
+      "display_name": "双一流化院",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "xjwu",
+          "display_name": "xjwu",
+          "source_id": "Shuangyiliu-huayuan",
+          "legacy_source": "Shuangyiliu-huayuan",
+          "login": "xjwu",
+          "host": "114.214.203.217",
+          "remote_path": "/public/home/xjwu/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 60,
+          "stale_after_minutes": 180
+        }
+      ]
+    },
+    {
+      "id": "shuangyiliu-hfnl",
+      "display_name": "双一流微尺度",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "xjwu",
+          "display_name": "xjwu",
+          "source_id": "Shuangyiliu-HFNL-xjwu",
+          "legacy_source": "Shuangyiliu-HFNL-xjwu",
+          "login": "xjwu",
+          "host": "114.214.207.167",
+          "remote_path": "/share/home/xjwu/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 60,
+          "stale_after_minutes": 180,
+          "snapshot_priority": 10
+        },
+        {
+          "id": "hflv",
+          "display_name": "hflv",
+          "source_id": "Shuangyiliu-HFNL-hflv",
+          "legacy_source": "Shuangyiliu-HFNL-hflv",
+          "login": "hflv",
+          "host": "114.214.207.167",
+          "remote_path": "/share/home/hflv/server_monitor",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 60,
+          "stale_after_minutes": 180,
+          "snapshot_priority": 20
+        },
+        {
+          "id": "wjb",
+          "display_name": "wjb",
+          "source_id": "Shuangyiliu-HFNL-wjb",
+          "login": "wjb",
+          "host": "114.214.207.167",
+          "mode": "node21_pull",
+          "transport": "rsync",
+          "expected_interval_minutes": 60,
+          "stale_after_minutes": 180,
+          "snapshot_priority": 30,
+          "setup_state": "pending_setup"
+        }
+      ]
+    },
+    {
+      "id": "scnet",
+      "display_name": "合肥超算",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "scnet-account",
+          "display_name": "账号待确认",
+          "source_id": "SCNet",
+          "legacy_source": "SCNet",
+          "mode": "windows_relay",
+          "transport": "ssh",
+          "expected_interval_minutes": 1440,
+          "stale_after_minutes": 10080,
+          "setup_state": "account_unconfirmed"
+        }
+      ]
+    },
+    {
+      "id": "wuxi",
+      "display_name": "无锡超算",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "wuxi-account",
+          "display_name": "账号待确认",
+          "source_id": "Wuxi",
+          "legacy_source": "Wuxi",
+          "mode": "windows_relay",
+          "transport": "ssh",
+          "expected_interval_minutes": 1440,
+          "stale_after_minutes": 10080,
+          "setup_state": "account_unconfirmed"
+        }
+      ]
+    },
+    {
+      "id": "dongfang",
+      "display_name": "东方超算",
+      "scheduler": "slurm",
+      "accounts": [
+        {
+          "id": "xjwu",
+          "display_name": "xjwu",
+          "source_id": "Dongfang-xjwu",
+          "legacy_source": "Dongfang-xjwu",
+          "login": "xjwu",
+          "mode": "windows_relay",
+          "transport": "ssh",
+          "expected_interval_minutes": 1440,
+          "stale_after_minutes": 10080,
+          "setup_state": "pending_setup"
+        },
+        {
+          "id": "yang4",
+          "display_name": "yang4",
+          "source_id": "Dongfang-yang4",
+          "legacy_source": "Dongfang-yang4",
+          "login": "yang4",
+          "mode": "windows_relay",
+          "transport": "ssh",
+          "expected_interval_minutes": 1440,
+          "stale_after_minutes": 10080,
+          "setup_state": "pending_setup"
+        }
+      ]
+    }
+  ]
+}

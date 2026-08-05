@@ -1,0 +1,253 @@
+# docker-compose.prod.yml
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - redis
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    volumes:
+      # ✅ 持久化 sqlite（必须）
+      - ./var/db:/app/var/db:rw
+      # ✅ uploads 持久化
+      - uploads_data:/app/var/uploads
+      # ✅ vasp 缓存持久化（你现在用的是 /home/software/LMateLab/tmp）
+      - vasp_cache:/app/var/tmp
+    environment:
+      DATABASE_URL: sqlite:////app/var/db/eln.db  # 数据库路径（容器内路径，指向持久化卷）
+      DIGEST_DATABASE_URL: sqlite:////app/var/db/digests.db # 抓取文献数据库路径
+  
+  migrate_digest:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - redis
+    restart: "no"
+    volumes:
+      - ./var/db:/app/var/db:rw
+    environment:
+      DIGEST_DATABASE_URL: sqlite:////app/var/db/digests.db
+    command: ["alembic", "-c", "alembic_digest.ini", "upgrade", "head"]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      migrate_digest:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 30s
+    #ports:
+      #- "4000:4000"
+    volumes:
+      # ✅ 只读数据挂载：大目录只读，放到 /mnt 下（不影响写目录）
+      - /home:/mnt/home:ro
+      - /storage:/mnt/storage:ro
+      #- /storage/Pwjb/ase-db:/mnt/storage/Pwjb/ase-db:ro
+      # ✅ 让 authz_db.py 读到宿主机最新配置（只读）
+      - ./var/data:/app/var/data:ro
+      # ✅ sqlite 持久化（如果你用 sqlite）
+      - ./var/db:/app/var/db:rw
+      - /home/software/log-web/log_vasp.db:/app/var/db/log_vasp.db:ro
+
+      # ✅ 上传目录：宿主机目录 → 容器内 /app/uploads（可写）
+      - /storage/software/LMateLab/backend/uploads:/app/var/uploads:rw
+
+      # ✅ 自定义数据库目录：宿主机目录 → 容器内 （可写）
+      - /storage/software/LMateLab/backend/Customized_database:/app/var/Customized_database:rw
+
+      # ✅ 缓存/tmp：宿主机目录 → 容器内你代码使用的目录（可写）
+      - ./var/tmp:/app/var/tmp:rw
+
+      # ✅ 知识库目录：宿主机目录 → 容器内（可写）
+      - /storage/software/LMateLab/var/knowledge:/app/var/knowledge:rw
+      - /storage/software/LMateLab/var/papers:/app/var/papers:rw
+      - /storage/software/LMateLab/var/models:/app/var/models:rw
+      - ./var/config:/app/var/config:rw
+      - ./var/issues:/app/var/issues:rw
+      - ./var/artifacts:/app/var/artifacts:ro
+      # ✅ 日志文件挂载：宿主机日志文件路径 → 容器内（可写）
+      - /home/software/LMateLab/backend/data:/app/data:rw
+      - /storage/Pwjb/qe_epw-db:/mnt/storage/Pwjb/qe_epw-db:rw
+
+    environment:
+      PYTHONPATH: /app
+      # =========================
+      # Papers 根目录
+      # =========================
+      PAPERS_ROOT_DIR: /app/var/papers
+      PAPERS_RAW_DIR: /app/papers/raw
+      PAPERS_LIBRARY_DIR: /app/papers/library
+      PAPERS_INDEX_DIR: /app/var/papers/index
+      PAPERS_JOURNAL_FEATURES_PATH: /app/var/papers/index/journal_features.yaml
+      TZ: Asia/Shanghai
+      DATABASE_URL: sqlite:////app/var/db/eln.db  # 数据库路径
+      DIGEST_DATABASE_URL: sqlite:////app/var/db/digests.db # 抓取文献数据库路径
+      # ✅ 容器内访问 redis：用服务名 redis，不要用 127.0.0.1
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      VASP_ELEMENTS_CACHE_DIR: /app/var/tmp/vasp
+      VASP_SCAN_BACKEND: celery
+      QE_EPW_CACHE_DIR: /app/var/tmp/qe_epw
+      CHANGELOG_PATH: /app/var/config/changelog.md  # 日志文件路径
+      ISSUES_DIR: /app/var/issues  # 反馈文件存储位置
+      ACADEMIC_REPORTS_FILE: /app/var/config/academic_reports.json  # 学术报告数据文件路径
+      SECURITY_POLICY_PATH: /app/var/data/security_policy.json
+      SERVER_MONITOR_BASE_DIR: /app/var/artifacts/server_monitor
+      SERVER_MONITOR_DEFAULT_SERVER: Dell
+      VASP_CUSTOM_ADD_ALL_MAX_ROWS_DEFAULT: 200000
+      VASP_CUSTOM_ADD_ALL_MAX_ROWS_HARD_LIMIT: 2000000
+      QE_EPW_CUSTOM_ADD_ALL_MAX_ROWS_DEFAULT: 20000
+      QE_EPW_CUSTOM_ADD_ALL_MAX_ROWS_HARD_LIMIT: 200000
+      VASP_UPLOAD_MAX_BYTES: "10737418240"
+      QE_EPW_MAX_UPLOAD_BYTES: "10737418240"
+      VASP_IMPORT_TIMEOUT: "7200"
+      QE_EPW_IMPORT_TIMEOUT: "7200"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen2.5:7b
+      OLLAMA_MODEL_PLATFORM_GUIDE: qwen2.5:7b
+      OLLAMA_MODEL_GENERAL_CHAT: qwen3:32b
+      OLLAMA_TIMEOUT: "120"
+      AGENT_KNOWLEDGE_DIR: /app/var/knowledge
+      AGENT_EMBEDDING_MODEL: /app/var/models/BAAI/bge-m3
+      AGENT_RAG_ENABLED: "1"
+      AGENT_RAG_TOP_K: "4"
+
+      # ✅ 开启 gunicorn access log（不覆盖 Dockerfile 的 CMD，因此不会影响 main:app 入口）
+      # 输出到 stdout，docker compose logs -f backend 可见
+      GUNICORN_CMD_ARGS: >-
+        --access-logfile -
+        --error-logfile -
+        --log-level info
+        --access-logformat %(t)s %(h)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(L)s
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      migrate_digest:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    restart: always
+    volumes:
+      - /home:/mnt/home:ro
+      - /storage:/mnt/storage:ro
+      
+      - ./var/data:/app/var/data:ro
+      - ./var/db:/app/var/db:rw
+      - ./var/tmp:/app/var/tmp:rw
+      - /storage/software/LMateLab/var/knowledge:/app/var/knowledge:rw
+
+      - /storage/software/LMateLab/backend/uploads:/app/var/uploads:rw
+      - /storage/software/LMateLab/var/papers:/app/var/papers:rw
+      - /storage/software/LMateLab/var/models:/app/var/models:rw
+
+      - /storage/software/LMateLab/backend/Customized_database:/app/var/Customized_database:rw
+
+      - /storage/Pwjb/qe_epw-db:/mnt/storage/Pwjb/qe_epw-db:rw
+    command: ["bash", "/app/start_worker.sh"]
+    environment:
+      PYTHONPATH: /app
+      TZ: Asia/Shanghai
+      DATABASE_URL: sqlite:////app/var/db/eln.db  # 用户信息数据库路径
+      DIGEST_DATABASE_URL: sqlite:////app/var/db/digests.db # 抓取文献数据库路径
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      
+      VASP_ELEMENTS_CACHE_DIR: /app/var/tmp/vasp
+      QE_EPW_CACHE_DIR: /app/var/tmp/qe_epw
+      VASP_SCAN_BACKEND: celery
+
+      VASP_CUSTOM_ADD_ALL_MAX_ROWS_DEFAULT: 200000
+      VASP_CUSTOM_ADD_ALL_MAX_ROWS_HARD_LIMIT: 2000000
+      QE_EPW_CUSTOM_ADD_ALL_MAX_ROWS_DEFAULT: 20000
+      QE_EPW_CUSTOM_ADD_ALL_MAX_ROWS_HARD_LIMIT: 200000
+      VASP_UPLOAD_MAX_BYTES: "10737418240"
+      QE_EPW_MAX_UPLOAD_BYTES: "10737418240"
+      VASP_IMPORT_TIMEOUT: "7200"
+      QE_EPW_IMPORT_TIMEOUT: "7200"
+      AGENT_KNOWLEDGE_DIR: /app/var/knowledge
+      AGENT_EMBEDDING_MODEL: /app/var/models/BAAI/bge-m3
+      AGENT_RAG_ENABLED: "1"
+      AGENT_RAG_TOP_K: "4"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    depends_on:
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      migrate_digest:
+        condition: service_completed_successfully
+    restart: always
+    command: ["bash", "/app/start_beat.sh"]
+    environment:
+      PYTHONPATH: /app
+      TZ: Asia/Shanghai
+      DATABASE_URL: sqlite:////app/var/db/eln.db
+      DIGEST_DATABASE_URL: sqlite:////app/var/db/digests.db
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    volumes:
+      - ./var/db:/app/var/db:rw
+      - /home/software/LMateLab/backend/data:/app/var/data:rw
+
+  nginx:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /home/software/log-web/ssl/matflow.top:/etc/nginx/ssl/matflow.top:ro
+
+volumes:
+  redis_data:
+  uploads_data:
+  vasp_cache:

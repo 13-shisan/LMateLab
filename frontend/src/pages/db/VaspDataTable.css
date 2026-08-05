@@ -1,0 +1,180 @@
+.vasp-data-surface {
+  position: relative;
+  margin-top: 12px;
+}
+
+.vasp-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e1e7ef;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.vasp-data-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.vasp-data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 9px;
+  border-bottom: 1px solid #dfe5ee;
+  color: #3b4659;
+  background: #f7f9fc;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.vasp-data-table th small {
+  margin-left: 4px;
+  color: #7b8799;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.vasp-data-table td {
+  max-width: 280px;
+  padding: 10px 9px;
+  border-bottom: 1px solid #edf0f4;
+  color: #172033;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.vasp-data-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.vasp-path-value {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  vertical-align: bottom;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vasp-row-link {
+  color: #1f5fce;
+  font-weight: 700;
+  text-underline-offset: 2px;
+}
+
+.vasp-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.vasp-row-actions button {
+  min-height: 29px;
+  padding: 0 9px;
+  border: 1px solid #cbd4e1;
+  border-radius: 5px;
+  color: #334155;
+  background: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vasp-row-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vasp-row-actions button.is-danger {
+  border-color: #ef9a9a;
+  color: #991b1b;
+  background: #fff7f7;
+}
+
+.vasp-table-message,
+.vasp-mobile-message {
+  padding: 20px;
+  color: #68758a;
+  text-align: center;
+}
+
+.vasp-mobile-records {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .vasp-table-scroll {
+    display: none;
+  }
+
+  .vasp-mobile-records {
+    display: grid;
+    gap: 10px;
+  }
+
+  .vasp-mobile-record {
+    min-width: 0;
+    padding: 13px;
+    border: 1px solid #dfe5ee;
+    border-radius: 7px;
+    background: #ffffff;
+  }
+
+  .vasp-mobile-record-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .vasp-mobile-record-head strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 15px;
+  }
+
+  .vasp-mobile-record dl {
+    margin: 0;
+  }
+
+  .vasp-mobile-record dl > div {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 8px;
+    padding: 5px 0;
+  }
+
+  .vasp-mobile-record dt {
+    color: #68758a;
+    font-size: 12px;
+  }
+
+  .vasp-mobile-record dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+
+  .vasp-mobile-record .vasp-path-value {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .vasp-mobile-record details {
+    margin: 7px 0 10px;
+    border-top: 1px solid #edf0f4;
+    padding-top: 8px;
+  }
+
+  .vasp-mobile-record summary {
+    color: #1f5fce;
+    font-size: 12px;
+    cursor: pointer;
+  }
+}

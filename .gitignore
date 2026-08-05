@@ -1,0 +1,110 @@
+############################################
+# LMateLab - root
+############################################
+
+# 临时目录（你明确有 tmp/，一般不应入库）
+/tmp/
+
+# 顶层 artifacts：如果是可再生的图/映射结果，建议忽略
+/artifacts/
+
+# 日志与通用临时文件
+*.log
+*.tmp
+*.swp
+*.swo
+
+############################################
+# Secrets / env
+############################################
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+############################################
+# OS / Editor
+############################################
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+############################################
+# Frontend (Vite/Node)
+############################################
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.cache/
+/frontend/.vite/
+/frontend/.eslintcache
+
+# 前端本地环境文件（如果你用到）
+/frontend/.env
+/frontend/.env.*
+
+############################################
+# Backend (Python)
+############################################
+# Python cache
+**/__pycache__/
+*.py[cod]
+
+# virtualenv（如果你有的话）
+.venv/
+venv/
+backend/.venv/
+backend/venv/
+
+# 运行时缓存/测试缓存（如有）
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+############################################
+# Backend runtime / generated / data
+############################################
+# 后端 artifacts（你 backend/ 下也有 artifacts，通常为可再生文件）
+/backend/artifacts/
+
+# 上传目录一般包含用户/运行时数据，不建议入库
+/backend/uploads/
+
+# 用户自定义数据库目录
+/backend/Customized_database/
+
+# 数据目录：如果是运行时数据/导入数据，建议忽略（按需再放开）
+/backend/data/
+
+# 数据库文件（你现在已有 .db 和备份，强烈建议忽略）
+/backend/*.db
+/backend/*.db.*
+/backend/*.sqlite
+/backend/*.sqlite3
+/backend/digests.db
+/backend/eln.db
+
+############################################
+# Docker / compose (一般不忽略 compose 文件)
+############################################
+# 如有本地覆盖文件可忽略（你现在没有也没关系）
+docker-compose.override.yml
+*.local.yml
+
+
+## 大模型文件
+/backend/models/
+
+############################################
+# Runtime (var/)
+############################################
+/var/
+
+# Knowledge / vector db / derived
+/backend/knowledge/chroma_db/
+/backend/knowledge/processed/
+/backend/knowledge/raw/
+
+# Isolated development worktrees
+/.worktrees/

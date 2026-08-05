@@ -1,0 +1,106 @@
+/* frontend/src/pages/papers/library.css */
+.paper-markdown h1,
+.paper-markdown h2,
+.paper-markdown h3,
+.paper-markdown h4,
+.paper-markdown h5,
+.paper-markdown h6 {
+  color: #0f172a;
+  font-weight: 800;
+  line-height: 1.5;
+  margin-top: 1.2em;
+  margin-bottom: 0.6em;
+}
+
+.paper-markdown h1 {
+  font-size: 28px;
+}
+
+.paper-markdown h2 {
+  font-size: 22px;
+}
+
+.paper-markdown h3 {
+  font-size: 18px;
+}
+
+.paper-markdown p {
+  margin: 0.8em 0;
+  color: #334155;
+}
+
+.paper-markdown ul,
+.paper-markdown ol {
+  padding-left: 1.5em;
+  margin: 0.8em 0;
+}
+
+.paper-markdown li {
+  margin: 0.35em 0;
+}
+
+.paper-markdown blockquote {
+  margin: 1em 0;
+  padding: 0.8em 1em;
+  border-left: 4px solid #bfdbfe;
+  background: #f8fbff;
+  color: #475569;
+  border-radius: 8px;
+}
+
+.paper-markdown code {
+  background: #f1f5f9;
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  font-size: 0.92em;
+}
+
+.paper-markdown pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.paper-markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.paper-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 14px;
+}
+
+.paper-markdown th,
+.paper-markdown td {
+  border: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.paper-markdown th {
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.paper-markdown a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.paper-markdown a:hover {
+  text-decoration: underline;
+}
+
+.paper-markdown hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1.5em 0;
+}

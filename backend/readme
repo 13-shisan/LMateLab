@@ -1,0 +1,28 @@
+你现在的后端启动流程可以固定成一句话：**先把数据库迁移到最新，再启动 Uvicorn**。这样 `main.py` 不负责改表结构，库也永远跟代码匹配。
+
+## ✅ 每次启动前必做（标准顺序）
+
+在 `backend/` 目录执行：
+
+```bash
+cd /home/software/LMateLab/backend
+alembic upgrade head
+uvicorn main:app --reload --port 4000 --host 222.195.94.37
+```
+
+---
+
+## 🔍 什么时候必须跑 `alembic upgrade head`
+- 你改了 `models.py` 的表结构（加字段/改字段/加表/删表）
+- 你拉了新代码，不确定是否包含迁移
+- 你在新机器/新环境第一次启动项目
+
+> 即使你没改模型，`alembic upgrade head` 也通常很快、而且是幂等的：已经是最新就什么也不做。
+
+---
+
+## 🧠 你现在遵循的规则（记这两条就够）
+1. **表结构变化：只用 Alembic（revision + upgrade）**
+2. **应用启动：不做 create_all，不做“自动改表”**
+
+这样你每次启动前要执行的就固定为：`alembic upgrade head`。

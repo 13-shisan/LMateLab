@@ -1,0 +1,44 @@
+/* index.css：只保留一些非常基础的全局设置，其它都交给 styles.css */
+
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 让 body 占满屏幕，不做居中、不设暗色背景 */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+/* #root 作为 React 容器，占满整个视口 */
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* 链接默认样式交给各自页面控制，这里只清除下划线 */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 按钮基础：去掉浏览器默认字体继承问题，其余交给 styles.css 的 .btn 控制 */
+button {
+  font-family: inherit;
+}
+
+.topbar-logo-img{
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;   /* 想要圆就改成 999px */
+  object-fit: contain;
+  background: rgba(255,255,255,0.15);
+}

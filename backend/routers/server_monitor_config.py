@@ -1,0 +1,17 @@
+ALLOWED_SERVERS = [
+    "Dell",
+    "Dell-GPU",
+    "Dawn4",
+    "Dawn5",
+    "Sugon",
+    "Jingzhun-xjwu",
+    "Jingzhun-jbwu",
+    "Jingzhun-GPU",
+    "Shuangyiliu-huayuan",
+    "Shuangyiliu-HFNL-xjwu",
+    "Shuangyiliu-HFNL-hflv",
+    "SCNet",
+    "Wuxi",
+    "Dongfang-xjwu",
+    "Dongfang-yang4",
+]

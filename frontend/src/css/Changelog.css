@@ -1,0 +1,9 @@
+/* frontend/src/css/Changelog.css */
+/* frontend/src/pages/Changelog.jsx */
+.md-body h1, .md-body h2, .md-body h3 { margin: 12px 0 8px; }
+.md-body p { margin: 8px 0; }
+.md-body ul { padding-left: 18px; margin: 8px 0; }
+.md-body code { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; }
+.md-body pre code { display: block; padding: 12px; overflow: auto; }
+.md-body pre { background: #0b1020; color: #e5e7eb; border-radius: 10px; padding: 12px; overflow: auto; }
+.md-body a { color: #2563eb; text-decoration: underline; }

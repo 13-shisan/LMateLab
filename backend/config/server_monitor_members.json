@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "members": [
+    {"id": "Pwjb", "display_name": "吴佳宝", "aliases": ["Pwjb", "wjb", "wujiabao"]},
+    {"id": "Pwjx", "aliases": ["Pwjx"]},
+    {"id": "Pwxm", "aliases": ["Pwxm"]},
+    {"id": "ies", "aliases": ["ies"]},
+    {"id": "Pchenxj", "aliases": ["Pchenxj"]},
+    {"id": "Pgaoyan", "aliases": ["Pgaoyan"]},
+    {"id": "Pjzh", "aliases": ["Pjzh"]},
+    {"id": "Plyf", "display_name": "李毅凡", "aliases": ["Plyf", "lyf"]},
+    {"id": "Psunmiao", "display_name": "孙淼", "aliases": ["Psunmiao", "sunmiao"]},
+    {"id": "Pxpb", "aliases": ["Pxpb", "xpb"]},
+    {"id": "Pbpf", "display_name": "白鹏飞", "aliases": ["Pbpf", "bpf"]},
+    {"id": "Pcheyx", "aliases": ["Pcheyx", "yxche"]},
+    {"id": "Pgyh", "aliases": ["Pgyh"]},
+    {"id": "Pwyt", "aliases": ["Pwyt", "wyt"]},
+    {"id": "Plfx", "aliases": ["Plfx"]},
+    {"id": "Psxz", "aliases": ["Psxz", "sxz"]},
+    {"id": "Pzhangka", "display_name": "张凯", "aliases": ["Pzhangka", "Pzhangkai"]},
+    {"id": "Pzxp", "aliases": ["Pzxp"]},
+    {"id": "Pcato", "aliases": ["Pcato"]},
+    {"id": "Pcxy", "aliases": ["Pcxy"]},
+    {"id": "Phflv", "display_name": "吕海峰", "aliases": ["Phflv", "hflv"]},
+    {"id": "Pliyuxuan", "aliases": ["Pliyuxuan"]},
+    {"id": "Pwangdy", "aliases": ["Pwangdy"]},
+    {"id": "Pwyl", "aliases": ["Pwyl"]},
+    {"id": "Pzzy", "aliases": ["Pzzy"]},
+    {"id": "Pczp", "aliases": ["Pczp", "chenzp"]},
+    {"id": "Pjyq", "aliases": ["Pjyq"]},
+    {"id": "Pluoxiao", "aliases": ["Pluoxiao"]}
+  ]
+}

@@ -1,0 +1,175 @@
+.vasp-db-page {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.vasp-db-selector-bar,
+.vasp-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vasp-db-selector-fields,
+.vasp-db-selector-row,
+.vasp-table-actions,
+.vasp-query-controls,
+.vasp-mode-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vasp-db-selector-fields {
+  flex-wrap: wrap;
+}
+
+.vasp-db-selector-row select {
+  max-width: min(360px, 100%);
+}
+
+.vasp-freshness {
+  color: #68758a;
+  font-size: 12px;
+}
+
+.vasp-freshness.is-stale {
+  color: #9a6700;
+}
+
+.vasp-periodic-scroll {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.vasp-table-toolbar {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.vasp-table-actions,
+.vasp-query-controls {
+  flex-wrap: wrap;
+}
+
+.vasp-query-controls input,
+.vasp-query-controls select {
+  min-height: 34px;
+  border: 1px solid #cbd4e1;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.vasp-query-controls input {
+  width: 190px;
+  padding: 0 10px;
+}
+
+.vasp-query-controls select {
+  padding: 0 8px;
+}
+
+.vasp-mode-control {
+  padding: 3px;
+  border: 1px solid #cbd4e1;
+  border-radius: 6px;
+  background: #f7f9fc;
+}
+
+.vasp-mode-control button {
+  min-height: 29px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  color: #596579;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vasp-mode-control button.is-active {
+  color: #174fae;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(23, 32, 51, 0.12);
+  font-weight: 700;
+}
+
+.vasp-pagination {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 700px) {
+  .vasp-db-page {
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .vasp-db-selector-bar,
+  .vasp-table-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .vasp-db-selector-fields,
+  .vasp-db-selector-row,
+  .vasp-table-actions,
+  .vasp-query-controls {
+    width: 100%;
+  }
+
+  .vasp-db-selector-fields {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vasp-db-selector-row {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    align-items: stretch !important;
+  }
+
+  .vasp-db-selector-row > div {
+    min-width: 0 !important;
+  }
+
+  .vasp-db-selector-row select,
+  .vasp-query-controls input,
+  .vasp-query-controls select {
+    width: 100%;
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+
+  .vasp-query-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .vasp-mode-control {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vasp-mode-control button {
+    padding: 5px 7px;
+    line-height: 1.25;
+  }
+
+  .vasp-periodic-scroll {
+    justify-content: flex-start;
+  }
+
+  .vasp-column-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .vasp-pagination {
+    justify-content: flex-start !important;
+  }
+}
