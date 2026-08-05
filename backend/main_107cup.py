@@ -4,10 +4,15 @@ import importlib
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
-from competition_runtime import CORE_ROUTER_IMPORTS, resolve_frontend_file
+from competition_authz import require_business_access
+from competition_runtime import (
+    BUSINESS_ROUTER_IMPORTS,
+    CORE_ROUTER_IMPORTS,
+    resolve_frontend_file,
+)
 from route_integrity import assert_unique_routes
 
 
@@ -23,6 +28,12 @@ def build_app() -> FastAPI:
     for module_name, router_name in CORE_ROUTER_IMPORTS:
         module = importlib.import_module(module_name)
         api_router.include_router(getattr(module, router_name))
+
+    business_router = APIRouter(dependencies=[Depends(require_business_access)])
+    for module_name, router_name in BUSINESS_ROUTER_IMPORTS:
+        module = importlib.import_module(module_name)
+        business_router.include_router(getattr(module, router_name))
+    api_router.include_router(business_router)
     app.include_router(api_router)
     assert_unique_routes(app)
 

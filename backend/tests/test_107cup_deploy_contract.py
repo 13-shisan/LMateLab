@@ -36,6 +36,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "manifest.sha256",
             "current.next",
             "mv -Tf",
+            "tests.test_107cup_authz",
         ):
             self.assertIn(required, source)
         self.assertNotIn("#SBATCH --gres", source)
@@ -123,6 +124,8 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "service-job-id",
             "service-node",
             "service-port",
+            "migrate-competition-roles.py",
+            "--operator-alias",
         ):
             self.assertIn(required, source)
         for forbidden in ("celery worker", "celery beat", "redis-server", "gunicorn"):
@@ -178,7 +181,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
         user = data["users"][0]
         self.assertEqual("107杯管理员", user["nameCN"])
         self.assertEqual("pb23030683", user["aliasEN"])
-        self.assertEqual("root", user["role"])
+        self.assertEqual("operator", user["role"])
         self.assertTrue(user["enabled"])
         self.assertTrue(user["asedbdir"].startswith("/home/scc/pb23030683/lmatelab-107cup/"))
 
@@ -189,6 +192,22 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertTrue(policy["requireUpper"])
         self.assertTrue(policy["requireLower"])
         self.assertTrue(policy["allowedPattern"])
+
+    def test_competition_runtime_disables_public_account_changes(self):
+        source = self.read_required("runtime.env.example")
+        self.assertIn("LMATELAB_REGISTRATION_ENABLED=0", source)
+        self.assertIn("LMATELAB_PASSWORD_RESET_ENABLED=0", source)
+
+    def test_public_relay_allows_login_but_rejects_business_writes(self):
+        relay = self.read_required("relay/nginx.conf.example")
+        self.assertIn("listen 18733", relay)
+        self.assertIn("location = /api/auth/login", relay)
+        self.assertIn("limit_except POST", relay)
+        self.assertIn("location /api/", relay)
+        self.assertIn("limit_except GET", relay)
+        self.assertIn("deny all", relay)
+        self.assertIn("allow 114.214.203.210", relay)
+        self.assertIn("proxy_pass http://127.0.0.1:18734", relay)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ set -a
 source "$runtime_env"
 set +a
 : "${JWT_SECRET:?JWT_SECRET must be configured}"
+: "${LMATELAB_OPERATOR_ALIAS:?LMATELAB_OPERATOR_ALIAS must be configured}"
 
 release=$(readlink -f "$root/current")
 source_root="$release/source"
@@ -57,5 +58,9 @@ source "$python_env/bin/activate"
 cd "$source_root/backend"
 alembic -c alembic.ini upgrade head
 alembic -c alembic_digest.ini upgrade head
+python "$source_root/deploy/107cup/migrate-competition-roles.py" \
+  --database "$root/data/db/eln.db" \
+  --backup-dir "$root/backups/competition-roles" \
+  --operator-alias "$LMATELAB_OPERATOR_ALIAS"
 
 exec uvicorn main_107cup:app --host 0.0.0.0 --port "$port" --workers 1

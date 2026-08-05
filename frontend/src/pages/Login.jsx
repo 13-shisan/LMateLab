@@ -4,6 +4,11 @@ import api from '../api/client';
 import { useNavigate } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import logo from '../assets/logo/Logo.png';
+import { activeEdition } from '../config/appNavigation';
+import {
+  passwordResetEnabledForEdition,
+  registrationEnabledForEdition,
+} from '../config/competitionAccess';
 
 
 export default function Login() {
@@ -12,6 +17,8 @@ export default function Login() {
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const passwordResetEnabled = passwordResetEnabledForEdition(activeEdition);
+  const registrationEnabled = registrationEnabledForEdition(activeEdition);
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -68,13 +75,15 @@ export default function Login() {
           <div className="form-field">
             <div className="form-row">
               <label className="form-label">密码</label>
-              <button
-                type="button"
-                className="form-link"
-                onClick={() => navigate('/forgot-password')}
-              >
-                忘记密码
-              </button>
+              {passwordResetEnabled ? (
+                <button
+                  type="button"
+                  className="form-link"
+                  onClick={() => navigate('/forgot-password')}
+                >
+                  忘记密码
+                </button>
+              ) : null}
             </div>
 
             <input
@@ -101,18 +110,20 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="form-footer">
-          <span>
-            没有账号？
-            <button
-              type="button"
-              className="inline-link"
-              onClick={() => navigate('/register')}
-            >
-              立即注册
-            </button>
-          </span>
-        </div>
+        {registrationEnabled ? (
+          <div className="form-footer">
+            <span>
+              没有账号？
+              <button
+                type="button"
+                className="inline-link"
+                onClick={() => navigate('/register')}
+              >
+                立即注册
+              </button>
+            </span>
+          </div>
+        ) : null}
       </div>
     </AuthShell>
   );

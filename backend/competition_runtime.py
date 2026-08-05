@@ -6,16 +6,11 @@ from typing import Mapping
 
 
 CORE_ROUTER_IMPORTS = (
-    ("auth", "router"),
-    ("routers.projects", "router"),
-    ("routers.notes", "router"),
-    ("routers.files", "router"),
-    ("routers.vasp_db", "router"),
-    ("routers.changelog", "router"),
-    ("routers.issues", "router"),
-    ("routers.academic_reports", "router"),
+    ("auth", "competition_router"),
     ("routers.health", "router"),
 )
+
+BUSINESS_ROUTER_IMPORTS = ()
 
 SQLITE_CONNECTION_PRAGMAS = (
     "PRAGMA foreign_keys=ON;",

@@ -25,6 +25,8 @@ import {
   getNavigationItem,
   navigationGroups,
 } from '../config/appNavigation';
+import { activeEdition } from '../config/appNavigation';
+import CompetitionDashboard from './CompetitionDashboard';
 import './Dashboard.css';
 
 const shortcutIconMap = {
@@ -66,7 +68,7 @@ function readStoredUser() {
   }
 }
 
-export default function Dashboard() {
+function StandardDashboard() {
   const navigate = useNavigate();
   const [latestReports, setLatestReports] = useState([]);
   const [reportsLoading, setReportsLoading] = useState(true);
@@ -263,4 +265,9 @@ export default function Dashboard() {
       />
     </div>
   );
+}
+
+export default function Dashboard() {
+  if (activeEdition === '107cup') return <CompetitionDashboard />;
+  return <StandardDashboard />;
 }

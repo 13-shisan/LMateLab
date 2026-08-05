@@ -30,10 +30,12 @@ import {
 import { clearAuthState } from '../api/auth';
 import logo from '../assets/logo/Logo.png';
 import {
+  activeEdition,
   getPageMeta,
   isNavigationItemActive,
   navigationGroups,
 } from '../config/appNavigation';
+import { roleLabel } from '../config/competitionAccess';
 import './AppShell.css';
 
 const iconMap = {
@@ -79,6 +81,7 @@ export default function AppShell() {
   });
 
   const user = readStoredUser();
+  const competitionEdition = activeEdition === '107cup';
   const pageMeta = useMemo(() => getPageMeta(location.pathname), [location.pathname]);
 
   useEffect(() => {
@@ -216,15 +219,17 @@ export default function AppShell() {
         </div>
 
         <div className="lm-topbar-actions">
-          <button
-            className="lm-icon-button"
-            type="button"
-            onClick={() => navigateFromMenu('/dashboard/changelog')}
-            aria-label="平台更新日志"
-            title="平台更新日志"
-          >
-            <Bell size={17} />
-          </button>
+          {!competitionEdition ? (
+            <button
+              className="lm-icon-button"
+              type="button"
+              onClick={() => navigateFromMenu('/dashboard/changelog')}
+              aria-label="平台更新日志"
+              title="平台更新日志"
+            >
+              <Bell size={17} />
+            </button>
+          ) : null}
 
           <div className="lm-user-menu-wrap" ref={menuRef}>
             <button
@@ -237,7 +242,7 @@ export default function AppShell() {
               <span className="lm-user-avatar">{getUserInitial(user)}</span>
               <span className="lm-user-summary">
                 <strong>{user?.name || user?.username || '科研用户'}</strong>
-                <small>账户与设置</small>
+                <small>{competitionEdition ? roleLabel(user?.role) : '账户与设置'}</small>
               </span>
               <ChevronDown size={15} />
             </button>
@@ -248,20 +253,24 @@ export default function AppShell() {
                   <strong>{user?.name || user?.username || '科研用户'}</strong>
                   <span>{user?.email || '未读取到邮箱'}</span>
                 </div>
-                <div className="lm-user-menu-separator" />
-                <button type="button" role="menuitem" onClick={() => navigateFromMenu('/dashboard/issues')}>
-                  <MessageSquareText size={16} />
-                  <span>反馈与建议</span>
-                </button>
-                <button type="button" role="menuitem" onClick={() => navigateFromMenu('/dashboard/changelog')}>
-                  <Bell size={16} />
-                  <span>平台更新日志</span>
-                </button>
-                <div className="lm-user-language" role="menuitem" aria-label="当前语言：中文">
-                  <Languages size={16} />
-                  <span>语言</span>
-                  <small>中文</small>
-                </div>
+                {!competitionEdition ? (
+                  <>
+                    <div className="lm-user-menu-separator" />
+                    <button type="button" role="menuitem" onClick={() => navigateFromMenu('/dashboard/issues')}>
+                      <MessageSquareText size={16} />
+                      <span>反馈与建议</span>
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => navigateFromMenu('/dashboard/changelog')}>
+                      <Bell size={16} />
+                      <span>平台更新日志</span>
+                    </button>
+                    <div className="lm-user-language" role="menuitem" aria-label="当前语言：中文">
+                      <Languages size={16} />
+                      <span>语言</span>
+                      <small>中文</small>
+                    </div>
+                  </>
+                ) : null}
                 <div className="lm-user-menu-separator" />
                 <button className="is-danger" type="button" role="menuitem" onClick={logout}>
                   <LogOut size={16} />

@@ -80,10 +80,11 @@
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`1d5fd3969ea58a2feec427a6b20d7018819d5158`。
-- 当前工作分支：`codex/107cup-python-runtime`。
-- 当前分支提交：`196690a6b5dc583bf9e2a6b1b21f52494790244f`。
-- 当前分支尚未合并 `main`。
+- Gitea `main`：`4a311a2cccdefe8b6f30f5414f5a2541c891fab9`。
+- PR #2 已将 `codex/107cup-python-runtime` 合并到 `main`。
+- 当前工作分支：`codex/107cup-access-control`。
+- 当前分支基线提交：`4a311a2cccdefe8b6f30f5414f5a2541c891fab9`。
+- 当前访问控制改动仅在本地工作树中验证，尚未提交、合并或部署到 107。
 
 ### 4.2 构建与发布
 
@@ -119,10 +120,10 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | 已导入、建立 Gitea 和个人分支 | 合并当前修复；验证 main 保护、三人身份和只读 Deploy Key |
+| 1. 竞赛仓库初始化 | PARTIAL | 已导入、建立 Gitea，PR #2 已合并 main | 验证 main 保护、三人身份和只读 Deploy Key |
 | 2. 无 Docker 构建与发布 | PARTIAL | 真实 Slurm 构建、测试、manifest 和原子切换已完成 | 演练失败构建不替换 current 和上一版回滚 |
 | 3. 最小 107 网页服务 | PARTIAL | 真实计算节点服务、迁移、健康和空数据库已完成 | 增加受控恢复并记录服务结束后端口消失证据 |
-| 4. 访问与角色控制 | PARTIAL | IP 白名单和 root 账号已完成 | 实现 Operator/Viewer、后端写保护和 107 导航裁剪 |
+| 4. 访问与角色控制 | PARTIAL | 本地已实现角色合同、写保护、迁移脚本、只读代理示例和专用前端入口 | 合并部署后预置 Viewer，并完成 Operator/Viewer 浏览器验收 |
 | 5. 工作流模型与输入校验 | PENDING | 尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
@@ -146,7 +147,7 @@
 - [ ] 为另外两名成员分别验证个人 Gitea 账号、SSH key 和提交邮箱。
 - [ ] 验证 `main` 禁止直接推送且必须通过 PR。
 - [ ] 在 107 验证 Deploy Key 可以 `fetch`，但尝试 `push --dry-run` 被拒绝。
-- [ ] 创建并合并 `codex/107cup-python-runtime` PR。
+- [x] 创建并合并 `codex/107cup-python-runtime` PR #2；合并提交为 `4a311a2cccdefe8b6f30f5414f5a2541c891fab9`。
 
 验收命令：
 
@@ -222,6 +223,9 @@ sacct -j "$service_job_id" --format=JobID,State,ExitCode,Elapsed,NodeList
 - Create: `backend/competition_authz.py`
 - Create: `backend/tests/test_107cup_authz.py`
 - Create: `frontend/tests/competitionRoles107Cup.test.mjs`
+- Create: `frontend/src/App107Cup.jsx`
+- Create: `frontend/src/config/competitionAccess.js`
+- Create: `frontend/src/pages/CompetitionDashboard.jsx`
 - Create: `deploy/107cup/relay/nginx.conf.example`
 - Create: `deploy/107cup/migrate-competition-roles.py`
 - Modify: `backend/auth.py`
@@ -230,6 +234,8 @@ sacct -j "$service_job_id" --format=JobID,State,ExitCode,Elapsed,NodeList
 - Modify: `frontend/src/config/appNavigation.js`
 - Modify: `frontend/src/pages/Dashboard.jsx`
 - Modify: `frontend/src/routes/RequireAuth.jsx`
+- Modify: `frontend/src/main.jsx`
+- Modify: `frontend/vite.config.js`
 - Modify: `deploy/107cup/allowed_users.example.json`
 
 角色固定为：
@@ -248,15 +254,15 @@ def require_viewer_or_operator(current_user = Depends(get_current_user)): ...
 ```
 
 - [x] 4090 公开入口配置 IP 白名单并验证 `200/403`。
-- [ ] 将当前 `root/user` 模型收敛为竞赛使用的 `operator/viewer` 授权合同。
-- [ ] 迁移脚本先备份 SQLite，再将现有 `root` 管理员原子更新为 `operator`；重复运行不得产生额外用户或改变密码哈希。
+- [x] 本地实现 `operator/viewer` 授权合同；旧 `root/user` 在 107 竞赛入口登录时失败关闭。
+- [ ] 迁移脚本已通过本地备份、原子更新、密码哈希不变和重复运行测试；尚未在 107 数据库执行。
 - [ ] 为三名成员配置独立应用身份；共享 Unix 账号不共享应用密码。
-- [ ] 通过受控方式预置 Viewer，公开入口禁止注册新账号。
-- [ ] Nginx 公开入口只允许 `/api/auth/login` 的必要 POST 和只读请求。
-- [ ] 后端对 Viewer 的业务 `POST/PUT/PATCH/DELETE` 返回 `403`。
+- [ ] 后端和专用前端已关闭注册与密码重置；Viewer 尚未在 107 受控预置。
+- [ ] 已新增 Nginx 只读配置示例，只允许 `/api/auth/login` 的 POST 和其他 GET；尚未替换 4090 当前运行配置。
+- [x] 后端角色依赖对 Viewer 的业务 `POST/PUT/PATCH/DELETE` 返回 `403`，Operator 通过。
 - [ ] Operator 写接口同时验证角色、资源归属和请求路径。
-- [ ] 107 杯导航移除实验记录、学术报告、全组数据库和其他非主线入口。
-- [ ] 直接访问已隐藏的 URL 仍由后端拒绝，不能只隐藏按钮。
+- [x] 107 杯专用构建仅包含登录、竞赛 Dashboard 和认证壳；导航移除所有非主线入口。
+- [x] 107 后端只注册认证和健康路由，无关业务 API 未挂载；专用前端未注册隐藏页面 URL。
 - [ ] 本机 SSH 隧道和公开 Viewer 入口分别完成浏览器验收。
 
 阶段门禁：
@@ -269,6 +275,15 @@ Operator 登录成功 + 仅允许竞赛资源写操作
 ```
 
 阶段 4 不要求已有真实 VASP 演示数据。Viewer 对真实演示数据的验收在阶段 8 和阶段 10 重复执行。
+
+本地 TDD 证据（`2026-08-05`）：
+
+- RED：新增后端授权/迁移/部署契约后出现 11 个预期失败；新增前端角色与裁剪契约后出现 3 个预期失败；专用构建入口测试先出现 1 个预期失败。
+- GREEN：后端阶段 4 专项测试 `24/24` 通过，其中未登录请求为 `401`、角色拒绝和 Viewer 写拒绝为 `403`；完整前端测试 `21/21` 通过。
+- BUILD：`VITE_LMATELAB_EDITION=107cup npm run build` 通过，产物只生成登录、Dashboard 和主入口 JS 分块。
+- ROUTES：本地导入 `main_107cup` 后仅注册 `login`、`me`、只读密码策略、健康和 SPA 路由；注册、密码重置以及项目、实验记录、文件、VASP 数据库、报告、Issue 和 Agent API 均未挂载。
+- 边界：Windows 全仓库后端基线仍有 6 个既存环境错误（Docker、`fcntl`、生产密钥、`pytest` 和 GBK 子进程解码相关），不能记录为全仓库后端通过，也不能替代 107 Slurm 构建验收。
+- LINT：本次 107 前端相关文件的定向 ESLint 检查通过；全仓库 ESLint 仍有 36 个旧模块错误，不在本批次扩大修复。
 
 ## 10. 阶段 5：工作流数据模型与输入校验
 
@@ -454,13 +469,13 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 
 下一批次只完成阶段 1 至阶段 4 的收尾，不进入阶段 5：
 
-- [ ] 创建并合并当前运行时修复 PR。
+- [x] 创建并合并运行时修复 PR #2。
 - [ ] 演练失败构建不替换 `current`，再演练上一成功发布回滚。
 - [ ] 在受控时间验证服务结束后端口消失，并提交新服务作业恢复入口。
-- [ ] 写 Operator/Viewer 后端失败测试。
-- [ ] 实现最小角色依赖并通过测试。
-- [ ] 为公开入口增加只读方法限制。
-- [ ] 裁剪 107 杯导航和首页入口。
+- [x] 写 Operator/Viewer 后端失败测试。
+- [x] 实现最小角色依赖并通过本地测试。
+- [x] 新增公开入口只读 Nginx 配置示例；实际替换与验证仍待 107 部署后执行。
+- [x] 通过专用构建入口裁剪 107 杯导航、首页和无关页面分块。
 - [ ] 在本机和公开入口分别完成浏览器权限验收。
 - [ ] 将真实 107 证据和状态更新回本文件并提交 PR。
 
@@ -472,3 +487,8 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 记录阶段 1 至阶段 4 的真实部署状态。
 - 确认取消独立人工 SCF 基线，第一次真实 VASP 验收进入阶段 7。
 - 将下一执行批次限定为仓库收尾和访问角色控制，不扩展 LMateLab 旁支功能。
+- PR #2 合并后将本地与 Gitea `main` 同步到 `4a311a2cccdefe8b6f30f5414f5a2541c891fab9`，并创建 `codex/107cup-access-control` 隔离工作树。
+- 按 TDD 实现阶段 4 的 `operator/viewer` 合同、Viewer 写拒绝、竞赛账号变更关闭和 `root -> operator` 幂等备份迁移。
+- 新增 4090 用户态 Nginx 只读配置示例；当前在线代理尚未替换，因此公开入口方法限制仍未完成真实验收。
+- 新增 `App107Cup.jsx` 专用构建入口，107 前端产物不再包含实验记录、报告、数据库、Agent 等无关页面分块。
+- 本批次未进入工作流模型、Slurm 控制或 VASP 功能。

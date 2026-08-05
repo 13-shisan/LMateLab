@@ -106,6 +106,7 @@ python -m pip install --requirement "$project/backend/requirements-107cup.txt"
 
 cd "$project/backend"
 python -m unittest \
+  tests.test_107cup_authz \
   tests.test_107cup_runtime \
   tests.test_107cup_deploy_contract \
   tests.test_health_readiness \
