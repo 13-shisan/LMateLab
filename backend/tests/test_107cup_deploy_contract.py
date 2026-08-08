@@ -195,6 +195,26 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertLess(wait_for_server, capture_status)
         self.assertLess(capture_status, restore_errexit)
 
+    def test_viewer_provision_job_is_short_private_and_has_no_service_process(self):
+        source = self.read_required("provision-viewer.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-A100",
+            "#SBATCH --qos=qos_p107-a100",
+            "#SBATCH --time=00:05:00",
+            "SLURM_JOB_ID",
+            "umask 077",
+            "demo-viewer.password",
+            "secrets.token_urlsafe",
+            "os.O_EXCL",
+            "provision-competition-viewer.py",
+            "evidence/access",
+            "integrity_check",
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("uvicorn", "npm ", "pip install", "celery", "redis-server"):
+            self.assertNotIn(forbidden, source)
+
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")
         service_submit = self.read_required("submit-service.sh")
