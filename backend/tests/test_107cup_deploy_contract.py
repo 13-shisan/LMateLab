@@ -133,6 +133,45 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertNotIn("#SBATCH --time=7-00:00:00", source)
 
+    def test_rollback_smoke_is_isolated_and_exits_after_self_check(self):
+        source = self.read_required("rollback-smoke.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-A100",
+            "#SBATCH --qos=qos_p107-a100",
+            "#SBATCH --time=00:10:00",
+            "LMATELAB_ROLLBACK_RELEASE",
+            '[[ "$LMATELAB_ROLLBACK_RELEASE" =~ ^[0-9a-f]{40}$ ]]',
+            "umask 077",
+            "sha256sum -c manifest.sha256",
+            "rollback-current.next",
+            "mv -Tf",
+            "production_current_before",
+            "production_current_after",
+            'test "$production_current_before" = "$production_current_after"',
+            "DATABASE_URL",
+            "DIGEST_DATABASE_URL",
+            "alembic -c alembic.ini upgrade head",
+            "alembic -c alembic_digest.ini upgrade head",
+            "uvicorn main_107cup:app",
+            "/api/health/live",
+            "/api/health/ready",
+            "kill -TERM",
+            "wait",
+            "integrity_check",
+        ):
+            self.assertIn(required, source)
+
+        for forbidden in (
+            '"$root/current"',
+            '"$root/data',
+            '"$root/runtime/service-',
+            "npm ",
+            "pip install",
+            "build.slurm",
+        ):
+            self.assertNotIn(forbidden, source)
+
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")
         service_submit = self.read_required("submit-service.sh")
