@@ -80,10 +80,10 @@
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`1bba72d0ade2bb7024081d384584524a9c9d1c69`。
-- PR #4 已将 `codex/107cup-runtime-evidence` 合并到 `main`；合并提交的第二父提交为修正提交 `043894d9e9296538b51499e4b59a17d8be496ac7`。
-- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `1bba72d0ade2bb7024081d384584524a9c9d1c69`；107 工作树干净且为 detached HEAD。
-- 当前部署证据分支：`codex/107cup-deployment-evidence`，基线提交为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- Gitea `main`：`a33366702f2e62ff9c0012bbc625fbec92fda790`。
+- PR #5 已将部署证据分支合并到 `main`；该提交只更新实施方案，未触发服务重建。
+- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `a33366702f2e62ff9c0012bbc625fbec92fda790`；107 工作树干净且为 detached HEAD。
+- 当前回滚证据分支：`codex/107cup-rollback-evidence`，基线提交为 `a33366702f2e62ff9c0012bbc625fbec92fda790`。当前运行发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
 
 ### 4.2 构建与发布
 
@@ -95,6 +95,9 @@
 - 构建日志：`logs/build-33839.out` 为 37882 字节，SHA-256 为 `9f88bc5770975afed9f263d32a359dd32f3607cb75cfc7ee4ae21fbf743d60be`；`logs/build-33839.err` 为 5812 字节，SHA-256 为 `dd5d939acaf78dddda1337b89a58cfbbda1d4ee0174eaee8da980357ba5eeb98`。
 - 构建内后端专项测试 `31/31` 通过，前端测试 `21/21` 通过；107 专用 Vite 构建完成 1826 个模块，构建日志记录耗时 4.98 秒。
 - `squeue` 已无 Job `33839`，`scontrol` 已返回 `Invalid job id specified`，`sacct` 仍返回 0 条数据；构建节点和最终 Slurm 状态不可恢复，不得写成 `COMPLETED/0:0`。成功边界仅由完整日志、作业内 manifest 复核、发布目录和原子 `current` 切换共同证明。
+- 故意失败构建 Job `33979` 在 `Students/anode18` 以 `FAILED`、`ExitCode=1:0`、`Reason=NonZeroExitCode` 结束，直接错误为缺失 `manifest.sha256`。演练前后 `current` 均保持 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，在线 Job `33852` 和网页入口未受影响。失败目录保留在 `releases/a33366702f2e62ff9c0012bbc625fbec92fda790`，证据位于 `evidence/build/20260808T162810+0800-build-33979-failed/`，其中清单复核通过且文件均为 `0600`。
+- 隔离回滚 Job `34005` 在 `P107-A100/anode16` 使用既有发布 `30a18e1b7000d93a2cca39849a25edb0ff957e28`、独立 SQLite 和端口 `18732` 启动，未执行构建或依赖安装；live 元数据返回旧提交，ready 和两库完整性均通过，随后正常关闭。保存的 `scontrol` 记录 `COMPLETED`、`ExitCode=0:0`、耗时 3 秒；`sacct` 仍为空，不用其替代 `scontrol` 证据。生产 `current` 演练前后均保持 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，临时端口随后关闭。
+- 回滚演练的两次失败 Job `33998` 和 `34001` 均保留：前者暴露空数据库缺少待迁移 operator，后者完成 live/ready 后把受控 TERM 的子进程状态 143 传播为批作业失败。最终脚本只接受带完整 Uvicorn shutdown 标记的受控 `0/143` 子进程状态，并让 Slurm 批作业自身零退出。三次证据分别位于 `evidence/rollback/{33998,34001,34005}/`，文件均为 `0600`，对应 SHA-256 清单位于 `rollback-smoke/{job_id}/evidence-manifest.sha256` 并已复核。
 - 无效旧 Python 环境保存在 `backups/python-invalid-32642`。
 
 ### 4.3 网页服务与数据
@@ -129,9 +132,9 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #4 已合并，本地和 107 已固定到 main 合并提交 `1bba72d` | 验证 main 保护、三人身份和只读 Deploy Key |
-| 2. 无 Docker 构建与发布 | PARTIAL | Job 33839 完成真实构建、测试、340 文件 manifest 和原子切换；sacct 仍为空 | 演练失败构建不替换 current、上一版回滚并恢复记账证据 |
-| 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；旧 Job 32769 受控取消后完整 shutdown 且端口消失 | 增加自动恢复，并补正常零退出而非 TIMEOUT/CANCELLED 的复跑 |
+| 1. 竞赛仓库初始化 | PARTIAL | PR #5 已合并，本地、Gitea 和 107 源码已固定到 main 合并提交 `a333667` | 验证 main 保护、三人身份和只读 Deploy Key |
+| 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
+| 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Operator 迁移、账号变更关闭、专用前端和 4090 只读代理均已部署 | 预置 Viewer，并完成 Operator/Viewer 浏览器验收 |
 | 5. 工作流模型与输入校验 | PENDING | 尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
@@ -177,6 +180,7 @@ git remote -v
 - Maintain: `deploy/107cup/build.slurm`
 - Maintain: `deploy/107cup/submit-build.sh`
 - Maintain: `deploy/107cup/runtime.env.example`
+- Maintain: `deploy/107cup/rollback-smoke.slurm`
 - Test: `backend/tests/test_107cup_deploy_contract.py`
 
 - [x] Slurm 作业创建项目专用 Python 和 Node 环境。
@@ -184,8 +188,10 @@ git remote -v
 - [x] 发布内容写入 `releases/{git_commit}` 并生成 `manifest.txt` 与 `manifest.sha256`。
 - [x] 只有完整校验通过后才原子替换 `current`。
 - [x] 无效旧环境采用非覆盖备份。
-- [ ] 用一个故意失败的构建提交验证 `current` 仍指向上一成功版本。
-- [ ] 验证上一成功发布可在不重建依赖的情况下回滚并启动。
+- [x] 用故意失败的构建 Job `33979` 验证 `current` 仍指向上一成功版本。
+- [x] 用隔离回滚 Job `34005` 验证上一成功发布可在不重建依赖的情况下启动并正常退出。
+
+回滚自检不切换生产 `current`，而是在 Job 私有目录中原子切换 `rollback-current`，并使用独立数据库和端口验证旧发布。这样能够验证发布可回滚性，同时不与 Job `33852` 共享 SQLite、runtime 指针或服务端口。
 
 验收命令：
 
@@ -485,15 +491,15 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 创建并合并运行时修复 PR #2。
 - [x] 创建并合并访问控制 PR #3，并在 107 构建部署提交 `30a18e1`。
 - [x] 创建并合并运行时加固 PR #4，在本地和 107 构建部署提交 `1bba72d`。
-- [ ] 演练失败构建不替换 `current`，再演练上一成功发布回滚。
-- [ ] Job `32769` 已受控取消、完整 shutdown 且端口消失；仍需补正常零退出而非 TIMEOUT/CANCELLED 的复跑。
+- [x] Job `33979` 已验证失败构建不替换 `current`；Job `34005` 已验证上一成功发布无需重建即可隔离回滚启动。
+- [x] Job `32769` 已受控取消、完整 shutdown 且端口消失；Job `34005` 已补 Uvicorn 完整 shutdown 和 Slurm `COMPLETED/0:0` 的正常零退出复跑。
 - [x] 提交新服务 Job `33852` 并将 4090 转发安全切换到 `anode16`。
 - [x] 写 Operator/Viewer 后端失败测试。
 - [x] 实现最小角色依赖并通过本地测试。
 - [x] 新增并实际部署公开入口只读 Nginx 配置；本地与校园网入口均指向新 107 服务。
 - [x] 通过专用构建入口裁剪 107 杯导航、首页和无关页面分块。
 - [ ] 在本机和公开入口分别完成浏览器权限验收。
-- [ ] 真实 107 证据和状态已更新到 `codex/107cup-deployment-evidence`；待提交 PR 并合并。
+- [ ] 真实 107 失败构建与回滚证据已更新到 `codex/107cup-rollback-evidence`；待提交 PR 并合并。
 
 ## 18. 变更记录
 
@@ -523,9 +529,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 
 ### 2026-08-08
 
-- PR #4 合并后，本地主检出、Gitea `main` 和 107 detached HEAD 同步到 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- PR #4 合并后构建并部署运行提交 `1bba72d0ade2bb7024081d384584524a9c9d1c69`；随后 PR #5 只更新方案，本地主检出、Gitea `main` 和 107 detached HEAD 同步到 `a33366702f2e62ff9c0012bbc625fbec92fda790`，运行发布未重建。
 - Slurm Build Job `33839` 通过 107 Linux 后端专项测试 `31/31`、前端测试 `21/21`、Vite 构建和 340 文件 manifest 复核，原子启用发布 `releases/1bba72d0ade2bb7024081d384584524a9c9d1c69`。由于 `scontrol` 已清除且 `sacct` 空表，不记录构建节点或 `COMPLETED/0:0`。
 - Service Job `33852` 在 `P107-A100/anode16` 启动，live/ready、两套 SQLite 完整性和登录节点无业务常驻进程均通过；计划结束时间为 `2026-08-12T11:46:52+08:00`。
 - 4090 SSH 复用主连接和 `127.0.0.1:18734 -> anode16:18731` 转发建立后，4090 代理、Windows 本地入口和校园网直连入口均返回新 Job、节点和提交；注册 POST 继续返回 `403`。
-- 在确认新入口健康后，精确取消被替换的 Job `32769`；Uvicorn 完整 shutdown，`anode01:18731` 随后不可达，最终日志与终止元数据已按 `0600` 保存并生成 SHA-256。该结果是受控取消，不替代尚未完成的正常零退出复跑。
-- Viewer 预置与 Operator/Viewer 浏览器验收、失败构建不切换 `current`、发布回滚、自动恢复和 Slurm 记账缺口仍未完成；阶段 1 至阶段 4 继续保持 `PARTIAL`，未进入阶段 5。
+- 在确认新入口健康后，精确取消被替换的 Job `32769`；Uvicorn 完整 shutdown，`anode01:18731` 随后不可达，最终日志与终止元数据已按 `0600` 保存并生成 SHA-256。该结果本身是受控取消，正常零退出后来由 Job `34005` 补齐。
+- 故意失败构建 Job `33979` 以 `FAILED/1:0` 结束且没有替换 `current`；失败目录、Slurm 元数据和 SHA-256 证据均保留。
+- 新增 `rollback-smoke.slurm`，通过 Job `33998` 和 `34001` 的保留失败证据修正空库 operator 初始化与受控 TERM 状态传播；最终 Job `34005` 从旧发布 `30a18e1` 完成独立迁移、live/ready、SQLite 完整性、优雅关闭和 `COMPLETED/0:0`，生产 Job `33852`、数据库、端口和 `current` 全程不变。
+- 阶段 2 更新为 `DONE`。Viewer 预置与 Operator/Viewer 浏览器验收、自动恢复和 Slurm `sacct` 空表限制仍未解决；阶段 1、3、4 保持 `PARTIAL`，未进入阶段 5。
