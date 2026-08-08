@@ -133,6 +133,68 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertNotIn("#SBATCH --time=7-00:00:00", source)
 
+    def test_rollback_smoke_is_isolated_and_exits_after_self_check(self):
+        source = self.read_required("rollback-smoke.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-A100",
+            "#SBATCH --qos=qos_p107-a100",
+            "#SBATCH --time=00:10:00",
+            "LMATELAB_ROLLBACK_RELEASE",
+            '[[ "$LMATELAB_ROLLBACK_RELEASE" =~ ^[0-9a-f]{40}$ ]]',
+            "umask 077",
+            "sha256sum -c manifest.sha256",
+            "rollback-current.next",
+            "mv -Tf",
+            "production_current_before",
+            "production_current_after",
+            'test "$production_current_before" = "$production_current_after"',
+            "DATABASE_URL",
+            "DIGEST_DATABASE_URL",
+            "alembic -c alembic.ini upgrade head",
+            "alembic -c alembic_digest.ini upgrade head",
+            "rollback-smoke@example.invalid",
+            "rollback-smoke-placeholder",
+            "uvicorn main_107cup:app",
+            "/api/health/live",
+            "/api/health/ready",
+            "kill -TERM",
+            "wait",
+            "set +e",
+            "server_status=$?",
+            "server-exit-status.txt",
+            "Application shutdown complete",
+            "Finished server process",
+            "integrity_check",
+        ):
+            self.assertIn(required, source)
+
+        for forbidden in (
+            '"$root/current"',
+            '"$root/data',
+            '"$root/runtime/service-',
+            "npm ",
+            "pip install",
+            "build.slurm",
+        ):
+            self.assertNotIn(forbidden, source)
+
+        primary_migration = source.index("alembic -c alembic.ini upgrade head")
+        synthetic_operator = source.index("rollback-smoke@example.invalid")
+        role_migration = source.index("migrate-competition-roles.py")
+        self.assertLess(primary_migration, synthetic_operator)
+        self.assertLess(synthetic_operator, role_migration)
+
+        controlled_shutdown = source.index('kill -TERM "$server_pid"')
+        allow_expected_signal = source.index("set +e", controlled_shutdown)
+        wait_for_server = source.index('wait "$server_pid"', allow_expected_signal)
+        capture_status = source.index("server_status=$?", wait_for_server)
+        restore_errexit = source.index("set -e", capture_status)
+        self.assertLess(controlled_shutdown, allow_expected_signal)
+        self.assertLess(allow_expected_signal, wait_for_server)
+        self.assertLess(wait_for_server, capture_status)
+        self.assertLess(capture_status, restore_errexit)
+
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")
         service_submit = self.read_required("submit-service.sh")
