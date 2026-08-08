@@ -73,40 +73,41 @@
 
 ## 4. 当前可验证基线
 
-记录时间：`2026-08-06`。
+记录时间：`2026-08-08`。
 
 ### 4.1 源码与仓库
 
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`30a18e1b7000d93a2cca39849a25edb0ff957e28`。
-- PR #3 已将 `codex/107cup-access-control` 合并到 `main`；合并提交的第二父提交为功能提交 `7978f23ae8fdb76da0b8d5270872d7028d8e52e3`。
-- 107 源码检出已固定到合并提交 `30a18e1b7000d93a2cca39849a25edb0ff957e28`，工作树干净且为 detached HEAD。
-- 当前证据修正分支：`codex/107cup-runtime-evidence`，基线提交为 `30a18e1b7000d93a2cca39849a25edb0ff957e28`。
+- Gitea `main`：`1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- PR #4 已将 `codex/107cup-runtime-evidence` 合并到 `main`；合并提交的第二父提交为修正提交 `043894d9e9296538b51499e4b59a17d8be496ac7`。
+- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `1bba72d0ade2bb7024081d384584524a9c9d1c69`；107 工作树干净且为 detached HEAD。
+- 当前部署证据分支：`codex/107cup-deployment-evidence`，基线提交为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
 
 ### 4.2 构建与发布
 
-- 最新 Slurm 构建 Job：`32757`，分区 `P107-RTX5090`，资源为 4 CPU、12 GiB、45 分钟上限。
+- 最新 Slurm 构建 Job：`33839`。为避开 competition 长时间排队，本次提交仅在命令行覆盖为账号 `stu`、分区 `Students`、QOS `qos_stu_default`；构建仍在 107 Slurm 计算节点执行，资源为 4 CPU、12 GiB、45 分钟上限，仓库默认 competition 配置未修改。
 - Python：模块 `miniconda/py312` 创建的 Python 3.12 venv。
-- 发布目录：`/home/scc/pb23030683/lmatelab-107cup/releases/30a18e1b7000d93a2cca39849a25edb0ff957e28`。
+- 发布目录：`/home/scc/pb23030683/lmatelab-107cup/releases/1bba72d0ade2bb7024081d384584524a9c9d1c69`。
 - `current` 已原子指向该发布目录。
-- 发布 manifest SHA-256：`ec242d3eed4a40db515461623089998aec32d02bee573d431b8519fa16e7780b`；`manifest.txt` 中 340 个文件全部通过复核。
-- 构建日志：`logs/build-32757.out` SHA-256 为 `a12cf04f1fb169f27753eca6f3a7f2c41a1a4c43d43b6f084c4a4513b7ca0cb2`，`logs/build-32757.err` 为 `5e8ab1590534e0a17465ee00fa3e5c30a127c94936f2866cf0c63c84476b3271`。
-- 构建内后端专项测试 `29/29` 通过，前端测试 `21/21` 通过，107 专用 Vite 构建通过。
-- `squeue` 已无 Job `32757`，但 `sacct` 对 `32757`、`32769` 和旧 Job `32676` 均返回 0 条数据；在记账证据恢复前不得写成 `COMPLETED/0:0`。
+- 发布 manifest SHA-256：`fe94381217de7f07c5bfbef61902e755bc567920e3a43d2a50506a51796b1265`；`manifest.txt` 中 340 个文件全部通过作业内复核。
+- 构建日志：`logs/build-33839.out` 为 37882 字节，SHA-256 为 `9f88bc5770975afed9f263d32a359dd32f3607cb75cfc7ee4ae21fbf743d60be`；`logs/build-33839.err` 为 5812 字节，SHA-256 为 `dd5d939acaf78dddda1337b89a58cfbbda1d4ee0174eaee8da980357ba5eeb98`。
+- 构建内后端专项测试 `31/31` 通过，前端测试 `21/21` 通过；107 专用 Vite 构建完成 1826 个模块，构建日志记录耗时 4.98 秒。
+- `squeue` 已无 Job `33839`，`scontrol` 已返回 `Invalid job id specified`，`sacct` 仍返回 0 条数据；构建节点和最终 Slurm 状态不可恢复，不得写成 `COMPLETED/0:0`。成功边界仅由完整日志、作业内 manifest 复核、发布目录和原子 `current` 切换共同证明。
 - 无效旧 Python 环境保存在 `backups/python-invalid-32642`。
 
 ### 4.3 网页服务与数据
 
-- 当前 Slurm 服务 Job：`32769`，分区 `P107-RTX5090`，时限按实时 QOS 固定为 4 天，计划结束时间 `2026-08-10T01:06:44+08:00`。
-- 节点：`anode01`。
+- 当前 Slurm 服务 Job：`33852`，账号 `competition`、分区 `P107-A100`、QOS `qos_p107-a100`，时限为 4 天，计划结束时间 `2026-08-12T11:46:52+08:00`。
+- 节点：`anode16`。
 - 服务端口：`18731`。
 - `/api/health/live` 和 `/api/health/ready` 已实际返回成功。
 - 两套 Alembic migration 已运行，两个 SQLite 数据库完整性检查均为 `ok`。
 - 当前业务数据为空；唯一账号 `pb23030683` 已由 `root` 迁移为 `operator`，迁移前后密码哈希一致。
-- 迁移备份：`backups/competition-roles/eln.db.before-competition-roles.20260805T170654166520Z.sqlite`，SHA-256 为 `8b2318b9d6c6fbc8c042a6a15a78c7f539db3635e2a1689a05cc3ed5dd0c57ce`；首次创建权限为 `0644`，发现后已将目录收紧为 `0700`、文件收紧为 `0600`，源码修正待本分支合并部署。
-- 运行中服务日志的不可变快照位于 `evidence/runtime/20260806T020528+0800-service-32769/`：`service-32769.out` 为 4566 字节，SHA-256 为 `d5d5e17cd7a623ea46d45f1c962f82059503f5a906cd7eb94705c9748108bb68`；`service-32769.err` 为 455 字节，SHA-256 为 `e416c6189cd4dc124f9d8d210237c270865ebe81935718046999a7ec9ab86c65`。活动日志仍保留并继续增长。
+- 迁移备份：`backups/competition-roles/eln.db.before-competition-roles.20260805T170654166520Z.sqlite`，SHA-256 为 `8b2318b9d6c6fbc8c042a6a15a78c7f539db3635e2a1689a05cc3ed5dd0c57ce`；首次创建权限为 `0644`，发现后已将目录收紧为 `0700`、文件收紧为 `0600`。PR #4 的源码修正现已部署，后续新备份使用 `O_EXCL|0600` 创建且同名不覆盖。
+- 新服务上线快照位于 `evidence/runtime/20260808T115141+0800-service-33852-post-deploy/`：`service-33852.out` 为 539 字节，SHA-256 为 `4a46550387c8430c1e4630be3744427e590c57588f58b017fd2cafb5a13e494c`；`service-33852.err` 为 455 字节，SHA-256 为 `b321cbd0ec52eb1431f0b63a842e5ca6b6a5bf70cc801281b13ba31e30c867b1`。快照目录权限为 `0700`，文件和哈希清单权限为 `0600`；活动日志继续增长。
+- 被替换的 Job `32769` 于 `2026-08-08T11:49:47+08:00` 经归属核对后由 `scancel` 受控停止；Uvicorn 日志记录完整 shutdown，随后 `anode01:18731` 实测不可达。最终快照位于 `evidence/runtime/20260808T114947+0800-service-32769-controlled-cancel/`：stdout SHA-256 为 `e7cf0e647a9a97132c74aa8a8bff7fb2e1ddf51bc64ca4762de7d2337cbadbf3`，stderr 为 `2efe3681da0a134a0f5e6637ebe89a7bae78f8c823469fec437d6e8a2fac857a`，终止元数据为 `e8059a61b62d6b40284305653f9e339f08abb0b5833c207d165864c989a4cd88`；`sacct` 仍无记录，因此该证据不能写成正常零退出。
 - 旧 Job `32676` 于 `2026-08-06T01:24:19+08:00` 因 Students 时限被 Slurm 取消，Uvicorn 正常关闭，随后 `anode16:18731` 实测不可达；因 `sacct` 空表，最终状态只能以保留的 `service-32676.err` 原始标记为证据。
 - VASP 自定义数据库目录和上传目录均为 0 个文件。
 
@@ -114,11 +115,12 @@
 
 - 4090 用户态 Nginx：`/home/Pwjb/.config/lmatelab-107cup-proxy/conf/nginx.conf`。
 - Nginx 监听：`0.0.0.0:18733`。
-- 4090 到 107 的内部 SSH 转发：`127.0.0.1:18734 -> anode01:18731`。
+- 4090 到 107 的内部 SSH 转发：`127.0.0.1:18734 -> anode16:18731`。
+- 4090 上的 107 SSH 复用主连接使用 `/home/Pwjb/.ssh/cm-107cup`，socket 权限为 `0600`，配置 96 小时 `ControlPersist` 和 30 秒保活；它减少重复二次验证，但不是永久自动恢复机制。
 - 公网入口：`http://222.195.94.37:18733`。
 - 已验证白名单 IP 返回 `200`，未授权 IP 返回 `403`。
 - 运行中的 Nginx 已替换为只读公开入口：登录端点只允许 POST，其余页面和 API 只允许 GET；注册 POST、非登录 POST 和登录端点 PUT 实测均为 `403`。
-- Windows 本地入口 `http://127.0.0.1:18733` 与校园网直连入口均返回 Job `32769`、节点 `anode01` 和提交 `30a18e1`；运行配置 SHA-256 为 `0c011ea9442733daf5d3277d4632a662264083ff0432b9abdfaad5b5828c99c8`，权限为 `0600`；Nginx 自动创建的 `client-body` 和 `proxy-temp` 目录权限均为 `0700`。
+- 4090 代理、Windows 本地入口 `http://127.0.0.1:18733` 与校园网直连入口均返回 Job `33852`、节点 `anode16` 和提交 `1bba72d`；注册 POST 仍为 `403`。运行配置 SHA-256 为 `0c011ea9442733daf5d3277d4632a662264083ff0432b9abdfaad5b5828c99c8`，权限为 `0600`；Nginx 自动创建的 `client-body` 和 `proxy-temp` 目录权限均为 `0700`。
 - 当前入口为 HTTP，尚未完成 TLS 和自动恢复。
 
 ## 5. 阶段状态总表
@@ -127,9 +129,9 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #3 已合并，107 已只读拉取固定 main 提交 | 验证 main 保护、三人身份和只读 Deploy Key |
-| 2. 无 Docker 构建与发布 | PARTIAL | Job 32757 完成真实构建、测试、manifest 和原子切换；sacct 仍为空 | 演练失败构建不替换 current、上一版回滚并恢复记账证据 |
-| 3. 最小 107 网页服务 | PARTIAL | Job 32769 在 anode01 运行；旧服务超时后端口消失已实测 | 增加受控恢复并完成正常结束而非 TIMEOUT 的复跑 |
+| 1. 竞赛仓库初始化 | PARTIAL | PR #4 已合并，本地和 107 已固定到 main 合并提交 `1bba72d` | 验证 main 保护、三人身份和只读 Deploy Key |
+| 2. 无 Docker 构建与发布 | PARTIAL | Job 33839 完成真实构建、测试、340 文件 manifest 和原子切换；sacct 仍为空 | 演练失败构建不替换 current、上一版回滚并恢复记账证据 |
+| 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；旧 Job 32769 受控取消后完整 shutdown 且端口消失 | 增加自动恢复，并补正常零退出而非 TIMEOUT/CANCELLED 的复跑 |
 | 4. 访问与角色控制 | PARTIAL | Operator 迁移、账号变更关闭、专用前端和 4090 只读代理均已部署 | 预置 Viewer，并完成 Operator/Viewer 浏览器验收 |
 | 5. 工作流模型与输入校验 | PENDING | 尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
@@ -156,6 +158,7 @@
 - [ ] 在 107 验证 Deploy Key 可以 `fetch`，但尝试 `push --dry-run` 被拒绝。
 - [x] 创建并合并 `codex/107cup-python-runtime` PR #2；合并提交为 `4a311a2cccdefe8b6f30f5414f5a2541c891fab9`。
 - [x] 创建并合并 `codex/107cup-access-control` PR #3；合并提交为 `30a18e1b7000d93a2cca39849a25edb0ff957e28`。
+- [x] 创建并合并 `codex/107cup-runtime-evidence` PR #4；合并提交为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
 
 验收命令：
 
@@ -263,7 +266,7 @@ def require_viewer_or_operator(current_user = Depends(get_current_user)): ...
 
 - [x] 4090 公开入口配置 IP 白名单并验证 `200/403`。
 - [x] 本地实现 `operator/viewer` 授权合同；旧 `root/user` 在 107 竞赛入口登录时失败关闭。
-- [x] 迁移脚本已在 107 执行，`root -> operator`、数据库完整性、备份和密码哈希不变均已验证；备份权限缺口已运行时收紧，源码修正待本分支合并部署。
+- [x] 迁移脚本已在 107 执行，`root -> operator`、数据库完整性、备份和密码哈希不变均已验证；备份权限缺口已运行时收紧，PR #4 的源码修正已部署。
 - [ ] 为三名成员配置独立应用身份；共享 Unix 账号不共享应用密码。
 - [x] 后端和专用前端已关闭注册与密码重置，运行配置显式设置两个开关为 `0`。
 - [ ] Viewer 尚未在 107 受控预置。
@@ -481,15 +484,16 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 
 - [x] 创建并合并运行时修复 PR #2。
 - [x] 创建并合并访问控制 PR #3，并在 107 构建部署提交 `30a18e1`。
+- [x] 创建并合并运行时加固 PR #4，在本地和 107 构建部署提交 `1bba72d`。
 - [ ] 演练失败构建不替换 `current`，再演练上一成功发布回滚。
-- [ ] 旧服务 TIMEOUT 后端口消失已验证；仍需补正常结束而非 TIMEOUT 的受控复跑。
-- [x] 提交新服务 Job `32769` 并将 4090 转发安全切换到 `anode01`。
+- [ ] Job `32769` 已受控取消、完整 shutdown 且端口消失；仍需补正常零退出而非 TIMEOUT/CANCELLED 的复跑。
+- [x] 提交新服务 Job `33852` 并将 4090 转发安全切换到 `anode16`。
 - [x] 写 Operator/Viewer 后端失败测试。
 - [x] 实现最小角色依赖并通过本地测试。
 - [x] 新增并实际部署公开入口只读 Nginx 配置；本地与校园网入口均指向新 107 服务。
 - [x] 通过专用构建入口裁剪 107 杯导航、首页和无关页面分块。
 - [ ] 在本机和公开入口分别完成浏览器权限验收。
-- [ ] 将真实 107 证据和状态更新回本文件并提交 PR。
+- [ ] 真实 107 证据和状态已更新到 `codex/107cup-deployment-evidence`；待提交 PR 并合并。
 
 ## 18. 变更记录
 
@@ -516,3 +520,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 发现并运行时修复迁移备份 `0644` 和 Nginx 配置 `0664` 权限；按 TDD 在 `codex/107cup-runtime-evidence` 修正私有备份创建、Nginx 用户态临时路径和 4 天 QOS 时限。
 - 质量审查后新增备份碰撞不覆盖、更新失败回滚和 `O_EXCL|0600` 创建参数测试；两个安全 mutation 均被测试拦截。Nginx 临时目录改为代理根目录直接子目录，干净候选 `nginx -t` 已自动创建两个 `0700` 目录。
 - Viewer 身份、Operator/Viewer 浏览器验收、正常服务结束复跑、失败构建和回滚演练仍未完成；阶段 4 保持 `PARTIAL`，不进入阶段 5。
+
+### 2026-08-08
+
+- PR #4 合并后，本地主检出、Gitea `main` 和 107 detached HEAD 同步到 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- Slurm Build Job `33839` 通过 107 Linux 后端专项测试 `31/31`、前端测试 `21/21`、Vite 构建和 340 文件 manifest 复核，原子启用发布 `releases/1bba72d0ade2bb7024081d384584524a9c9d1c69`。由于 `scontrol` 已清除且 `sacct` 空表，不记录构建节点或 `COMPLETED/0:0`。
+- Service Job `33852` 在 `P107-A100/anode16` 启动，live/ready、两套 SQLite 完整性和登录节点无业务常驻进程均通过；计划结束时间为 `2026-08-12T11:46:52+08:00`。
+- 4090 SSH 复用主连接和 `127.0.0.1:18734 -> anode16:18731` 转发建立后，4090 代理、Windows 本地入口和校园网直连入口均返回新 Job、节点和提交；注册 POST 继续返回 `403`。
+- 在确认新入口健康后，精确取消被替换的 Job `32769`；Uvicorn 完整 shutdown，`anode01:18731` 随后不可达，最终日志与终止元数据已按 `0600` 保存并生成 SHA-256。该结果是受控取消，不替代尚未完成的正常零退出复跑。
+- Viewer 预置与 Operator/Viewer 浏览器验收、失败构建不切换 `current`、发布回滚、自动恢复和 Slurm 记账缺口仍未完成；阶段 1 至阶段 4 继续保持 `PARTIAL`，未进入阶段 5。
