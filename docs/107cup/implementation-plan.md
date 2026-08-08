@@ -80,10 +80,10 @@
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`a33366702f2e62ff9c0012bbc625fbec92fda790`。
-- PR #5 已将部署证据分支合并到 `main`；该提交只更新实施方案，未触发服务重建。
-- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `a33366702f2e62ff9c0012bbc625fbec92fda790`；107 工作树干净且为 detached HEAD。
-- 当前回滚证据分支：`codex/107cup-rollback-evidence`，基线提交为 `a33366702f2e62ff9c0012bbc625fbec92fda790`。当前运行发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- Gitea `main`：`0ea0354ec893f9ac9c4095fe19977b38a0e66456`。
+- PR #7 已将 `codex/107cup-viewer-acceptance` 合并到 `main`；该合并没有重建或重启当前服务。
+- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`；107 工作树干净且为 detached HEAD。
+- 当前 Operator 验收分支：`codex/107cup-operator-acceptance`，基线提交为 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`。当前运行发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
 
 ### 4.2 构建与发布
 
@@ -132,10 +132,10 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #6 已合并，本地、Gitea 和 107 源码已固定到 main 合并提交 `2c92ff2` | 验证 main 保护、三人身份和只读 Deploy Key |
+| 1. 竞赛仓库初始化 | PARTIAL | PR #7 已合并，本地、Gitea 和 107 源码已固定到 main 合并提交 `0ea0354` | 验证 main 保护、三人身份和只读 Deploy Key |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
-| 4. 访问与角色控制 | PARTIAL | Viewer 已受控预置并通过公开入口桌面/移动验收；Operator 迁移、账号变更关闭、专用前端和 4090 只读代理均已部署 | 完成 Operator 浏览器验收和三名成员独立应用身份 |
+| 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
 | 5. 工作流模型与输入校验 | PENDING | 尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
@@ -287,7 +287,8 @@ def require_viewer_or_operator(current_user = Depends(get_current_user)): ...
 - [x] 107 后端只注册认证和健康路由，无关业务 API 未挂载；专用前端未注册隐藏页面 URL。
 - [x] 独立 Chrome 已完成匿名桌面和移动登录页验收：无令牌重定向、注册/找回入口隐藏、错误凭据反馈和移动端无横向溢出均通过。
 - [x] Windows 本地入口 `http://127.0.0.1:18733` 已完成公开 Viewer 浏览器验收：登录和 `/api/auth/me` 均为 `200`，业务 POST 为 `403`，桌面/移动页面均显示“只读访客 / 只读演示权限”。
-- [ ] Operator 通过独立本机 SSH 隧道完成浏览器写权限与资源边界验收。
+- [x] Operator 通过独立本机 SSH 隧道完成登录、`/api/auth/me`、身份显示和桌面/移动浏览器验收。
+- [ ] 阶段 5/6 提供真实工作流写接口后，验证 Operator 写权限、资源归属和请求路径；当前认证壳不能替代该验收。
 
 阶段门禁：
 
@@ -316,7 +317,16 @@ Viewer 预置与验收证据（`2026-08-08`）：
 - PROVISION：Job `34041` 创建 Viewer；Job `34046` 复用原 `0600` 密码文件，仅迁移邮箱，验证迁移前后密码哈希一致、凭据仍可验证、数据库完整性为 `ok`，且当前服务 Job `33852` 未重启。
 - EVIDENCE：最终证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/access/viewer-34046`，目录为 `0700`、文件和清单为 `0600`；数据库备份为 `/home/scc/pb23030683/lmatelab-107cup/backups/competition-viewer/eln.db.before-viewer.20260808T114852712450Z.sqlite`，权限为 `0600`。
 - BROWSER：全新 Viewer 会话的登录和 `/api/auth/me` 网络记录均为 `200`，控制台 0 error/0 warning；桌面与 `390x844` 截图本地保存为 `LMateLab-107Cup-evidence/viewer-34041/viewer-desktop.png` 和 `viewer-mobile.png`。
-- BOUNDARY：Viewer 是团队演示和自动验收共用的只读应用账号，不替代三名成员的个人 Operator 身份；密码只保存在 107 的 `config/credentials/demo-viewer.password`，不进入 Git 或方案文件。Operator 浏览器验收仍未完成，阶段 4 保持 `PARTIAL`。
+- BOUNDARY：Viewer 是团队演示和自动验收共用的只读应用账号，不替代三名成员的个人 Operator 身份；密码只保存在 107 的 `config/credentials/demo-viewer.password`，不进入 Git 或方案文件。Operator 认证与身份界面验收已完成，但业务写权限和资源归属仍待阶段 5/6，阶段 4 保持 `PARTIAL`。
+
+Operator 浏览器验收证据（`2026-08-08`）：
+
+- ROUTE：独立入口为 `Windows:18734 -> 4090:18734 -> anode16:18731`；验收期间 107 服务继续由 Slurm Job `33852` 运行，未重建、重启或修改生产数据库。
+- AUTH：显式退出残留 Viewer 会话后，Operator 登录 `POST /api/auth/login` 和 `GET /api/auth/me` 均为 `200`；页面显示 `107杯管理员 / 操作员 / 受控操作权限`，没有读取、恢复或重置 Operator 密码。
+- TEST：Slurm Job `34062` 在 `Students/anode20` 对合并提交 `0ea0354` 运行认证与 Viewer 预置专项测试 `12/12`，以 `COMPLETED/0:0` 结束，耗时 12 秒；证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/access/operator-34062`，目录为 `0700`、文件和 SHA-256 清单为 `0600` 且复核全部通过。
+- BROWSER：登录后的控制台为 0 error/0 warning；`1440x900` 与 `390x844` 页面均通过人工检查，无文字重叠。截图与不含凭据的验收记录保存在本地 `LMateLab-107Cup-evidence/operator-0ea0354/`；桌面截图 SHA-256 为 `680f42d07b0483a2e5bdce03f36f4d245bcbeead791d8acb17fcb783d77d3d76`，移动截图为 `5c47c4dbc1418ad57cf9425e800ea38e26678f0ce09dc9b16fc33114062bdc13`。
+- RUNTIME：验收后只读复核确认 107 源码为 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`、工作树干净、Job `33852` 为 `RUNNING` 且节点为 `anode16`，`/api/health/ready` 返回 `200`。
+- BOUNDARY：当前 `main_107cup` 只挂载认证、健康检查和 SPA 路由，不存在可用于真实工作流的业务写接口。因此本次只通过 Operator 认证与身份 UI 验收；写权限、请求路径和“只能操作 LMateLab 自有资源”的验收等待阶段 5/6，阶段 4 保持 `PARTIAL`。
 
 ## 10. 阶段 5：工作流数据模型与输入校验
 
@@ -513,7 +523,8 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 新增并实际部署公开入口只读 Nginx 配置；本地与校园网入口均指向新 107 服务。
 - [x] 通过专用构建入口裁剪 107 杯导航、首页和无关页面分块。
 - [x] 在 Windows 本地公开入口完成 Viewer 桌面和移动浏览器权限验收。
-- [ ] 通过 Operator 独立 SSH 隧道完成写权限与资源边界浏览器验收。
+- [x] 通过 Operator 独立 SSH 隧道完成认证、身份显示和桌面/移动浏览器验收。
+- [ ] 阶段 5/6 提供真实业务写接口后，完成 Operator 写权限、请求路径和资源归属边界验收。
 - [x] 真实 107 失败构建与回滚证据已通过 `codex/107cup-rollback-evidence` PR #6 合并。
 
 ## 18. 变更记录
@@ -556,4 +567,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 在 `codex/107cup-viewer-acceptance` 分支提交 Viewer 受控预置能力；Job `34040` 和修正后的 Job `34045` 分别通过 Linux 专项测试 `23/23`、`24/24`。
 - Job `34041` 创建专用 Viewer 后，真实浏览器暴露 `.invalid` 邮箱被 `EmailStr` 拒绝的 `422`；按 TDD 增加唯一旧邮箱迁移，Job `34046` 保持密码哈希不变并迁移到 `demo-viewer@matflow.top`。
 - Viewer API 与浏览器验收完成：登录和 `/api/auth/me` 为 `200`，业务 POST 为 `403`，桌面/移动均显示只读身份，控制台 0 error/0 warning。
-- Operator 浏览器验收、三名成员独立应用身份和自动恢复仍未完成；阶段 1、3、4 继续保持 `PARTIAL`，未进入阶段 5。
+- PR #7 合并后，本地、Gitea `main` 和 107 detached HEAD 同步到 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`；运行发布继续保持 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，未重建或重启。
+- Operator 通过独立 SSH 隧道完成认证和身份界面验收：登录与 `/api/auth/me` 为 `200`，桌面/移动均显示“操作员 / 受控操作权限”，登录后的控制台 0 error/0 warning。
+- Slurm Job `34062` 在 `Students/anode20` 对当前合并提交完成认证与 Viewer 预置专项测试 `12/12`，以 `COMPLETED/0:0` 结束；日志、调度元数据和 SHA-256 清单已按 `0700/0600` 保存。
+- 当前竞赛后端没有真实业务写接口，因此未把身份 UI 误记为写权限或资源归属验收；该门禁等待阶段 5/6。三名成员独立应用身份和自动恢复仍未完成，阶段 1、3、4 继续保持 `PARTIAL`，未进入阶段 5。
