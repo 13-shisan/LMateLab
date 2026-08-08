@@ -160,6 +160,11 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "/api/health/ready",
             "kill -TERM",
             "wait",
+            "set +e",
+            "server_status=$?",
+            "server-exit-status.txt",
+            "Application shutdown complete",
+            "Finished server process",
             "integrity_check",
         ):
             self.assertIn(required, source)
@@ -179,6 +184,16 @@ class CompetitionDeployContractTests(unittest.TestCase):
         role_migration = source.index("migrate-competition-roles.py")
         self.assertLess(primary_migration, synthetic_operator)
         self.assertLess(synthetic_operator, role_migration)
+
+        controlled_shutdown = source.index('kill -TERM "$server_pid"')
+        allow_expected_signal = source.index("set +e", controlled_shutdown)
+        wait_for_server = source.index('wait "$server_pid"', allow_expected_signal)
+        capture_status = source.index("server_status=$?", wait_for_server)
+        restore_errexit = source.index("set -e", capture_status)
+        self.assertLess(controlled_shutdown, allow_expected_signal)
+        self.assertLess(allow_expected_signal, wait_for_server)
+        self.assertLess(wait_for_server, capture_status)
+        self.assertLess(capture_status, restore_errexit)
 
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")

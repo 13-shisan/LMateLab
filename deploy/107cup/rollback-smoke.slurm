@@ -183,8 +183,26 @@ for database_path in sys.argv[1:]:
 PY
 
 kill -TERM "$server_pid"
+set +e
 wait "$server_pid"
+server_status=$?
+set -e
+printf '%s\n' "$server_status" > "$evidence_root/server-exit-status.txt"
+if kill -0 "$server_pid" 2>/dev/null; then
+  printf '%s\n' "rollback smoke server remained alive after TERM" >&2
+  exit 1
+fi
 server_pid=
+case "$server_status" in
+  0|143) ;;
+  *)
+    printf 'unexpected rollback smoke server exit status: %s\n' \
+      "$server_status" >&2
+    exit 1
+    ;;
+esac
+grep -F "Application shutdown complete" "$evidence_root/uvicorn.err"
+grep -F "Finished server process" "$evidence_root/uvicorn.err"
 
 production_current_after=$(readlink -f "$root"/current)
 printf '%s\n' "$production_current_after" > "$evidence_root/production-current-after.txt"
