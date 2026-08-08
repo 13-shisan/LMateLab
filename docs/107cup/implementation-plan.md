@@ -132,10 +132,10 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #5 已合并，本地、Gitea 和 107 源码已固定到 main 合并提交 `a333667` | 验证 main 保护、三人身份和只读 Deploy Key |
+| 1. 竞赛仓库初始化 | PARTIAL | PR #6 已合并，本地、Gitea 和 107 源码已固定到 main 合并提交 `2c92ff2` | 验证 main 保护、三人身份和只读 Deploy Key |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
-| 4. 访问与角色控制 | PARTIAL | Operator 迁移、账号变更关闭、专用前端和 4090 只读代理均已部署 | 预置 Viewer，并完成 Operator/Viewer 浏览器验收 |
+| 4. 访问与角色控制 | PARTIAL | Viewer 已受控预置并通过公开入口桌面/移动验收；Operator 迁移、账号变更关闭、专用前端和 4090 只读代理均已部署 | 完成 Operator 浏览器验收和三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | PENDING | 尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
@@ -162,6 +162,7 @@
 - [x] 创建并合并 `codex/107cup-python-runtime` PR #2；合并提交为 `4a311a2cccdefe8b6f30f5414f5a2541c891fab9`。
 - [x] 创建并合并 `codex/107cup-access-control` PR #3；合并提交为 `30a18e1b7000d93a2cca39849a25edb0ff957e28`。
 - [x] 创建并合并 `codex/107cup-runtime-evidence` PR #4；合并提交为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- [x] 创建并合并 `codex/107cup-rollback-evidence` PR #6；合并提交为 `2c92ff2c1770f09ca697adaf11eaf495a14875b1`。
 
 验收命令：
 
@@ -245,6 +246,9 @@ sacct -j "$service_job_id" --format=JobID,State,ExitCode,Elapsed,NodeList
 - Create: `frontend/src/pages/CompetitionDashboard.jsx`
 - Create: `deploy/107cup/relay/nginx.conf.example`
 - Create: `deploy/107cup/migrate-competition-roles.py`
+- Create: `deploy/107cup/provision-competition-viewer.py`
+- Create: `deploy/107cup/provision-viewer.slurm`
+- Create: `backend/tests/test_107cup_viewer_provision.py`
 - Modify: `backend/auth.py`
 - Modify: `backend/main_107cup.py`
 - Modify: `backend/competition_runtime.py`
@@ -275,14 +279,15 @@ def require_viewer_or_operator(current_user = Depends(get_current_user)): ...
 - [x] 迁移脚本已在 107 执行，`root -> operator`、数据库完整性、备份和密码哈希不变均已验证；备份权限缺口已运行时收紧，PR #4 的源码修正已部署。
 - [ ] 为三名成员配置独立应用身份；共享 Unix 账号不共享应用密码。
 - [x] 后端和专用前端已关闭注册与密码重置，运行配置显式设置两个开关为 `0`。
-- [ ] Viewer 尚未在 107 受控预置。
+- [x] 专用 `demo-viewer` 已通过短时 Slurm Job `34041` 受控创建，Job `34046` 在密码哈希不变的条件下将不可登录的保留域名邮箱迁移为 `demo-viewer@matflow.top`；两次变更均先生成 `0600` SQLite 备份。
 - [x] 4090 Nginx 已替换为只读配置，只允许 `/api/auth/login` 的 POST 和其他 GET；活动配置及备份权限均为 `0600`。
 - [x] 后端角色依赖对 Viewer 的业务 `POST/PUT/PATCH/DELETE` 返回 `403`，Operator 通过。
 - [ ] Operator 写接口同时验证角色、资源归属和请求路径。
 - [x] 107 杯专用构建仅包含登录、竞赛 Dashboard 和认证壳；导航移除所有非主线入口。
 - [x] 107 后端只注册认证和健康路由，无关业务 API 未挂载；专用前端未注册隐藏页面 URL。
 - [x] 独立 Chrome 已完成匿名桌面和移动登录页验收：无令牌重定向、注册/找回入口隐藏、错误凭据反馈和移动端无横向溢出均通过。
-- [ ] 本机 SSH 隧道和公开 Viewer 入口分别完成浏览器验收。
+- [x] Windows 本地入口 `http://127.0.0.1:18733` 已完成公开 Viewer 浏览器验收：登录和 `/api/auth/me` 均为 `200`，业务 POST 为 `403`，桌面/移动页面均显示“只读访客 / 只读演示权限”。
+- [ ] Operator 通过独立本机 SSH 隧道完成浏览器写权限与资源边界验收。
 
 阶段门禁：
 
@@ -303,6 +308,15 @@ Operator 登录成功 + 仅允许竞赛资源写操作
 - ROUTES：本地导入 `main_107cup` 后仅注册 `login`、`me`、只读密码策略、健康和 SPA 路由；注册、密码重置以及项目、实验记录、文件、VASP 数据库、报告、Issue 和 Agent API 均未挂载。
 - 边界：Windows 全仓库后端基线仍有 6 个既存环境错误（Docker、`fcntl`、生产密钥、`pytest` 和 GBK 子进程解码相关），不能记录为全仓库后端通过，也不能替代 107 Slurm 构建验收。
 - LINT：本次 107 前端相关文件的定向 ESLint 检查通过；全仓库 ESLint 仍有 36 个旧模块错误，不在本批次扩大修复。
+
+Viewer 预置与验收证据（`2026-08-08`）：
+
+- RED/GREEN：Linux 符号链接数据库拒绝测试先失败、修复后通过；真实浏览器首次登录因 `viewer@lmatelab.invalid` 被 `EmailStr` 拒绝而返回 `422`，随后为唯一允许的旧邮箱迁移补失败测试并修复。
+- TEST：Slurm Job `34040` 对初版提交运行 Linux 专项测试 `23/23`；修正后 Job `34045` 对提交 `eab70688259a9a85ae2007143eafed2b72aadacd` 运行 `24/24`，两者均为 `COMPLETED/0:0`。
+- PROVISION：Job `34041` 创建 Viewer；Job `34046` 复用原 `0600` 密码文件，仅迁移邮箱，验证迁移前后密码哈希一致、凭据仍可验证、数据库完整性为 `ok`，且当前服务 Job `33852` 未重启。
+- EVIDENCE：最终证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/access/viewer-34046`，目录为 `0700`、文件和清单为 `0600`；数据库备份为 `/home/scc/pb23030683/lmatelab-107cup/backups/competition-viewer/eln.db.before-viewer.20260808T114852712450Z.sqlite`，权限为 `0600`。
+- BROWSER：全新 Viewer 会话的登录和 `/api/auth/me` 网络记录均为 `200`，控制台 0 error/0 warning；桌面与 `390x844` 截图本地保存为 `LMateLab-107Cup-evidence/viewer-34041/viewer-desktop.png` 和 `viewer-mobile.png`。
+- BOUNDARY：Viewer 是团队演示和自动验收共用的只读应用账号，不替代三名成员的个人 Operator 身份；密码只保存在 107 的 `config/credentials/demo-viewer.password`，不进入 Git 或方案文件。Operator 浏览器验收仍未完成，阶段 4 保持 `PARTIAL`。
 
 ## 10. 阶段 5：工作流数据模型与输入校验
 
@@ -498,8 +512,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 实现最小角色依赖并通过本地测试。
 - [x] 新增并实际部署公开入口只读 Nginx 配置；本地与校园网入口均指向新 107 服务。
 - [x] 通过专用构建入口裁剪 107 杯导航、首页和无关页面分块。
-- [ ] 在本机和公开入口分别完成浏览器权限验收。
-- [ ] 真实 107 失败构建与回滚证据已更新到 `codex/107cup-rollback-evidence`；待提交 PR 并合并。
+- [x] 在 Windows 本地公开入口完成 Viewer 桌面和移动浏览器权限验收。
+- [ ] 通过 Operator 独立 SSH 隧道完成写权限与资源边界浏览器验收。
+- [x] 真实 107 失败构建与回滚证据已通过 `codex/107cup-rollback-evidence` PR #6 合并。
 
 ## 18. 变更记录
 
@@ -536,4 +551,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 在确认新入口健康后，精确取消被替换的 Job `32769`；Uvicorn 完整 shutdown，`anode01:18731` 随后不可达，最终日志与终止元数据已按 `0600` 保存并生成 SHA-256。该结果本身是受控取消，正常零退出后来由 Job `34005` 补齐。
 - 故意失败构建 Job `33979` 以 `FAILED/1:0` 结束且没有替换 `current`；失败目录、Slurm 元数据和 SHA-256 证据均保留。
 - 新增 `rollback-smoke.slurm`，通过 Job `33998` 和 `34001` 的保留失败证据修正空库 operator 初始化与受控 TERM 状态传播；最终 Job `34005` 从旧发布 `30a18e1` 完成独立迁移、live/ready、SQLite 完整性、优雅关闭和 `COMPLETED/0:0`，生产 Job `33852`、数据库、端口和 `current` 全程不变。
-- 阶段 2 更新为 `DONE`。Viewer 预置与 Operator/Viewer 浏览器验收、自动恢复和 Slurm `sacct` 空表限制仍未解决；阶段 1、3、4 保持 `PARTIAL`，未进入阶段 5。
+- 阶段 2 更新为 `DONE`。在该检查点，Viewer 预置与 Operator/Viewer 浏览器验收、自动恢复和 Slurm `sacct` 空表限制仍未解决；阶段 1、3、4 保持 `PARTIAL`，未进入阶段 5。
+- PR #6 合并后，本地、Gitea `main` 和 107 detached HEAD 同步到 `2c92ff2c1770f09ca697adaf11eaf495a14875b1`；运行发布继续保持 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，未重建或重启。
+- 在 `codex/107cup-viewer-acceptance` 分支提交 Viewer 受控预置能力；Job `34040` 和修正后的 Job `34045` 分别通过 Linux 专项测试 `23/23`、`24/24`。
+- Job `34041` 创建专用 Viewer 后，真实浏览器暴露 `.invalid` 邮箱被 `EmailStr` 拒绝的 `422`；按 TDD 增加唯一旧邮箱迁移，Job `34046` 保持密码哈希不变并迁移到 `demo-viewer@matflow.top`。
+- Viewer API 与浏览器验收完成：登录和 `/api/auth/me` 为 `200`，业务 POST 为 `403`，桌面/移动均显示只读身份，控制台 0 error/0 warning。
+- Operator 浏览器验收、三名成员独立应用身份和自动恢复仍未完成；阶段 1、3、4 继续保持 `PARTIAL`，未进入阶段 5。
