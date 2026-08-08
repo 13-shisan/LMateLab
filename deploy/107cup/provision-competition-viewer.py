@@ -17,6 +17,16 @@ class ProvisionResult(NamedTuple):
     created: bool
     user_id: int
     backup_path: Path | None
+    email_updated: bool = False
+
+
+class ExistingViewer(NamedTuple):
+    user_id: int
+    email_needs_update: bool
+
+
+LEGACY_VIEWER_EMAIL = "viewer@lmatelab.invalid"
+VIEWER_EMAIL = "demo-viewer@matflow.top"
 
 
 def read_private_password(password_file: Path | str) -> str:
@@ -67,19 +77,22 @@ def _existing_viewer(
     alias: str,
     password: str,
     verify_password: Callable[[str, str], bool],
-) -> int | None:
+) -> ExistingViewer | None:
     if not rows:
         return None
     if len(rows) != 1:
         raise RuntimeError("viewer identity conflicts with multiple existing accounts")
     user_id, current_email, current_name, current_alias, role, password_hash = rows[0]
-    expected = (email, name, alias, "viewer")
-    current = (str(current_email).lower(), current_name, current_alias, role)
-    if current != expected:
+    normalized_current_email = str(current_email).lower()
+    if (current_name, current_alias, role) != (name, alias, "viewer"):
         raise RuntimeError("viewer identity conflicts with an existing account")
     if not verify_password(password, password_hash):
         raise RuntimeError("refusing to reset an existing viewer password")
-    return int(user_id)
+    if normalized_current_email == email:
+        return ExistingViewer(int(user_id), False)
+    if normalized_current_email == LEGACY_VIEWER_EMAIL and email == VIEWER_EMAIL:
+        return ExistingViewer(int(user_id), True)
+    raise RuntimeError("viewer identity conflicts with an existing account")
 
 
 def _backup_database(
@@ -129,7 +142,7 @@ def provision_viewer(
             normalized_name,
             normalized_alias,
         )
-        existing_id = _existing_viewer(
+        existing = _existing_viewer(
             rows,
             normalized_email,
             normalized_name,
@@ -137,50 +150,77 @@ def provision_viewer(
             password,
             verify_password,
         )
-        if existing_id is not None:
-            return ProvisionResult(False, existing_id, None)
+        if existing is not None and not existing.email_needs_update:
+            return ProvisionResult(False, existing.user_id, None)
 
-        password_hash = hash_password(password)
         backup_path = _backup_database(connection, database, backups)
         try:
             connection.execute("BEGIN IMMEDIATE")
-            if _matching_users(
+            current_rows = _matching_users(
                 connection,
                 normalized_email,
                 normalized_name,
                 normalized_alias,
-            ):
-                raise RuntimeError("viewer identity changed during provisioning")
-            cursor = connection.execute(
-                "INSERT INTO users (email, password_hash, name, alias, role) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (
+            )
+            if existing is not None:
+                current = _existing_viewer(
+                    current_rows,
                     normalized_email,
-                    password_hash,
                     normalized_name,
                     normalized_alias,
-                    "viewer",
-                ),
-            )
-            user_id = int(cursor.lastrowid)
+                    password,
+                    verify_password,
+                )
+                if current != existing:
+                    raise RuntimeError("viewer identity changed during provisioning")
+                updated = connection.execute(
+                    "UPDATE users SET email = ? WHERE id = ? AND lower(email) = ?",
+                    (
+                        normalized_email,
+                        existing.user_id,
+                        LEGACY_VIEWER_EMAIL,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise RuntimeError("viewer email migration failed")
+                user_id = existing.user_id
+                created_account = False
+                email_updated = True
+            else:
+                if current_rows:
+                    raise RuntimeError("viewer identity changed during provisioning")
+                password_hash = hash_password(password)
+                cursor = connection.execute(
+                    "INSERT INTO users (email, password_hash, name, alias, role) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        normalized_email,
+                        password_hash,
+                        normalized_name,
+                        normalized_alias,
+                        "viewer",
+                    ),
+                )
+                user_id = int(cursor.lastrowid)
+                created_account = True
+                email_updated = False
             created = connection.execute(
                 "SELECT email, name, alias, role, password_hash FROM users WHERE id = ?",
                 (user_id,),
             ).fetchone()
-            if created != (
-                normalized_email,
-                normalized_name,
-                normalized_alias,
-                "viewer",
-                password_hash,
-            ):
+            if created is None or created[:4] != (
+                    normalized_email,
+                    normalized_name,
+                    normalized_alias,
+                    "viewer",
+            ) or not verify_password(password, created[4]):
                 raise RuntimeError("viewer provisioning postcondition failed")
             connection.commit()
         except Exception:
             connection.rollback()
             raise
 
-    return ProvisionResult(True, user_id, backup_path)
+    return ProvisionResult(created_account, user_id, backup_path, email_updated)
 
 
 def main() -> int:
@@ -214,6 +254,8 @@ def main() -> int:
                 "user_id": result.user_id,
                 "alias": args.alias,
                 "role": "viewer",
+                "email": args.email.strip().lower(),
+                "email_updated": result.email_updated,
                 "backup_path": str(result.backup_path) if result.backup_path else None,
             },
             ensure_ascii=True,

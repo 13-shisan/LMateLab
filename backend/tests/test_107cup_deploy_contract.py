@@ -205,6 +205,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "SLURM_JOB_ID",
             "umask 077",
             "demo-viewer.password",
+            "demo-viewer@matflow.top",
             "secrets.token_urlsafe",
             "os.O_EXCL",
             "provision-competition-viewer.py",
@@ -214,6 +215,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertIn(required, source)
         for forbidden in ("uvicorn", "npm ", "pip install", "celery", "redis-server"):
             self.assertNotIn(forbidden, source)
+        self.assertNotIn("@lmatelab.invalid", source)
 
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")

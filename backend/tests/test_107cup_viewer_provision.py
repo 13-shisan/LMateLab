@@ -12,6 +12,8 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "deploy" / "107cup" / "provision-competition-viewer.py"
+VIEWER_EMAIL = "demo-viewer@matflow.top"
+LEGACY_VIEWER_EMAIL = "viewer@lmatelab.invalid"
 
 
 class CompetitionViewerProvisionTests(unittest.TestCase):
@@ -76,7 +78,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
                 first = provisioner.provision_viewer(
                     database,
                     backups,
-                    email="viewer@lmatelab.invalid",
+                    email=VIEWER_EMAIL,
                     name="107 Cup Demo Viewer",
                     alias="demo-viewer",
                     password="viewer-password-long-enough",
@@ -100,7 +102,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(
                 (
-                    "viewer@lmatelab.invalid",
+                    VIEWER_EMAIL,
                     "107 Cup Demo Viewer",
                     "demo-viewer",
                     "viewer",
@@ -112,7 +114,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
             second = provisioner.provision_viewer(
                 database,
                 backups,
-                email="VIEWER@LMATELAB.INVALID",
+                email=VIEWER_EMAIL.upper(),
                 name="107 Cup Demo Viewer",
                 alias="demo-viewer",
                 password="viewer-password-long-enough",
@@ -137,7 +139,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
             first = provisioner.provision_viewer(
                 database,
                 backups,
-                email="viewer@lmatelab.invalid",
+                email=VIEWER_EMAIL,
                 name="107 Cup Demo Viewer",
                 alias="demo-viewer",
                 password="viewer-password-long-enough",
@@ -150,7 +152,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
                 provisioner.provision_viewer(
                     database,
                     backups,
-                    email="viewer@lmatelab.invalid",
+                    email=VIEWER_EMAIL,
                     name="107 Cup Demo Viewer",
                     alias="demo-viewer",
                     password="different-viewer-password",
@@ -177,7 +179,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
                 ).fetchone()
             self.assertEqual(
                 (
-                    "viewer@lmatelab.invalid",
+                    VIEWER_EMAIL,
                     "107 Cup Demo Viewer",
                     "demo-viewer",
                     "viewer",
@@ -216,6 +218,76 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
                 with self.assertRaises(PermissionError):
                     provisioner.read_private_password(password_file)
 
+    def test_legacy_invalid_email_is_migrated_without_password_reset(self):
+        provisioner = self.load_provisioner()
+        if provisioner is None:
+            return
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            database = root / "eln.db"
+            backups = root / "backups"
+            self.create_database(database)
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute(
+                    "INSERT INTO users (email, password_hash, name, alias, role) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        LEGACY_VIEWER_EMAIL,
+                        "hash:viewer-password-long-enough",
+                        "107 Cup Demo Viewer",
+                        "demo-viewer",
+                        "viewer",
+                    ),
+                )
+                connection.commit()
+
+            migrated = provisioner.provision_viewer(
+                database,
+                backups,
+                email=VIEWER_EMAIL,
+                name="107 Cup Demo Viewer",
+                alias="demo-viewer",
+                password="viewer-password-long-enough",
+                hash_password=self.hash_password,
+                verify_password=self.verify_password,
+            )
+            self.assertFalse(migrated.created)
+            self.assertTrue(migrated.email_updated)
+            self.assertTrue(migrated.backup_path.is_file())
+
+            with closing(sqlite3.connect(database)) as connection:
+                current = connection.execute(
+                    "SELECT email, name, alias, role, password_hash FROM users "
+                    "WHERE alias = ?",
+                    ("demo-viewer",),
+                ).fetchone()
+            self.assertEqual(
+                (
+                    VIEWER_EMAIL,
+                    "107 Cup Demo Viewer",
+                    "demo-viewer",
+                    "viewer",
+                    "hash:viewer-password-long-enough",
+                ),
+                current,
+            )
+
+            repeated = provisioner.provision_viewer(
+                database,
+                backups,
+                email=VIEWER_EMAIL,
+                name="107 Cup Demo Viewer",
+                alias="demo-viewer",
+                password="viewer-password-long-enough",
+                hash_password=self.hash_password,
+                verify_password=self.verify_password,
+            )
+            self.assertFalse(repeated.created)
+            self.assertFalse(repeated.email_updated)
+            self.assertIsNone(repeated.backup_path)
+            self.assertEqual(1, len(list(backups.glob("eln.db.before-viewer.*.sqlite"))))
+
     @unittest.skipUnless(hasattr(os, "symlink"), "symbolic links are unavailable")
     def test_database_path_must_not_be_a_symbolic_link(self):
         provisioner = self.load_provisioner()
@@ -236,7 +308,7 @@ class CompetitionViewerProvisionTests(unittest.TestCase):
                 provisioner.provision_viewer(
                     database_link,
                     root / "backups",
-                    email="viewer@lmatelab.invalid",
+                    email=VIEWER_EMAIL,
                     name="107 Cup Demo Viewer",
                     alias="demo-viewer",
                     password="viewer-password-long-enough",

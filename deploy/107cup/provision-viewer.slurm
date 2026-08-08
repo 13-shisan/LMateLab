@@ -62,7 +62,7 @@ test "$(stat -c %U "$password_file")" = "$USER"
   --database "$database" \
   --backup-dir "$backup_dir" \
   --password-file "$password_file" \
-  --email viewer@lmatelab.invalid \
+  --email demo-viewer@matflow.top \
   --name "107 Cup Demo Viewer" \
   --alias demo-viewer \
   > "$evidence_root/provision-result.json"
@@ -74,14 +74,14 @@ import sys
 
 with sqlite3.connect(sys.argv[1]) as connection:
     rows = connection.execute(
-        "SELECT id, alias, role FROM users WHERE alias = ?",
+        "SELECT id, email, alias, role FROM users WHERE alias = ?",
         ("demo-viewer",),
     ).fetchall()
     integrity = connection.execute("PRAGMA integrity_check;").fetchone()[0]
 assert len(rows) == 1, rows
-assert rows[0][1:] == ("demo-viewer", "viewer"), rows
+assert rows[0][1:] == ("demo-viewer@matflow.top", "demo-viewer", "viewer"), rows
 assert integrity == "ok", integrity
-print(f"id={rows[0][0]} alias={rows[0][1]} role={rows[0][2]}")
+print(f"id={rows[0][0]} email={rows[0][1]} alias={rows[0][2]} role={rows[0][3]}")
 print(f"integrity_check={integrity}")
 PY
 
