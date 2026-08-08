@@ -153,6 +153,8 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "DIGEST_DATABASE_URL",
             "alembic -c alembic.ini upgrade head",
             "alembic -c alembic_digest.ini upgrade head",
+            "rollback-smoke@example.invalid",
+            "rollback-smoke-placeholder",
             "uvicorn main_107cup:app",
             "/api/health/live",
             "/api/health/ready",
@@ -171,6 +173,12 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "build.slurm",
         ):
             self.assertNotIn(forbidden, source)
+
+        primary_migration = source.index("alembic -c alembic.ini upgrade head")
+        synthetic_operator = source.index("rollback-smoke@example.invalid")
+        role_migration = source.index("migrate-competition-roles.py")
+        self.assertLess(primary_migration, synthetic_operator)
+        self.assertLess(synthetic_operator, role_migration)
 
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")

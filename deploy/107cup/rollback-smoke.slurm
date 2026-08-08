@@ -110,6 +110,26 @@ alembic -c alembic.ini upgrade head \
   > "$evidence_root/alembic-primary.txt" 2>&1
 alembic -c alembic_digest.ini upgrade head \
   > "$evidence_root/alembic-digest.txt" 2>&1
+python - "$smoke_root/data/db/eln.db" "$LMATELAB_OPERATOR_ALIAS" \
+  > "$evidence_root/synthetic-operator.txt" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as connection:
+    connection.execute(
+        "INSERT INTO users (email, password_hash, name, alias, role) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            "rollback-smoke@example.invalid",
+            "rollback-smoke-placeholder",
+            "Rollback Smoke Operator",
+            sys.argv[2],
+            "root",
+        ),
+    )
+    connection.commit()
+print("created isolated synthetic root operator")
+PY
 python "$source_root/deploy/107cup/migrate-competition-roles.py" \
   --database "$smoke_root/data/db/eln.db" \
   --backup-dir "$smoke_root/backups/competition-roles" \
