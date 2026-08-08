@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
-#SBATCH --time=7-00:00:00
+#SBATCH --time=4-00:00:00
 #SBATCH --output=/home/scc/pb23030683/lmatelab-107cup/logs/service-%j.out
 #SBATCH --error=/home/scc/pb23030683/lmatelab-107cup/logs/service-%j.err
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -31,11 +32,15 @@ def _backup_database(
     database_path: Path,
     backup_dir: Path,
 ) -> Path:
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    backup_dir.chmod(0o700)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     backup_path = backup_dir / f"{database_path.name}.before-competition-roles.{timestamp}.sqlite"
+    file_descriptor = os.open(backup_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(file_descriptor)
     with closing(sqlite3.connect(backup_path)) as destination:
         source.backup(destination)
+    backup_path.chmod(0o600)
     return backup_path
 
 

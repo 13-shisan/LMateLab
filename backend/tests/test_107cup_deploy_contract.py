@@ -117,6 +117,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "#SBATCH --account=competition",
             "#SBATCH --partition=P107-RTX5090",
             "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --time=4-00:00:00",
             "alembic -c alembic.ini upgrade head",
             "alembic -c alembic_digest.ini upgrade head",
             "uvicorn main_107cup:app",
@@ -130,6 +131,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertIn(required, source)
         for forbidden in ("celery worker", "celery beat", "redis-server", "gunicorn"):
             self.assertNotIn(forbidden, source)
+        self.assertNotIn("#SBATCH --time=7-00:00:00", source)
 
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")
@@ -201,6 +203,10 @@ class CompetitionDeployContractTests(unittest.TestCase):
     def test_public_relay_allows_login_but_rejects_business_writes(self):
         relay = self.read_required("relay/nginx.conf.example")
         self.assertIn("listen 18733", relay)
+        self.assertIn("client_body_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/client-body", relay)
+        self.assertIn("proxy_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/proxy-temp", relay)
+        self.assertIn("proxy_http_version 1.1", relay)
+        self.assertIn("proxy_buffering off", relay)
         self.assertIn("location = /api/auth/login", relay)
         self.assertIn("limit_except POST", relay)
         self.assertIn("location /api/", relay)
