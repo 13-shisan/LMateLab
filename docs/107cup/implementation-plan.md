@@ -73,17 +73,17 @@
 
 ## 4. 当前可验证基线
 
-记录时间：`2026-08-08`。
+记录时间：`2026-08-09`。
 
 ### 4.1 源码与仓库
 
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`0ea0354ec893f9ac9c4095fe19977b38a0e66456`。
-- PR #7 已将 `codex/107cup-viewer-acceptance` 合并到 `main`；该合并没有重建或重启当前服务。
-- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`；107 工作树干净且为 detached HEAD。
-- 当前 Operator 验收分支：`codex/107cup-operator-acceptance`，基线提交为 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`。当前运行发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
+- Gitea `main`：`1ba1661c4c114fc271cf5bd7dd4e1dddc51845e1`。
+- PR #8 已将 `codex/107cup-operator-acceptance` 合并到 `main`；该合并只更新实施方案，没有重建或重启当前服务。
+- 本地主检出、Gitea `main` 和 107 源码检出均已固定到合并提交 `1ba1661c4c114fc271cf5bd7dd4e1dddc51845e1`；107 工作树干净且为 detached HEAD。
+- 当前仓库门禁分支：`codex/107cup-repository-gates`，基线提交为 `1ba1661c4c114fc271cf5bd7dd4e1dddc51845e1`。当前运行发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
 
 ### 4.2 构建与发布
 
@@ -132,7 +132,7 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #7 已合并，本地、Gitea 和 107 源码已固定到 main 合并提交 `0ea0354` | 验证 main 保护、三人身份和只读 Deploy Key |
+| 1. 竞赛仓库初始化 | PARTIAL | PR #8 已合并，三端源码已固定到 `1ba1661`；107 Deploy Key 已验证只读 | 验证 main 保护和另外两名成员的个人 Git 身份 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
@@ -158,7 +158,7 @@
 - [x] 建立个人功能分支并以 `Pwjb (jbwu@mail.ustc.edu.cn)` 推送。
 - [ ] 为另外两名成员分别验证个人 Gitea 账号、SSH key 和提交邮箱。
 - [ ] 验证 `main` 禁止直接推送且必须通过 PR。
-- [ ] 在 107 验证 Deploy Key 可以 `fetch`，但尝试 `push --dry-run` 被拒绝。
+- [x] 在 107 验证 Deploy Key 可以 `fetch`，但尝试 `push --dry-run` 被拒绝。
 - [x] 创建并合并 `codex/107cup-python-runtime` PR #2；合并提交为 `4a311a2cccdefe8b6f30f5414f5a2541c891fab9`。
 - [x] 创建并合并 `codex/107cup-access-control` PR #3；合并提交为 `30a18e1b7000d93a2cca39849a25edb0ff957e28`。
 - [x] 创建并合并 `codex/107cup-runtime-evidence` PR #4；合并提交为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`。
@@ -173,6 +173,13 @@ git remote -v
 ```
 
 验收证据必须包含三名成员各自的提交哈希、作者邮箱和对应 PR，不以共享 Unix 用户名代替。
+
+107 Deploy Key 只读证据（`2026-08-09`）：
+
+- FETCH：107 detached checkout 使用远端 `ssh://wugroup-lmatelab/107-team/LMateLab.git` 成功读取 `main`，取得合并提交 `1ba1661c4c114fc271cf5bd7dd4e1dddc51845e1`。
+- WRITE：对独立探测引用执行 `git push --dry-run`，Gitea 明确返回 `Deploy Key: 4:107-LMateLab-107Cup is not authorized to write to 107-team/LMateLab`，退出码为 `128`。
+- ABSENCE：拒绝后再次查询远端，`refs/heads/codex/deploy-key-probe-20260809` 不存在，未创建任何分支。
+- EVIDENCE：原始输出位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/repository/deploy-key-readonly-1ba1661`；目录为 `0700`，文件和 SHA-256 清单为 `0600`，清单复核全部通过。
 
 ## 7. 阶段 2：无 Docker 构建与发布
 
@@ -526,6 +533,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 通过 Operator 独立 SSH 隧道完成认证、身份显示和桌面/移动浏览器验收。
 - [ ] 阶段 5/6 提供真实业务写接口后，完成 Operator 写权限、请求路径和资源归属边界验收。
 - [x] 真实 107 失败构建与回滚证据已通过 `codex/107cup-rollback-evidence` PR #6 合并。
+- [x] PR #8 合并后将本地、Gitea `main` 和 107 detached checkout 同步到 `1ba1661`，并验证 107 Deploy Key 只能读取、不能推送。
 
 ## 18. 变更记录
 
@@ -571,3 +579,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Operator 通过独立 SSH 隧道完成认证和身份界面验收：登录与 `/api/auth/me` 为 `200`，桌面/移动均显示“操作员 / 受控操作权限”，登录后的控制台 0 error/0 warning。
 - Slurm Job `34062` 在 `Students/anode20` 对当前合并提交完成认证与 Viewer 预置专项测试 `12/12`，以 `COMPLETED/0:0` 结束；日志、调度元数据和 SHA-256 清单已按 `0700/0600` 保存。
 - 当前竞赛后端没有真实业务写接口，因此未把身份 UI 误记为写权限或资源归属验收；该门禁等待阶段 5/6。三名成员独立应用身份和自动恢复仍未完成，阶段 1、3、4 继续保持 `PARTIAL`，未进入阶段 5。
+
+### 2026-08-09
+
+- PR #8 合并后，本地主检出、Gitea `main` 和 107 detached HEAD 同步到 `1ba1661c4c114fc271cf5bd7dd4e1dddc51845e1`；运行中的 Job `33852`、节点 `anode16` 和发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69` 保持不变。
+- 107 Deploy Key 成功读取 `main`，但对独立探测引用的 `git push --dry-run` 被 Gitea 以只读权限明确拒绝，退出码为 `128`；拒绝后探测引用不存在，证据已按 `0700/0600` 固化并复核 SHA-256 清单。
+- 阶段 1 继续保持 `PARTIAL`；剩余门禁是验证 `main` 禁止直接推送，以及取得另外两名成员各自的 Gitea 账号、SSH key、提交邮箱、提交哈希和 PR 证据。阶段 3/4 状态不变，仍未进入阶段 5。
