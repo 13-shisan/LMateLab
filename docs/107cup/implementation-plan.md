@@ -14,6 +14,8 @@
 
 本文件是 107 杯项目唯一的实施路线和状态账本。不得再创建内容重叠的第二份总路线。
 
+已确认的专项设计可以保存在 `docs/superpowers/specs/`，但不得另立阶段状态或改变本文件的主路线。当前前端完整形态预览设计为 `docs/superpowers/specs/2026-08-10-107cup-frontend-preview-design.md`。
+
 每次修改必须遵守以下同步规则：
 
 - [ ] 修改前确认本文件中的当前阶段、范围和门禁。
@@ -39,15 +41,18 @@
 第一版只实现以下主线：
 
 ```text
-固定 MoS2 模板
+固定 MoS2 模板或 Operator 上传一个受限的小型 POSCAR/CIF
   -> 输入生成与校验
+  -> 可追溯工作流草稿
   -> Slurm 受控执行
   -> relax
   -> SCF
   -> BAND
   -> DOS
-  -> 解析、图表、导出和证据包
+  -> 解析、周期表驱动的 VASP 数据库、图表、导出和证据包
 ```
+
+上传结构只扩展输入来源，不扩展模板和命令范围：单文件最大 `1 MiB`、最多 `200` 个原子，只接受文本 POSCAR/CIF，不接受压缩包、目录、任意模板或任意路径。
 
 明确不进入第一版：
 
@@ -73,16 +78,16 @@
 
 ## 4. 当前可验证基线
 
-记录时间：`2026-08-09`。
+记录时间：`2026-08-10`。
 
 ### 4.1 源码与仓库
 
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`79fa22cd932c6d60d8002c433fa851ba8ef90fa3`。
-- PR #9 已将 `codex/107cup-repository-gates` 合并到 `main`。
-- 本地 `main`、Gitea `main` 和 107 源码检出均已同步到 PR #9 的合并提交 `79fa22cd932c6d60d8002c433fa851ba8ef90fa3`；107 工作树干净且为 detached HEAD。
+- Gitea `main`：`11bac230cb9cd714596c4a460512699db76e0aca`。
+- PR #10 已将 `codex/107cup-main-protection-evidence` 合并到 `main`。
+- 本地 `main`、Gitea `main` 和 107 源码检出均已同步到 PR #10 的合并提交 `11bac230cb9cd714596c4a460512699db76e0aca`；107 工作树干净且为 detached HEAD。
 - 当前生产仍为 Job `33852`、节点 `anode16` 和发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，本次仓库收尾未重建或重启服务。
 
 ### 4.2 构建与发布
@@ -132,14 +137,14 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #9 已合并，三端 `main`/检出已同步到 `79fa22c`；107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份证据 |
+| 1. 竞赛仓库初始化 | PARTIAL | PR #10 已合并，三端 `main`/检出已同步到 `11bac23`；107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份证据；按用户决定暂不阻塞当前前端预览批次 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
-| 5. 工作流模型与输入校验 | PENDING | 尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
+| 5. 工作流模型与输入校验 | PENDING | 前端交互和草稿输入范围已确认，尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
-| 8. 结果解析与证据包 | PENDING | 现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
+| 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
 
@@ -166,6 +171,7 @@
 - [x] 创建并合并 `codex/107cup-viewer-acceptance` PR #7；合并提交为 `0ea0354ec893f9ac9c4095fe19977b38a0e66456`。
 - [x] 创建并合并 `codex/107cup-operator-acceptance` PR #8；合并提交为 `1ba1661c4c114fc271cf5bd7dd4e1dddc51845e1`。
 - [x] 创建并合并 `codex/107cup-repository-gates` PR #9；合并提交为 `79fa22cd932c6d60d8002c433fa851ba8ef90fa3`。
+- [x] 创建并合并 `codex/107cup-main-protection-evidence` PR #10；合并提交为 `11bac230cb9cd714596c4a460512699db76e0aca`。
 
 验收命令：
 
@@ -366,6 +372,8 @@ Operator 浏览器验收证据（`2026-08-08`）：
 - Create: `backend/alembic/versions/107c0ffee001_add_competition_workflows.py`
 - Create: `backend/tests/test_competition_inputs.py`
 - Create: `backend/tests/test_competition_workflow_models.py`
+- Create: `frontend/src/pages/competition/NewCalculation.jsx`
+- Create: `frontend/tests/competitionNewCalculation.test.mjs`
 
 数据库实体固定为：
 
@@ -383,6 +391,9 @@ workflow_templates
 - [ ] 先写失败测试覆盖缺文件、路径穿越、命令注入、错误元素顺序和参数越界。
 - [ ] 创建 Alembic migration，并在全新数据库和升级数据库各运行一次。
 - [ ] 固定 MoS2 模板版本为 `mos2_v1`，不接受任意模板上传。
+- [ ] Operator 可以上传一个最大 `1 MiB`、最多 `200` 原子的文本 POSCAR/CIF；Viewer 和预览模式不能上传。
+- [ ] 上传文件先使用结构解析器读取并记录 SHA-256，不依赖扩展名、MIME 字符串或用户提供的路径决定可信格式。
+- [ ] 合法输入先保存为可追溯草稿；只有 Operator 明确确认后才进入 Slurm 提交路径。
 - [ ] 使用结构解析器核对 POSCAR 元素顺序，不使用字符串猜测。
 - [ ] INCAR 只允许阶段定义的键和值域。
 - [ ] KPOINTS 由固定模板或受控生成器产生。
@@ -452,14 +463,26 @@ relax -> SCF -> BAND -> DOS
 - Create: `backend/services/competition_results.py`
 - Create: `backend/services/competition_bundle.py`
 - Create: `backend/tests/test_competition_results.py`
-- Create: `frontend/src/pages/workflows/WorkflowList.jsx`
-- Create: `frontend/src/pages/workflows/WorkflowDetail.jsx`
-- Create: `frontend/src/pages/workflows/WorkflowResults.jsx`
+- Create: `frontend/src/pages/competition/CompetitionDashboard.jsx`
+- Create: `frontend/src/pages/competition/WorkflowList.jsx`
+- Create: `frontend/src/pages/competition/WorkflowDetail.jsx`
+- Create: `frontend/src/pages/competition/WorkflowResults.jsx`
+- Create: `frontend/src/pages/competition/VaspDatabase.jsx`
+- Create: `frontend/src/competition/data/demoCompetitionDataProvider.js`
+- Create: `frontend/src/competition/data/apiCompetitionDataProvider.js`
+- Create: `frontend/src/components/vasp/PeriodicTableFilter.jsx`
+- Create: `frontend/src/components/vasp/VaspRecordTable.jsx`
 - Create: `frontend/tests/competitionWorkflowResults.test.mjs`
-- Modify: `frontend/src/App.jsx`
+- Modify: `frontend/src/App107Cup.jsx`
 - Modify: `frontend/src/config/appNavigation.js`
+- Modify: `frontend/src/pages/db/PersonalVaspDatabase.jsx`
+- Modify: `frontend/src/pages/db/VaspDataTable.jsx`
 
 - [ ] 复用现有结构、BAND 和 DOS 解析能力，不复制第二套解析器。
+- [ ] 复用现有 3Dmol、结构详情、BAND/DOS 标签页、元素颜色、周期表数据和表格格式化能力；竞赛页面不得依赖旧库上传、收藏或删除动作。
+- [ ] 从原 VASP 数据库提取受控 `PeriodicTableFilter` 和只读 `VaspRecordTable`，原页面通过兼容包装器保持现有行为。
+- [ ] 预览构建固定使用 demo 数据提供器并持续显示演示标识；所有 mutation 失败关闭且不发送网络写请求。
+- [ ] 正式构建使用 API 数据提供器；同一套页面和组件不得因 demo/live 模式复制两份。
 - [ ] 解析结果携带来源 attempt、原始文件路径和 SHA-256。
 - [ ] 缺文件、不收敛和解析异常映射为明确失败，不能返回空成功图。
 - [ ] 工作流详情显示步骤时间线、Job ID、状态、资源和关键日志摘要。
@@ -531,24 +554,27 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 
 ## 17. 下一执行批次
 
-下一批次只完成阶段 1 至阶段 4 的收尾，不进入阶段 5：
+下一批次先交付经确认的“前端完整形态预览”，再进入阶段 5 的真实模型和写接口。该批次横跨阶段 5 至 8 的展示层，但不得把任何相关阶段更新为 `DONE` 或把演示数据记为真实验收。
 
-- [x] 创建并合并运行时修复 PR #2。
-- [x] 创建并合并访问控制 PR #3，并在 107 构建部署提交 `30a18e1`。
-- [x] 创建并合并运行时加固 PR #4，在本地和 107 构建部署提交 `1bba72d`。
-- [x] Job `33979` 已验证失败构建不替换 `current`；Job `34005` 已验证上一成功发布无需重建即可隔离回滚启动。
-- [x] Job `32769` 已受控取消、完整 shutdown 且端口消失；Job `34005` 已补 Uvicorn 完整 shutdown 和 Slurm `COMPLETED/0:0` 的正常零退出复跑。
-- [x] 提交新服务 Job `33852` 并将 4090 转发安全切换到 `anode16`。
-- [x] 写 Operator/Viewer 后端失败测试。
-- [x] 实现最小角色依赖并通过本地测试。
-- [x] 新增并实际部署公开入口只读 Nginx 配置；本地与校园网入口均指向新 107 服务。
-- [x] 通过专用构建入口裁剪 107 杯导航、首页和无关页面分块。
-- [x] 在 Windows 本地公开入口完成 Viewer 桌面和移动浏览器权限验收。
-- [x] 通过 Operator 独立 SSH 隧道完成认证、身份显示和桌面/移动浏览器验收。
-- [ ] 阶段 5/6 提供真实业务写接口后，完成 Operator 写权限、请求路径和资源归属边界验收。
-- [x] 真实 107 失败构建与回滚证据已通过 `codex/107cup-rollback-evidence` PR #6 合并。
-- [x] PR #9 合并后将本地 `main`、Gitea `main` 和 107 detached checkout 同步到 `79fa22c`；107 Deploy Key 只读和 Gitea `main` 保护均已完成。
-- [ ] 取得另外两名成员各自的 Gitea 账号、SSH key、提交邮箱、提交哈希和 PR 证据；这是阶段 1 唯一剩余门禁。
+专项设计：`docs/superpowers/specs/2026-08-10-107cup-frontend-preview-design.md`。
+
+- [ ] 按 `superpowers:writing-plans` 生成可执行实施计划并经用户复核。
+- [ ] 建立独立功能工作树和分支，不在受保护 `main` 直接修改。
+- [ ] 优先复用现有结构、晶体详情、BAND/DOS、元素颜色和导出组件。
+- [ ] 从原 VASP 数据库提取完整周期表筛选和只读表格核心，保持原页面兼容。
+- [ ] 为工作台、新建计算、工作流、结果和 VASP 数据库增加 107 专用路由。
+- [ ] 实现 demo/live 数据提供器；预览模式的全部 mutation 失败关闭且不伪造成功。
+- [ ] 使用内置 MoS2 演示成功、运行中和人为失败状态；不导入 4090 生产数据。
+- [ ] 在本地完成针对性测试、构建和代码检查，只记录为本地预检。
+- [ ] 将功能分支推送 Gitea 并通过 PR 合并；107 只拉取固定合并提交，不直接检出未合并功能分支。
+- [ ] 通过 107 Slurm 构建不晋升的 `previews/<commit>` 发布和独立 manifest。
+- [ ] 启动独立 Slurm 预览 Job，使用独立数据库、runtime 目录和未占用端口；不得切换 `current` 或修改稳定数据库。
+- [ ] 从 Windows 浏览器完成 `1440x900`、`1024x768` 和 `390x844` 验收，包括 3D Canvas 非空检查。
+- [ ] 记录预览 Job、节点、提交、端口、manifest、健康检查和结束后端口消失证据。
+- [ ] 对比预览前后的稳定 `current`、正式数据库和稳定服务 Job，证明未受影响。
+- [ ] 用户确认前端预览后，再为阶段 5 工作流模型与输入校验创建下一份实施计划。
+
+另外两名成员的 Git 和应用身份仍是阶段 1/4 的剩余门禁；按用户决定暂不处理，不阻塞本次前端预览，但必须在比赛交付前完成。
 
 ## 18. 变更记录
 
@@ -602,3 +628,14 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - PR #9 合并后，本地 `main`、Gitea `main` 和 107 detached HEAD 同步到 `79fa22cd932c6d60d8002c433fa851ba8ef90fa3`；运行中的 Job `33852`、节点 `anode16` 和发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69` 保持不变，未重建或重启。
 - Gitea 已为严格匹配 `main` 的保护规则禁用直接推送和强制推送，并启用 PR 合并及拒绝审核、官方审核请求更改、过时 PR、管理员同样受约束的合并限制；截图及其 SHA-256 已保存在 `D:\Documents\matflow项目\LMateLab-107Cup-evidence\repository-protection-20260809`。当前所需批准数仍为 `0`，因没有 CI 检查而未启用状态检查，签名提交为可选。
 - 阶段 1 继续保持 `PARTIAL`；唯一剩余门禁是取得另外两名成员各自的 Gitea 账号、SSH key、提交邮箱、提交哈希和 PR 证据。阶段 3/4 状态不变，仍未进入阶段 5。
+
+### 2026-08-10
+
+- PR #10 合并后，本地 `main`、Gitea `main` 和 107 detached checkout 同步到 `11bac230cb9cd714596c4a460512699db76e0aca`；阶段状态未改变。
+- 用户决定暂不处理另外两名成员身份，当前批次转为先展示最终前端形态；该决定不取消比赛交付前的成员身份门禁。
+- 经逐段确认，前端预览固定为工作台、新建计算、工作流、结果和周期表驱动的 VASP 数据库五个入口。
+- 输入范围由仅内置 MoS2 明确扩展为“内置 MoS2 或 Operator 上传一个受限的小型 POSCAR/CIF”，但仍不允许任意模板、命令、脚本或路径。
+- 复用边界固定：直接复用现有 3D 结构、晶体详情、BAND/DOS 和解析服务；提取周期表与只读表格；不得挂载完整旧 VASP router 或旧库写操作。
+- 预览采用 demo/live 双数据提供器和独立 107 Slurm 预览发布，不切换 `current`、不修改正式数据库或稳定服务。
+- 本次提交只增加设计文档并更新总实施方案；未修改功能源码，未运行 107 构建，未启动预览 Job，也未改变阶段 5 至 8 的 `PENDING` 状态。
+- 已生成专项实施计划 `docs/superpowers/plans/2026-08-10-107cup-frontend-preview.md`，按 TDD 拆分数据提供器、周期表与只读表格提取、五页前端、浏览器验收和独立 Slurm 预览链路；当前仍只是计划文档，尚未实现、构建、合并或部署，相关执行清单保持未勾选。
