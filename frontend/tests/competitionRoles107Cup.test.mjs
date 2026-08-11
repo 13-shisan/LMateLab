@@ -1,8 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { parse } from '@babel/parser';
 
 const accessUrl = new URL('../src/config/competitionAccess.js', import.meta.url);
+
+function findAstNodes(value, predicate, matches = []) {
+  if (value === null || typeof value !== 'object') return matches;
+  if (predicate(value)) matches.push(value);
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) {
+      for (const entry of child) findAstNodes(entry, predicate, matches);
+    } else {
+      findAstNodes(child, predicate, matches);
+    }
+  }
+  return matches;
+}
+
+function jsxElementName(node) {
+  return node?.openingElement?.name?.type === 'JSXIdentifier'
+    ? node.openingElement.name.name
+    : '';
+}
+
+function jsxAttribute(node, name) {
+  return node?.openingElement?.attributes?.find((attribute) => (
+    attribute.type === 'JSXAttribute' && attribute.name?.name === name
+  ));
+}
+
+function routeElementComponentName(node) {
+  const expression = jsxAttribute(node, 'element')?.value?.expression;
+  return expression?.type === 'JSXElement' ? jsxElementName(expression) : '';
+}
+
+function routePath(node) {
+  const value = jsxAttribute(node, 'path')?.value;
+  return value?.type === 'StringLiteral' ? value.value : null;
+}
 
 test('competition role helpers fail closed for legacy roles', async () => {
   assert.equal(existsSync(accessUrl), true, 'competitionAccess.js must exist');
@@ -64,12 +100,20 @@ test('107 cup build uses a dedicated route entry without unrelated pages', () =>
 
 test('107 cup entry atomically exposes exactly seven protected preview routes', () => {
   const competitionApp = readFileSync(new URL('../src/App107Cup.jsx', import.meta.url), 'utf8');
+  const ast = parse(competitionApp, { sourceType: 'module', plugins: ['jsx'] });
   const lazyPages = [...competitionApp.matchAll(
     /const\s+(\w+)\s*=\s*lazy\(\(\)\s*=>\s*import\(/g,
   )].map((match) => match[1]);
-  const protectedPaths = [...competitionApp.matchAll(/<Route\s+path="([^"]+)"\s+element=/g)]
-    .map((match) => match[1])
-    .filter((path) => path.startsWith('/dashboard'));
+  const protectedContainers = findAstNodes(ast, (node) => (
+    node.type === 'JSXElement'
+    && jsxElementName(node) === 'Route'
+    && routeElementComponentName(node) === 'ProtectedCompetitionShell'
+  ));
+  assert.equal(protectedContainers.length, 1);
+  const protectedRoutes = protectedContainers[0].children.filter((node) => (
+    node.type === 'JSXElement' && jsxElementName(node) === 'Route'
+  ));
+  const protectedPaths = protectedRoutes.map(routePath);
 
   assert.deepEqual(lazyPages, [
     'Login',
@@ -90,6 +134,8 @@ test('107 cup entry atomically exposes exactly seven protected preview routes', 
     '/dashboard/results/:workflowId',
     '/dashboard/database/vasp',
   ]);
+  assert.equal(protectedRoutes.length, 7);
+  assert.equal(protectedPaths.every((path) => path?.startsWith('/dashboard')), true);
   assert.match(
     competitionApp,
     /function\s+ProtectedCompetitionShell\(\)[\s\S]*?<RequireAuth>[\s\S]*?<CompetitionDataProvider>[\s\S]*?<AppShell\s*\/>/,

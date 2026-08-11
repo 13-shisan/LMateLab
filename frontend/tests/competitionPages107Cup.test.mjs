@@ -111,29 +111,156 @@ test('competition database URL writer uses canonical query keys', () => {
   assert.deepEqual([...params.keys()], ['q', 'elements', 'element_mode', 'page', 'record']);
 });
 
+test('competition database page normalization clamps once and preserves filters', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const databasePageNormalization = loadFunction(source, 'databasePageNormalization');
+  const shouldApplyPageNormalization = loadFunction(source, 'shouldApplyPageNormalization');
+  const writeDatabaseUrlState = loadFunction(source, 'writeDatabaseUrlState');
+  const state = {
+    query: 'Mo S',
+    selectedElements: ['Mo', 'S'],
+    elementMode: 'only',
+    page: 999,
+    selectedRecordId: 'db-old',
+  };
+
+  assert.deepEqual(databasePageNormalization(999, 21, 20), {
+    required: true,
+    targetPage: 2,
+  });
+  assert.deepEqual(databasePageNormalization(999, 0, 20), {
+    required: true,
+    targetPage: 1,
+  });
+  assert.deepEqual(databasePageNormalization(2, 21, 20), {
+    required: false,
+    targetPage: 2,
+  });
+  assert.equal(shouldApplyPageNormalization(true, 'page:999->2', ''), true);
+  assert.equal(shouldApplyPageNormalization(true, 'page:999->2', 'page:999->2'), false);
+  assert.equal(shouldApplyPageNormalization(false, 'page:2->2', ''), false);
+
+  const normalization = databasePageNormalization(state.page, 21, 20);
+  const params = writeDatabaseUrlState({
+    ...state,
+    page: normalization.targetPage,
+    selectedRecordId: '',
+  });
+  assert.equal(params.get('q'), 'Mo S');
+  assert.equal(params.get('elements'), 'Mo,S');
+  assert.equal(params.get('element_mode'), 'only');
+  assert.equal(params.get('page'), '2');
+  assert.equal(params.has('record'), false);
+  assert.match(
+    source,
+    /useEffect\(\(\)\s*=>\s*\{[\s\S]*?databasePageNormalization\(page,\s*result\.total,\s*DATABASE_PAGE_SIZE\)[\s\S]*?if\s*\(!normalization\.required\)\s*return;[\s\S]*?updateUrlState\([\s\S]*?page:\s*normalization\.targetPage[\s\S]*?clearRecord:\s*true/s,
+  );
+  assert.match(source, /const\s+pageNormalizationRef\s*=\s*useRef\(['"]['"]\)/);
+  assert.match(
+    source,
+    /shouldApplyPageNormalization\(\s*normalization\.required,\s*normalizationKey,\s*pageNormalizationRef\.current,?\s*\)/,
+  );
+});
+
+test('competition database request envelopes reject stale list and detail frames', async () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const loadRequestEnvelope = loadFunction(source, 'loadRequestEnvelope');
+  const selectRequestResource = loadFunction(source, 'selectRequestResource');
+  const loading = { status: 'loading', data: null, error: null };
+  const oldDetail = {
+    status: 'ready',
+    data: { requestKey: 'detail:A', value: { id: 'A' } },
+    error: null,
+  };
+  const oldList = {
+    status: 'ready',
+    data: { requestKey: 'list:page=1', value: { items: [{ id: 'A' }] } },
+    error: null,
+  };
+
+  assert.deepEqual(selectRequestResource(oldDetail, 'detail:B'), loading);
+  assert.deepEqual(selectRequestResource(oldList, 'list:page=2'), loading);
+  assert.deepEqual(selectRequestResource(oldDetail, 'detail:A'), {
+    status: 'ready',
+    data: { id: 'A' },
+    error: null,
+  });
+  assert.deepEqual(selectRequestResource({
+    status: 'error',
+    data: null,
+    error: { message: 'old', requestKey: 'detail:A' },
+  }, 'detail:B'), loading);
+  assert.deepEqual(selectRequestResource({
+    status: 'ready',
+    data: { requestKey: 'detail:B', value: null },
+    error: null,
+  }, 'detail:B'), {
+    status: 'empty',
+    data: null,
+    error: null,
+  });
+  assert.deepEqual(await loadRequestEnvelope('detail:B', async () => ({ id: 'B' })), {
+    requestKey: 'detail:B',
+    value: { id: 'B' },
+  });
+  await assert.rejects(
+    loadRequestEnvelope('detail:B', async () => {
+      const error = new Error('forbidden');
+      error.code = 'forbidden';
+      throw error;
+    }),
+    (error) => error.message === 'forbidden'
+      && error.code === 'forbidden'
+      && error.requestKey === 'detail:B',
+  );
+});
+
 test('competition database detail fails closed for malformed records and resource states', () => {
   const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
   const normalizeDatabaseRecord = loadFunction(source, 'normalizeDatabaseRecord');
   const databaseDetailState = loadFunction(source, 'databaseDetailState');
 
   for (const malformed of [null, undefined, [], 'record', 42, new Date()]) {
-    assert.equal(normalizeDatabaseRecord(malformed), null);
+    assert.equal(normalizeDatabaseRecord(malformed, 'db-1'), null);
   }
-  assert.deepEqual(normalizeDatabaseRecord({ id: 'db-1', formula: 'MoS2' }), {
+  const validCapabilities = {
+    structure_export: true,
+    band_plot: true,
+    dos_plot: true,
+    band_data: true,
+    dos_data: true,
+  };
+  const validRecord = {
     id: 'db-1',
     formula: 'MoS2',
-    elements: [],
-    source: '',
-    workflow_id: '',
-    status: 'unknown',
-    bandgap_eV: null,
-    energy: null,
-    completed_at: '',
-    latest_job_id: '',
-    data_kind: 'unknown',
-    vasp_detail: null,
-    artifacts: [],
-  });
+    status: 'succeeded',
+    data_kind: 'demo',
+    vasp_detail: { capabilities: validCapabilities },
+  };
+  assert.equal(normalizeDatabaseRecord(validRecord, 'db-2'), null, 'mismatched selected id');
+  for (const dataKind of ['unknown', '', null, undefined]) {
+    assert.equal(normalizeDatabaseRecord({ ...validRecord, data_kind: dataKind }, 'db-1'), null);
+  }
+  for (const status of ['unknown', 'complete', '', null, undefined]) {
+    assert.equal(normalizeDatabaseRecord({ ...validRecord, status }, 'db-1'), null);
+  }
+  for (const capabilities of [
+    null,
+    [],
+    {},
+    { ...validCapabilities, band_plot: 'yes' },
+    { ...validCapabilities, dos_data: undefined },
+  ]) {
+    assert.equal(normalizeDatabaseRecord({
+      ...validRecord,
+      vasp_detail: { capabilities },
+    }, 'db-1'), null);
+  }
+  const normalized = normalizeDatabaseRecord(validRecord, 'db-1');
+  assert.equal(normalized.id, 'db-1');
+  assert.equal(normalized.status, 'succeeded');
+  assert.equal(normalized.data_kind, 'demo');
+  assert.deepEqual(normalized.vasp_detail.capabilities, validCapabilities);
   assert.equal(databaseDetailState({ status: 'loading' }, null), 'loading');
   assert.equal(databaseDetailState({ status: 'empty' }, null), 'empty');
   assert.equal(databaseDetailState({ status: 'forbidden' }, null), 'forbidden');
@@ -144,6 +271,7 @@ test('competition database detail fails closed for malformed records and resourc
   assert.equal(databaseDetailState({ status: 'ready' }, { status: 'parse-error' }), 'parse-error');
   assert.equal(databaseDetailState({ status: 'ready' }, { status: 'stale' }), 'stale');
   assert.equal(databaseDetailState({ status: 'ready' }, { status: 'succeeded' }), 'ready');
+  assert.match(source, /normalizeDatabaseRecord\(detailResource\.data,\s*selectedRecordId\)/);
 });
 
 test('competition database inspector exposes required evidence without success inference', () => {
