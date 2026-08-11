@@ -20,6 +20,18 @@ import './CompetitionPages.css';
 
 const DATABASE_COLUMNS = Object.freeze(['formula', 'source', 'workflow_id', 'status', 'bandgap_eV', 'energy', 'completed_at']);
 const DATABASE_PAGE_SIZE = 20;
+const DATABASE_STATUSES = new Set([
+  'succeeded',
+  'running',
+  'waiting',
+  'queued',
+  'blocked',
+  'failed',
+  'stale',
+  'parse-error',
+  'render-error',
+]);
+const DATABASE_METADATA_KINDS = new Set(['text', 'number', 'integer', 'path', 'json']);
 const VALID_ELEMENT_SYMBOLS = new Set(PERIODIC_TABLE_ELEMENTS.map((element) => element.symbol));
 const EMPTY_DATABASE_RESULT = Object.freeze({
   items: Object.freeze([]),
@@ -222,32 +234,110 @@ function normalizeDatabaseRecord(value, selectedRecordId) {
   };
 }
 
-function normalizeDatabaseResult(value) {
+function normalizeDatabaseListItem(value, expectedDataKind) {
   if (!isPlainObject(value)) return null;
-  const items = Array.isArray(value.items)
-    ? value.items.filter(isPlainObject).map((item) => ({
-      ...item,
-      _rowId: item.id,
-    }))
-    : [];
-  const availableElements = Array.isArray(value.available_elements)
-    ? [...new Set(value.available_elements.filter((symbol) => VALID_ELEMENT_SYMBOLS.has(symbol)))]
-    : [];
-  const total = Number.isSafeInteger(Number(value.total)) && Number(value.total) >= 0
-    ? Number(value.total)
-    : items.length;
+  const id = typeof value.id === 'string'
+    ? value.id.trim()
+    : (Number.isSafeInteger(value.id) && value.id >= 0 ? String(value.id) : '');
+  if (!id) return null;
+  if (typeof value.formula !== 'string'
+      || typeof value.source !== 'string'
+      || typeof value.workflow_id !== 'string') return null;
+  if (value.completed_at !== null && typeof value.completed_at !== 'string') return null;
+  if (!DATABASE_STATUSES.has(value.status)) return null;
+  if (value.data_kind !== expectedDataKind) return null;
+  if (value.bandgap_eV !== null
+      && (typeof value.bandgap_eV !== 'number' || !Number.isFinite(value.bandgap_eV))) return null;
+  if (value.energy !== null
+      && (typeof value.energy !== 'number' || !Number.isFinite(value.energy))) return null;
+
+  return {
+    id,
+    _rowId: id,
+    formula: value.formula,
+    source: value.source,
+    workflow_id: value.workflow_id,
+    status: value.status,
+    bandgap_eV: value.bandgap_eV,
+    energy: value.energy,
+    completed_at: value.completed_at ?? '',
+    data_kind: expectedDataKind,
+  };
+}
+
+function normalizeDatabaseMetadataEntry(value) {
+  if (!isPlainObject(value)) return null;
+  if (typeof value.label !== 'string' || !value.label.trim()) return null;
+  if (!DATABASE_METADATA_KINDS.has(value.kind)) return null;
+  if (!Number.isSafeInteger(value.priority) || value.priority < 1 || value.priority > 4) return null;
+  const normalized = {
+    label: value.label.trim(),
+    kind: value.kind,
+    priority: value.priority,
+  };
+  if (Object.hasOwn(value, 'unit')) {
+    if (typeof value.unit !== 'string') return null;
+    normalized.unit = value.unit;
+  }
+  if (Object.hasOwn(value, 'decimals')) {
+    if (!Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 12) {
+      return null;
+    }
+    normalized.decimals = value.decimals;
+  }
+  return normalized;
+}
+
+function normalizeDatabaseMetadata(value) {
+  if (!isPlainObject(value)) return null;
+  const metadata = {};
+  for (const column of DATABASE_COLUMNS) {
+    if (!Object.hasOwn(value, column)) continue;
+    const entry = normalizeDatabaseMetadataEntry(value[column]);
+    if (entry === null) return null;
+    metadata[column] = entry;
+  }
+  return metadata;
+}
+
+function normalizeAvailableElements(value) {
+  if (!Array.isArray(value)) return null;
+  const elements = [];
+  for (const symbol of value) {
+    if (typeof symbol !== 'string' || !VALID_ELEMENT_SYMBOLS.has(symbol)) return null;
+    if (!elements.includes(symbol)) elements.push(symbol);
+  }
+  return elements;
+}
+
+function normalizeDatabaseResult(value, requestedPage, requestedPageSize) {
+  if (!isPlainObject(value) || !Array.isArray(value.items)) return null;
+  if (!Number.isSafeInteger(requestedPage) || requestedPage < 1) return null;
+  if (!Number.isSafeInteger(requestedPageSize) || requestedPageSize < 1) return null;
+  if (!Number.isSafeInteger(value.total) || value.total < 0) return null;
+  if (!Number.isSafeInteger(value.page) || value.page !== requestedPage) return null;
+  if (!Number.isSafeInteger(value.page_size) || value.page_size !== requestedPageSize) return null;
+  if (value.data_kind !== 'demo' && value.data_kind !== 'live') return null;
+  if (value.items.length > value.page_size || value.total < value.items.length) return null;
+
+  const items = [];
+  for (const item of value.items) {
+    const normalizedItem = normalizeDatabaseListItem(item, value.data_kind);
+    if (normalizedItem === null) return null;
+    items.push(normalizedItem);
+  }
+  const availableElements = normalizeAvailableElements(value.available_elements);
+  const metadata = normalizeDatabaseMetadata(value.metadata);
+  if (availableElements === null || metadata === null) return null;
 
   return {
     items,
-    total,
-    page: Number.isSafeInteger(Number(value.page)) && Number(value.page) > 0
-      ? Number(value.page)
-      : 1,
-    page_size: Number.isSafeInteger(Number(value.page_size)) && Number(value.page_size) > 0
-      ? Number(value.page_size)
-      : DATABASE_PAGE_SIZE,
+    total: value.total,
+    page: value.page,
+    page_size: value.page_size,
     available_elements: availableElements,
-    metadata: isPlainObject(value.metadata) ? value.metadata : {},
+    metadata,
+    data_kind: value.data_kind,
   };
 }
 
@@ -276,17 +366,51 @@ function renderDatabaseCell(column, item) {
   return column === 'status' ? <StatusBadge status={item.status} /> : undefined;
 }
 
-function isRenderableStructure(structure) {
-  if (!isPlainObject(structure)) return false;
-  if (!Array.isArray(structure.positions) || structure.positions.length === 0) return false;
-  if (!Array.isArray(structure.symbols) || structure.symbols.length !== structure.positions.length) {
-    return false;
+function normalizeViewerStructure(structure) {
+  if (!isPlainObject(structure)) return null;
+  if (!Array.isArray(structure.positions) || structure.positions.length === 0) return null;
+  if (!Array.isArray(structure.symbols)
+      || structure.symbols.length !== structure.positions.length) return null;
+  if (!Array.isArray(structure.pbc)
+      || structure.pbc.length !== 3
+      || !structure.pbc.every((value) => typeof value === 'boolean')) return null;
+
+  const symbols = [];
+  for (const rawSymbol of structure.symbols) {
+    if (typeof rawSymbol !== 'string') return null;
+    const symbol = rawSymbol.trim();
+    if (!symbol || !VALID_ELEMENT_SYMBOLS.has(symbol)) return null;
+    symbols.push(symbol);
   }
-  return structure.positions.every((position) => (
-    Array.isArray(position)
-    && position.length >= 3
-    && position.slice(0, 3).every((coordinate) => Number.isFinite(Number(coordinate)))
-  )) && structure.symbols.every((symbol) => typeof symbol === 'string' && symbol.length > 0);
+  const positions = [];
+  for (const position of structure.positions) {
+    if (!Array.isArray(position)
+        || position.length !== 3
+        || !position.every((coordinate) => (
+          typeof coordinate === 'number' && Number.isFinite(coordinate)
+        ))) return null;
+    positions.push([...position]);
+  }
+
+  const normalized = {
+    symbols,
+    positions,
+    pbc: [...structure.pbc],
+  };
+  if (Object.hasOwn(structure, 'cell')) {
+    if (!Array.isArray(structure.cell) || structure.cell.length !== 3) return null;
+    const cell = [];
+    for (const vector of structure.cell) {
+      if (!Array.isArray(vector)
+          || vector.length !== 3
+          || !vector.every((coordinate) => (
+            typeof coordinate === 'number' && Number.isFinite(coordinate)
+          ))) return null;
+      cell.push([...vector]);
+    }
+    normalized.cell = cell;
+  }
+  return normalized;
 }
 
 function capabilityState(record, capabilityNames) {
@@ -320,7 +444,7 @@ function DatabaseInspector({ status, error, record }) {
     );
   }
 
-  const structure = record.vasp_detail?.structure;
+  const viewerStructure = normalizeViewerStructure(record.vasp_detail?.structure);
   const composition = record.elements.length > 0 ? record.elements.join(' / ') : record.formula;
   const latestJobLabel = record.data_kind === 'demo' ? '最新演示 Job ID' : '最新 Job ID';
 
@@ -351,8 +475,8 @@ function DatabaseInspector({ status, error, record }) {
 
       <section className="competition-database-structure" aria-label="结构查看器">
         <h3>结构</h3>
-        {isRenderableStructure(structure) ? (
-          <VaspStructureViewer structure={structure} />
+        {viewerStructure ? (
+          <VaspStructureViewer structure={viewerStructure} />
         ) : (
           <CompetitionState status="empty" message="该记录没有可核验的结构坐标" />
         )}
@@ -418,16 +542,18 @@ export default function CompetitionVaspDatabase() {
   );
 
   const normalizedResult = useMemo(
-    () => (listState.status === 'ready' ? normalizeDatabaseResult(listState.data) : null),
-    [listState.data, listState.status],
+    () => (listState.status === 'ready'
+      ? normalizeDatabaseResult(listState.data, page, DATABASE_PAGE_SIZE)
+      : null),
+    [listState.data, listState.status, page],
   );
   const result = normalizedResult || EMPTY_DATABASE_RESULT;
   const listStatus = listState.status === 'ready' && normalizedResult === null
     ? 'parse-error'
     : databaseDetailState(listState, { status: 'ready' });
   const pageNormalization = useMemo(
-    () => databasePageNormalization(page, result.total, DATABASE_PAGE_SIZE),
-    [page, result.total],
+    () => databasePageNormalization(page, result.total, result.page_size),
+    [page, result.page_size, result.total],
   );
   const pageView = databasePageViewState(listStatus, page, pageNormalization, result);
   const selectedRecord = useMemo(

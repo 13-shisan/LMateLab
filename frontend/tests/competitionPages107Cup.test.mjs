@@ -5,6 +5,10 @@ import { parse } from '@babel/parser';
 
 import { canWriteCompetitionData } from '../src/config/competitionAccess.js';
 import { createDemoCompetitionDataProvider } from '../src/features/competition/data/demoCompetitionDataProvider.js';
+import {
+  formatVaspValue,
+  getVaspColumnPresentation,
+} from '../src/pages/db/vaspTablePresentation.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -19,6 +23,96 @@ function loadFunction(source, name, bindings = {}) {
     ...names,
     `${source.slice(declaration.start, declaration.end)}\nreturn ${name};`,
   )(...names.map((key) => bindings[key]));
+}
+
+function loadFunctions(source, names, bindings = {}) {
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const declarations = ast.program.body
+    .map((node) => (node.type === 'ExportNamedDeclaration' ? node.declaration : node))
+    .filter((node) => node?.type === 'FunctionDeclaration' && names.includes(node.id?.name));
+  assert.deepEqual(
+    declarations.map((node) => node.id.name).sort(),
+    [...names].sort(),
+    'all executable regression helpers must exist',
+  );
+  const bindingNames = Object.keys(bindings);
+  return new Function(
+    ...bindingNames,
+    `${declarations.map((node) => source.slice(node.start, node.end)).join('\n')}\n`
+      + `return { ${names.join(', ')} };`,
+  )(...bindingNames.map((key) => bindings[key]));
+}
+
+const TEST_DATABASE_COLUMNS = Object.freeze([
+  'formula',
+  'source',
+  'workflow_id',
+  'status',
+  'bandgap_eV',
+  'energy',
+  'completed_at',
+]);
+const TEST_DATABASE_STATUSES = new Set([
+  'succeeded',
+  'running',
+  'waiting',
+  'queued',
+  'blocked',
+  'failed',
+  'stale',
+  'parse-error',
+  'render-error',
+]);
+const TEST_METADATA_KINDS = new Set(['text', 'number', 'integer', 'path', 'json']);
+const TEST_ELEMENT_SYMBOLS = new Set(['H', 'Mo', 'S']);
+
+function validDatabaseListItem(overrides = {}) {
+  return {
+    id: 'db-1',
+    formula: 'MoS2',
+    source: 'builtin',
+    workflow_id: 'wf-1',
+    status: 'succeeded',
+    bandgap_eV: 1.78,
+    energy: -22.418731,
+    completed_at: '2026-08-10T09:40:00+08:00',
+    data_kind: 'demo',
+    ...overrides,
+  };
+}
+
+function validDatabaseListEnvelope(overrides = {}) {
+  return {
+    items: [validDatabaseListItem()],
+    total: 1,
+    page: 1,
+    page_size: 20,
+    available_elements: ['Mo', 'S'],
+    metadata: {
+      formula: { label: 'Formula', kind: 'text', priority: 1 },
+      energy: {
+        label: 'Energy', unit: 'eV', decimals: 2, kind: 'number', priority: 1,
+      },
+    },
+    data_kind: 'demo',
+    ...overrides,
+  };
+}
+
+function loadDatabaseResultNormalizer(source) {
+  return loadFunctions(source, [
+    'isPlainObject',
+    'normalizeDatabaseListItem',
+    'normalizeDatabaseMetadataEntry',
+    'normalizeDatabaseMetadata',
+    'normalizeAvailableElements',
+    'normalizeDatabaseResult',
+  ], {
+    DATABASE_COLUMNS: TEST_DATABASE_COLUMNS,
+    DATABASE_STATUSES: TEST_DATABASE_STATUSES,
+    DATABASE_METADATA_KINDS: TEST_METADATA_KINDS,
+    VALID_ELEMENT_SYMBOLS: TEST_ELEMENT_SYMBOLS,
+  }).normalizeDatabaseResult;
 }
 
 function findNodes(value, predicate, matches = []) {
@@ -156,7 +250,7 @@ test('competition database page normalization clamps once and preserves filters'
   assert.equal(params.has('record'), false);
   assert.match(
     source,
-    /const\s+pageNormalization\s*=\s*useMemo\(\s*\(\)\s*=>\s*databasePageNormalization\(page,\s*result\.total,\s*DATABASE_PAGE_SIZE\)/,
+    /const\s+pageNormalization\s*=\s*useMemo\(\s*\(\)\s*=>\s*databasePageNormalization\(page,\s*result\.total,\s*result\.page_size\)/,
   );
   assert.match(
     source,
@@ -167,6 +261,90 @@ test('competition database page normalization clamps once and preserves filters'
     source,
     /shouldApplyPageNormalization\(\s*pageNormalization\.required,\s*normalizationKey,\s*pageNormalizationRef\.current,?\s*\)/,
   );
+});
+
+test('competition database list normalization returns only schema-safe fields', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const normalizeDatabaseResult = loadDatabaseResultNormalizer(source);
+  const unsafeItem = validDatabaseListItem({
+    ignored_object: { must_not_reach_jsx: true },
+  });
+  const envelope = validDatabaseListEnvelope({
+    items: [unsafeItem],
+    metadata: {
+      ...validDatabaseListEnvelope().metadata,
+      ignored_column: { label: { must_not_reach_jsx: true } },
+    },
+  });
+  const normalized = normalizeDatabaseResult(envelope, 1, 20);
+
+  assert.deepEqual(normalized, {
+    items: [{
+      id: 'db-1',
+      _rowId: 'db-1',
+      formula: 'MoS2',
+      source: 'builtin',
+      workflow_id: 'wf-1',
+      status: 'succeeded',
+      bandgap_eV: 1.78,
+      energy: -22.418731,
+      completed_at: '2026-08-10T09:40:00+08:00',
+      data_kind: 'demo',
+    }],
+    total: 1,
+    page: 1,
+    page_size: 20,
+    available_elements: ['Mo', 'S'],
+    metadata: {
+      formula: { label: 'Formula', kind: 'text', priority: 1 },
+      energy: {
+        label: 'Energy', unit: 'eV', decimals: 2, kind: 'number', priority: 1,
+      },
+    },
+    data_kind: 'demo',
+  });
+  assert.notEqual(normalized.items[0], unsafeItem);
+  assert.equal(getVaspColumnPresentation('formula', normalized.metadata).label, 'Formula');
+  assert.equal(formatVaspValue('energy', normalized.items[0].energy, normalized.metadata).display, '-22.42');
+  assert.equal('ignored_column' in normalized.metadata, false);
+  assert.equal('ignored_object' in normalized.items[0], false);
+
+  for (const malformed of [
+    {},
+    validDatabaseListEnvelope({ items: {} }),
+    validDatabaseListEnvelope({ items: [null] }),
+    validDatabaseListEnvelope({ items: [validDatabaseListItem({ status: {} })] }),
+    validDatabaseListEnvelope({ items: [validDatabaseListItem({ status: 'complete' })] }),
+    validDatabaseListEnvelope({ items: [validDatabaseListItem({ formula: {} })] }),
+    validDatabaseListEnvelope({ items: [validDatabaseListItem({ bandgap_eV: '1.78' })] }),
+    validDatabaseListEnvelope({ items: [validDatabaseListItem({ energy: Number.POSITIVE_INFINITY })] }),
+    validDatabaseListEnvelope({ data_kind: 'unknown' }),
+    validDatabaseListEnvelope({ items: [validDatabaseListItem({ data_kind: 'live' })] }),
+    validDatabaseListEnvelope({ metadata: { formula: { label: {}, kind: 'text', priority: 1 } } }),
+    validDatabaseListEnvelope({ metadata: { formula: { label: [], kind: 'text', priority: 1 } } }),
+    validDatabaseListEnvelope({ metadata: { formula: { label: 'Formula', unit: {}, kind: 'text', priority: 1 } } }),
+    validDatabaseListEnvelope({ metadata: { formula: { label: 'Formula', kind: 'html', priority: 1 } } }),
+    validDatabaseListEnvelope({ metadata: { formula: { label: 'Formula', kind: 'text', decimals: '2', priority: 1 } } }),
+    validDatabaseListEnvelope({ metadata: { formula: { label: 'Formula', kind: 'text', priority: '1' } } }),
+  ]) {
+    assert.equal(normalizeDatabaseResult(malformed, 1, 20), null);
+  }
+});
+
+test('competition database list normalization binds response identity to the request', async () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const normalizeDatabaseResult = loadDatabaseResultNormalizer(source);
+
+  assert.equal(normalizeDatabaseResult(validDatabaseListEnvelope({ page: 1 }), 2, 20), null);
+  assert.equal(normalizeDatabaseResult(validDatabaseListEnvelope({ page_size: 50 }), 1, 20), null);
+  const provider = createDemoCompetitionDataProvider();
+  const response = await provider.listDatabase({ page: 999, pageSize: 20 });
+  const outOfRange = normalizeDatabaseResult(response, 999, 20);
+  assert.equal(outOfRange.page, 999);
+  assert.equal(outOfRange.page_size, 20);
+  assert.equal(outOfRange.total, 3);
+  assert.deepEqual(outOfRange.items, []);
+  assert.match(source, /normalizeDatabaseResult\(listState\.data,\s*page,\s*DATABASE_PAGE_SIZE\)/);
 });
 
 test('competition database render state masks out-of-range ready frames', () => {
@@ -318,6 +496,65 @@ test('competition database detail fails closed for malformed records and resourc
   assert.equal(databaseDetailState({ status: 'ready' }, { status: 'stale' }), 'stale');
   assert.equal(databaseDetailState({ status: 'ready' }, { status: 'succeeded' }), 'ready');
   assert.match(source, /normalizeDatabaseRecord\(detailResource\.data,\s*selectedRecordId\)/);
+});
+
+test('competition database viewer receives only a strict copied structure', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const { normalizeViewerStructure } = loadFunctions(source, [
+    'isPlainObject',
+    'normalizeViewerStructure',
+  ], {
+    VALID_ELEMENT_SYMBOLS: TEST_ELEMENT_SYMBOLS,
+  });
+  const original = {
+    symbols: [' Mo ', 'S'],
+    positions: [[0, 0, 10], [1.579, 0.912, 11.568]],
+    cell: [[3.158, 0, 0], [-1.579, 2.735, 0], [0, 0, 20]],
+    pbc: [true, true, false],
+    ignored: { must_not_reach_viewer: true },
+  };
+  const snapshot = structuredClone(original);
+  const normalized = normalizeViewerStructure(original);
+
+  assert.deepEqual(normalized, {
+    symbols: ['Mo', 'S'],
+    positions: [[0, 0, 10], [1.579, 0.912, 11.568]],
+    cell: [[3.158, 0, 0], [-1.579, 2.735, 0], [0, 0, 20]],
+    pbc: [true, true, false],
+  });
+  assert.notEqual(normalized, original);
+  assert.notEqual(normalized.positions, original.positions);
+  assert.notEqual(normalized.positions[0], original.positions[0]);
+  assert.notEqual(normalized.symbols, original.symbols);
+  assert.notEqual(normalized.cell, original.cell);
+  assert.notEqual(normalized.pbc, original.pbc);
+  normalized.positions[0][0] = 99;
+  assert.deepEqual(original, snapshot, 'normalization must not mutate or alias the provider object');
+  const withoutCell = structuredClone(original);
+  delete withoutCell.cell;
+  assert.deepEqual(normalizeViewerStructure(withoutCell), {
+    symbols: ['Mo', 'S'],
+    positions: [[0, 0, 10], [1.579, 0.912, 11.568]],
+    pbc: [true, true, false],
+  });
+
+  for (const malformed of [
+    { symbols: ['Mo'], positions: [[null, false, '']], pbc: [true, true, false] },
+    { symbols: ['Xx'], positions: [[0, 0, 0]], pbc: [true, true, false] },
+    {
+      symbols: ['Mo'],
+      positions: [[0, 0, 0]],
+      cell: [[1, 0, 0], [0, 1, 0], [0, 0]],
+      pbc: [true, true, false],
+    },
+    { symbols: ['Mo'], positions: [[0, 0, 0]], pbc: [true, 1, false] },
+    { symbols: ['Mo'], positions: [[0, 0, 0, 1]], pbc: [true, true, false] },
+  ]) {
+    assert.equal(normalizeViewerStructure(malformed), null);
+  }
+  assert.match(source, /const\s+viewerStructure\s*=\s*normalizeViewerStructure\(record\.vasp_detail\?\.structure\)/);
+  assert.match(source, /<VaspStructureViewer\s+structure=\{viewerStructure\}\s*\/>/);
+  assert.doesNotMatch(source, /<VaspStructureViewer\s+structure=\{structure\}\s*\/>/);
 });
 
 test('competition database inspector exposes required evidence without success inference', () => {
