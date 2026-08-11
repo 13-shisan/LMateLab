@@ -119,12 +119,13 @@ function normalizeResultDetailState(resource, workflowId) {
 
   const result = resource.data;
   if (!isPlainObject(result)) return emptyState;
-  const resultWorkflowId = [result.id, result.workflow_id].find((value) => (
-    typeof value === 'string'
-    && value.trim() !== ''
-    && value === value.trim()
-  ));
-  if (!resultWorkflowId) {
+  const resultWorkflowId = Object.hasOwn(result, 'workflow_id')
+    ? result.workflow_id
+    : result.id;
+  const hasValidWorkflowId = typeof resultWorkflowId === 'string'
+    && resultWorkflowId.trim() !== ''
+    && resultWorkflowId === resultWorkflowId.trim();
+  if (!hasValidWorkflowId) {
     return {
       status: 'parse-error', message: '结果身份无效', variant: null, result: null,
     };
@@ -148,6 +149,28 @@ function normalizeResultDetailState(resource, workflowId) {
     };
   }
 
+  const requiredStepKeys = ['relax', 'scf', 'band', 'dos'];
+  const acceptedStepsAreComplete = Array.isArray(result.steps)
+    && result.steps.length === requiredStepKeys.length
+    && result.steps.every(isPlainObject)
+    && new Set(result.steps.map((step) => step.key)).size === requiredStepKeys.length
+    && requiredStepKeys.every((key) => result.steps.some((step) => (
+      step.key === key
+      && step.status === 'succeeded'
+      && step.accepted === true
+      && (
+        (typeof step.job_id === 'string' && step.job_id.trim() !== '')
+        || (typeof step.job_id === 'number' && Number.isFinite(step.job_id))
+        || typeof step.job_id === 'boolean'
+      )
+      && (step.exit_code === '0:0' || step.exit_code === 0)
+    )));
+  if (!acceptedStepsAreComplete) {
+    return {
+      status: 'parse-error', message: '结果验收合同不完整', variant: null, result: null,
+    };
+  }
+
   const detail = result.vasp_detail;
   const db = detail?.db;
   const row = detail?.row;
@@ -161,14 +184,19 @@ function normalizeResultDetailState(resource, workflowId) {
   const rowIsComplete = isPlainObject(row)
     && ((typeof row.id === 'number' && Number.isFinite(row.id)) || hasText(row.id))
     && hasText(row.formula)
-    && isFiniteNumber(row.energy)
-    && isFiniteNumber(row.fmax)
+    && ['energy', 'fmax'].every((key) => (
+      Object.hasOwn(row, key) && (row[key] === null || isFiniteNumber(row[key]))
+    ))
     && Number.isInteger(row.natoms)
     && row.natoms > 0
     && isPbc(row.pbc);
   const propertiesAreComplete = isPlainObject(properties)
-    && hasText(properties.spacegroup)
-    && ['bandgap_eV', 'vbm_eV', 'cbm_eV'].every((key) => isFiniteNumber(properties[key]));
+    && Object.hasOwn(properties, 'spacegroup')
+    && (properties.spacegroup === null || hasText(properties.spacegroup))
+    && ['bandgap_eV', 'vbm_eV', 'cbm_eV'].every((key) => (
+      Object.hasOwn(properties, key)
+      && (properties[key] === null || isFiniteNumber(properties[key]))
+    ));
   const structureIsComplete = isPlainObject(structure)
     && Array.isArray(structure.symbols)
     && structure.symbols.length > 0
@@ -225,7 +253,48 @@ function normalizeResultDetailState(resource, workflowId) {
 }
 
 function displayIdentity(value) {
-  return value === null || value === undefined || value === '' ? '-' : value;
+  if (typeof value === 'string' && value.trim() !== '') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return String(value);
+  return '-';
+}
+
+function normalizeResultSteps(steps) {
+  const stepKeys = ['relax', 'scf', 'band', 'dos'];
+  const statuses = new Set([
+    'waiting', 'queued', 'running', 'succeeded', 'failed', 'blocked', 'stale',
+    'parse-error', 'render-error',
+  ]);
+  const byKey = new Map();
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      if (step === null || typeof step !== 'object' || Array.isArray(step)) continue;
+      if (!stepKeys.includes(step.key) || byKey.has(step.key)) continue;
+      byKey.set(step.key, step);
+    }
+  }
+  const normalizeScalar = (value) => {
+    if (typeof value === 'string' && value.trim() !== '') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'boolean') return String(value);
+    return null;
+  };
+  return stepKeys
+    .filter((key) => byKey.has(key))
+    .map((key) => {
+      const step = byKey.get(key);
+      return {
+        key,
+        status: statuses.has(step.status) ? step.status : 'waiting',
+        job_id: normalizeScalar(step.job_id),
+        attempt: normalizeScalar(step.attempt),
+        attempt_dir: normalizeScalar(step.attempt_dir),
+        slurm_state: normalizeScalar(step.slurm_state),
+        exit_code: normalizeScalar(step.exit_code),
+        reason: normalizeScalar(step.reason),
+        accepted: typeof step.accepted === 'boolean' ? step.accepted : null,
+      };
+    });
 }
 
 function resultDataKindLabel(dataKind) {
@@ -234,9 +303,16 @@ function resultDataKindLabel(dataKind) {
   return '来源未验证';
 }
 
+function resultDbKey(dataKind) {
+  if (dataKind === 'demo') return '107cup-demo';
+  if (dataKind === 'live') return '107cup-live';
+  return '107cup-result';
+}
+
 function displayFailureValue(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') return value;
+  if (typeof value === 'boolean') return String(value);
   return '-';
 }
 
@@ -246,6 +322,7 @@ function normalizeEvidenceLines(value) {
     .filter((entry) => (
       (typeof entry === 'string' && entry.trim() !== '')
       || (typeof entry === 'number' && Number.isFinite(entry))
+      || typeof entry === 'boolean'
     ))
     .map(String);
   return lines.length > 0 ? lines : ['-'];
@@ -253,11 +330,16 @@ function normalizeEvidenceLines(value) {
 
 function hasCompleteFailureEvidence(evidence) {
   if (evidence === null || typeof evidence !== 'object' || Array.isArray(evidence)) return false;
+  const isEvidenceScalar = (value) => (
+    (typeof value === 'string' && value.trim() !== '')
+    || (typeof value === 'number' && Number.isFinite(value))
+    || typeof value === 'boolean'
+  );
   return ['step', 'job_id', 'exit_code', 'reason']
-    .every((key) => displayFailureValue(evidence[key]) !== '-')
-    && Array.isArray(evidence.expected_files)
-    && Array.isArray(evidence.missing_files)
-    && Array.isArray(evidence.log_tail);
+    .every((key) => isEvidenceScalar(evidence[key]))
+    && ['expected_files', 'missing_files', 'log_tail'].every((key) => (
+      Array.isArray(evidence[key]) && evidence[key].every(isEvidenceScalar)
+    ));
 }
 
 function EvidenceList({ values }) {
@@ -352,7 +434,9 @@ export default function CompetitionResultDetail() {
 
   const result = detailState.result;
   const dataKindLabel = resultDataKindLabel(result.data_kind);
-  const resultSteps = Array.isArray(result.steps) ? result.steps : [];
+  const resultSteps = normalizeResultSteps(result.steps);
+  const materialLabel = displayIdentity(result.material);
+  const scientificDbKey = resultDbKey(result.data_kind);
 
   return (
     <main className="competition-result-detail-page">
@@ -361,7 +445,7 @@ export default function CompetitionResultDetail() {
       <header className="competition-result-detail-header">
         <div>
           <div className="competition-result-title-line">
-            <h1>{result.material || 'VASP 计算结果'}</h1>
+            <h1>{materialLabel === '-' ? 'VASP 计算结果' : materialLabel}</h1>
             <StatusBadge status={result.status} />
             {result.data_kind === 'demo' ? <span className="competition-result-demo-label">演示内容</span> : null}
           </div>
@@ -400,7 +484,7 @@ export default function CompetitionResultDetail() {
           </div>
           <VaspTaskSummary
             detail={result.vasp_detail}
-            dbKey="107cup-demo"
+            dbKey={scientificDbKey}
             rowId={workflowId}
             viewer={<VaspStructureViewer structure={result.vasp_detail.structure} />}
             downloadFile={downloadScientificFile}
@@ -413,7 +497,7 @@ export default function CompetitionResultDetail() {
             <h3>电子性质</h3>
             <VaspElectronicProperties
               rowId={workflowId}
-              dbKey="107cup-demo"
+              dbKey={scientificDbKey}
               capabilities={result.vasp_detail.capabilities}
               fetchJson={fetchScientificJson}
               downloadFile={downloadScientificFile}

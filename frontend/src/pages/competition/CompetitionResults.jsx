@@ -33,12 +33,11 @@ function writeResultFilters(searchParams, { query, status }) {
 
 function resultDetailUrl(item) {
   if (item === null || typeof item !== 'object' || Array.isArray(item)) return null;
-  const workflowId = [item.id, item.workflow_id].find((value) => (
-    typeof value === 'string'
-    && value.trim() !== ''
-    && value === value.trim()
-  ));
-  return workflowId ? `/dashboard/results/${encodeURIComponent(workflowId)}` : null;
+  const workflowId = Object.hasOwn(item, 'workflow_id') ? item.workflow_id : item.id;
+  const hasValidWorkflowId = typeof workflowId === 'string'
+    && workflowId.trim() !== ''
+    && workflowId === workflowId.trim();
+  return hasValidWorkflowId ? `/dashboard/results/${encodeURIComponent(workflowId)}` : null;
 }
 
 function selectCompletedResults(payload) {

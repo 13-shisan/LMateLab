@@ -917,9 +917,23 @@ test('result list keeps URL filters executable and opens only completed result i
     'query=S+vacancy&status=succeeded',
   );
 
-  assert.equal(resultDetailUrl({ id: 'wf/result 1', workflow_id: 'fallback' }), '/dashboard/results/wf%2Fresult%201');
+  assert.equal(
+    resultDetailUrl({ id: 'result-row-17', workflow_id: 'wf/live' }),
+    '/dashboard/results/wf%2Flive',
+  );
+  assert.equal(resultDetailUrl({ id: 'wf/result 1' }), '/dashboard/results/wf%2Fresult%201');
   assert.equal(resultDetailUrl({ id: '', workflow_id: 'wf#fallback' }), '/dashboard/results/wf%23fallback');
-  for (const invalid of [null, undefined, {}, [], { id: 7 }, { id: '   ' }, { workflow_id: ' wf-1 ' }]) {
+  for (const invalid of [
+    null,
+    undefined,
+    {},
+    [],
+    { id: 7 },
+    { id: '   ' },
+    { id: 'wf-fallback', workflow_id: '' },
+    { id: 'wf-fallback', workflow_id: {} },
+    { workflow_id: ' wf-1 ' },
+  ]) {
     assert.equal(resultDetailUrl(invalid), null);
   }
 
@@ -1027,8 +1041,19 @@ test('result detail state classifier fails closed before mounting science', () =
       dos_data: true,
     },
   };
+  const acceptedSteps = ['relax', 'scf', 'band', 'dos'].map((key, index) => ({
+    key,
+    status: 'succeeded',
+    accepted: true,
+    job_id: `JOB-${index + 1}`,
+    exit_code: index === 1 ? 0 : '0:0',
+  }));
   const success = {
-    id: 'wf-1', status: 'succeeded', data_kind: 'demo', vasp_detail: scientificDetail,
+    id: 'wf-1',
+    status: 'succeeded',
+    data_kind: 'demo',
+    steps: acceptedSteps,
+    vasp_detail: scientificDetail,
   };
   const failed = { id: 'wf-1', status: 'failed', data_kind: 'live' };
   const parseError = { id: 'wf-1', status: 'parse-error', data_kind: 'demo' };
@@ -1067,6 +1092,24 @@ test('result detail state classifier fails closed before mounting science', () =
     normalizeResultDetailState({ status: 'ready', data: parseError, error: null }, 'wf-1'),
     { status: 'ready', message: undefined, variant: 'failure', result: parseError },
   );
+  const authoritativeResult = {
+    id: 'result-row-17', workflow_id: 'wf-live', status: 'failed', data_kind: 'live',
+  };
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: authoritativeResult }, 'wf-live'),
+    { status: 'ready', message: undefined, variant: 'failure', result: authoritativeResult },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: authoritativeResult }, 'wf-other'),
+    { status: 'parse-error', message: '结果身份不一致', variant: null, result: null },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({
+      status: 'ready',
+      data: { id: 'wf-live', workflow_id: {}, status: 'failed', data_kind: 'live' },
+    }, 'wf-live'),
+    { status: 'parse-error', message: '结果身份无效', variant: null, result: null },
+  );
 
   for (const malformedIdentity of [
     {},
@@ -1095,14 +1138,36 @@ test('result detail state classifier fails closed before mounting science', () =
       { status: 'parse-error', message: '结果状态不受支持', variant: null, result: null },
     );
   }
+  const rowWithoutEnergy = { ...scientificDetail.row };
+  delete rowWithoutEnergy.energy;
+  const propertiesWithoutSpacegroup = { ...scientificDetail.properties };
+  delete propertiesWithoutSpacegroup.spacegroup;
+  const nullableScientificDetail = {
+    ...scientificDetail,
+    row: { ...scientificDetail.row, energy: null, fmax: null },
+    properties: {
+      ...scientificDetail.properties,
+      spacegroup: null,
+      bandgap_eV: null,
+      vbm_eV: null,
+      cbm_eV: null,
+    },
+  };
+  const nullableSuccess = { ...success, data_kind: 'live', vasp_detail: nullableScientificDetail };
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: nullableSuccess }, 'wf-1'),
+    { status: 'ready', message: undefined, variant: 'success', result: nullableSuccess },
+  );
+
   const incompleteDetails = [
     null,
     {},
     { ...scientificDetail, db: {} },
     { ...scientificDetail, row: {} },
     { ...scientificDetail, row: { ...scientificDetail.row, formula: '' } },
-    { ...scientificDetail, row: { ...scientificDetail.row, energy: null } },
+    { ...scientificDetail, row: rowWithoutEnergy },
     { ...scientificDetail, properties: {} },
+    { ...scientificDetail, properties: propertiesWithoutSpacegroup },
     { ...scientificDetail, structure: null },
     { ...scientificDetail, structure: { symbols: [], positions: [], cell: [] } },
     { ...scientificDetail, structure: { ...scientificDetail.structure, pbc: [] } },
@@ -1123,6 +1188,112 @@ test('result detail state classifier fails closed before mounting science', () =
       { status: 'parse-error', message: '科学结果合同不完整', variant: null, result: null },
     );
   }
+
+  const invalidAcceptedSteps = [
+    undefined,
+    [],
+    acceptedSteps.slice(0, 3),
+    [acceptedSteps[0], acceptedSteps[0], acceptedSteps[2], acceptedSteps[3]],
+    acceptedSteps.map((step, index) => (index === 0 ? { ...step, job_id: '' } : step)),
+    acceptedSteps.map((step, index) => (index === 1 ? { ...step, exit_code: null } : step)),
+    acceptedSteps.map((step, index) => (index === 2 ? { ...step, accepted: false } : step)),
+    acceptedSteps.map((step, index) => (index === 3 ? { ...step, status: 'waiting' } : step)),
+  ];
+  for (const invalidSteps of invalidAcceptedSteps) {
+    assert.deepEqual(
+      normalizeResultDetailState({
+        status: 'ready', data: { ...success, steps: invalidSteps },
+      }, 'wf-1'),
+      { status: 'parse-error', message: '结果验收合同不完整', variant: null, result: null },
+    );
+  }
+});
+
+test('result detail sanitizes identity and workflow step evidence before JSX', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const displayIdentity = loadFunction(source, 'displayIdentity');
+  const normalizeResultSteps = loadFunction(source, 'normalizeResultSteps');
+
+  assert.equal(displayIdentity('creator'), 'creator');
+  assert.equal(displayIdentity(0), 0);
+  assert.equal(displayIdentity(false), 'false');
+  for (const unsafe of [null, undefined, '', {}, [], new Date()]) {
+    assert.equal(displayIdentity(unsafe), '-');
+  }
+
+  const normalized = normalizeResultSteps([
+    {
+      key: 'relax',
+      status: {},
+      job_id: {},
+      attempt: 1,
+      attempt_dir: ['attempt-1'],
+      slurm_state: false,
+      exit_code: {},
+      reason: {},
+      accepted: {},
+    },
+    {
+      key: 'scf',
+      status: 'failed',
+      job_id: 'JOB-2',
+      attempt: 0,
+      attempt_dir: 'attempt-1/scf',
+      slurm_state: 'FAILED',
+      exit_code: '1:0',
+      reason: 'not converged',
+      accepted: false,
+    },
+    { key: 'unknown', status: 'failed', job_id: {} },
+    { key: 'scf', status: 'succeeded', job_id: 'duplicate' },
+  ]);
+  assert.deepEqual(normalized.map((step) => step.key), ['relax', 'scf']);
+  assert.equal(normalized[0].status, 'waiting');
+  assert.equal(normalized[0].job_id, null);
+  assert.equal(normalized[0].attempt, 1);
+  assert.equal(normalized[0].attempt_dir, null);
+  assert.equal(normalized[0].slurm_state, 'false');
+  assert.equal(normalized[0].exit_code, null);
+  assert.equal(normalized[0].reason, null);
+  assert.equal(normalized[0].accepted, null);
+  assert.equal(normalized[1].accepted, false);
+  assert.match(source, /const\s+resultSteps\s*=\s*normalizeResultSteps\(result\.steps\);/);
+  assert.match(source, /const\s+materialLabel\s*=\s*displayIdentity\(result\.material\);/);
+});
+
+test('failure evidence completeness rejects unsafe array entries', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const displayFailureValue = loadFunction(source, 'displayFailureValue');
+  const normalizeEvidenceLines = loadFunction(source, 'normalizeEvidenceLines');
+  const hasCompleteFailureEvidence = loadFunction(source, 'hasCompleteFailureEvidence', {
+    displayFailureValue,
+  });
+  const complete = {
+    step: 'scf',
+    job_id: 'JOB-1',
+    exit_code: '1:0',
+    reason: 'failed',
+    expected_files: ['OUTCAR', 2],
+    missing_files: [],
+    log_tail: ['line', false],
+  };
+
+  assert.equal(hasCompleteFailureEvidence(complete), true);
+  assert.equal(hasCompleteFailureEvidence({ ...complete, expected_files: [{}] }), false);
+  assert.equal(hasCompleteFailureEvidence({ ...complete, missing_files: [[]] }), false);
+  assert.equal(hasCompleteFailureEvidence({ ...complete, log_tail: [new Date()] }), false);
+  assert.deepEqual(normalizeEvidenceLines([{}, 'line', 0, false]), ['line', '0', 'false']);
+});
+
+test('scientific db keys distinguish demo from neutral live records', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const resultDbKey = loadFunction(source, 'resultDbKey');
+
+  assert.equal(resultDbKey('demo'), '107cup-demo');
+  assert.equal(resultDbKey('live'), '107cup-live');
+  assert.match(source, /const\s+scientificDbKey\s*=\s*resultDbKey\(result\.data_kind\);/);
+  assert.equal(source.match(/dbKey=\{scientificDbKey\}/g)?.length, 2);
+  assert.doesNotMatch(source, /dbKey=['"]107cup-demo['"]/);
 });
 
 test('result detail binds reused scientific components only to the success AST branch', () => {
@@ -1304,7 +1475,7 @@ test('result detail preserves identity timeline ordering and explicit failure ev
   assert.match(source, /失败证据不完整/);
   assert.match(source, /Array\.isArray/);
   assert.match(source, /演示内容/);
-  assert.match(source, /dbKey=['"]107cup-demo['"]/g);
+  assert.match(source, /dbKey=\{scientificDbKey\}/g);
   assert.match(source, /rowId=\{workflowId\}/g);
   assert.match(source, /downloadFile=\{downloadScientificFile\}/g);
   assert.match(source, /fetchJson=\{fetchScientificJson\}/);
