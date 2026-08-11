@@ -117,4 +117,4 @@ export const PERIODIC_TABLE_ELEMENTS = Object.freeze([
   { Z: 116, symbol: "Lv", name: "Livermorium", row: 7, col: 16 },
   { Z: 117, symbol: "Ts", name: "Tennessine", row: 7, col: 17 },
   { Z: 118, symbol: "Og", name: "Oganesson", row: 7, col: 18 },
-]);
+].map(Object.freeze));

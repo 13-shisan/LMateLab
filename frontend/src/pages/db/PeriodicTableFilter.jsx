@@ -15,15 +15,15 @@ export default function PeriodicTableFilter({
   return (
     <section className="vasp-periodic-filter" aria-label="元素周期表筛选">
       <div className="vasp-periodic-toolbar">
-        <div className="vasp-segmented-control" aria-label="元素匹配模式">
-          <button type="button" className={mode === 'at_least' ? 'is-active' : ''} onClick={() => onModeChange('at_least')}>至少含有所选元素</button>
-          <button type="button" className={mode === 'only' ? 'is-active' : ''} onClick={() => onModeChange('only')}>只含所选元素</button>
+        <div className="vasp-segmented-control" role="group" aria-label="元素匹配模式">
+          <button type="button" className={mode === 'at_least' ? 'is-active' : ''} aria-pressed={mode === 'at_least'} onClick={() => onModeChange('at_least')}>至少含有所选元素</button>
+          <button type="button" className={mode === 'only' ? 'is-active' : ''} aria-pressed={mode === 'only'} onClick={() => onModeChange('only')}>只含所选元素</button>
         </div>
         <button type="button" onClick={() => onSelectionChange([])} disabled={selectedElements.length === 0}>清空选择</button>
       </div>
       <div className="vasp-selected-elements" aria-live="polite">
         {selectedElements.length === 0 ? <span>未选择元素</span> : selectedElements.map((symbol) => (
-          <button key={symbol} type="button" onClick={() => onSelectionChange(toggleElementSelection(selectedElements, symbol))} title={`移除 ${symbol}`}>{symbol}</button>
+          <button key={symbol} type="button" onClick={() => onSelectionChange(toggleElementSelection(selectedElements, symbol))} aria-label={`移除 ${symbol}`} title={`移除 ${symbol}`}>{symbol}</button>
         ))}
       </div>
       <div className="vasp-periodic-scroll">

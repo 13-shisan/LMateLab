@@ -73,9 +73,10 @@
   font-weight: 700;
 }
 
-.vasp-periodic-scroll {
+.vasp-periodic-filter .vasp-periodic-scroll {
   max-width: 100%;
   overflow-x: auto;
+  justify-content: safe center;
   padding-bottom: 4px;
 }
 
