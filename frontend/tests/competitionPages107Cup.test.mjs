@@ -3,17 +3,34 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parse } from '@babel/parser';
 
+import { canWriteCompetitionData } from '../src/config/competitionAccess.js';
+
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
-function loadFunction(source, name) {
+function loadFunction(source, name, bindings = {}) {
   const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
   const declaration = ast.program.body
     .map((node) => (node.type === 'ExportNamedDeclaration' ? node.declaration : node))
     .find((node) => node?.type === 'FunctionDeclaration' && node.id?.name === name);
   assert.ok(declaration, `${name} must exist for executable regression coverage`);
+  const names = Object.keys(bindings);
   return new Function(
+    ...names,
     `${source.slice(declaration.start, declaration.end)}\nreturn ${name};`,
-  )();
+  )(...names.map((key) => bindings[key]));
+}
+
+function findNodes(value, predicate, matches = []) {
+  if (value === null || typeof value !== 'object') return matches;
+  if (predicate(value)) matches.push(value);
+  for (const child of Object.values(value)) {
+    if (Array.isArray(child)) {
+      for (const entry of child) findNodes(entry, predicate, matches);
+    } else {
+      findNodes(child, predicate, matches);
+    }
+  }
+  return matches;
 }
 
 test('competition state surfaces keep demo, loading, and failures explicit', () => {
@@ -304,15 +321,16 @@ test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', 
   assert.match(source, /import\s+['"]\.\.\/db\/vasp-detail\/VaspTaskDetail\.css['"];?/);
   assert.match(source, /import\s+['"]\.\/CompetitionPages\.css['"];?/);
   assert.match(source, /useState\(['"]builtin['"]\)/);
-  assert.match(source, /setSourceKind\(['"]builtin['"]\)/);
-  assert.match(source, /setSourceKind\(['"]upload['"]\)/);
+  assert.match(source, /handleSourceKindChange\(['"]builtin['"]\)/);
+  assert.match(source, /handleSourceKindChange\(['"]upload['"]\)/);
   assert.match(source, /const\s*\{\s*provider,\s*mode\s*\}\s*=\s*useCompetitionData\(\);/);
   assert.match(source, /const\s+user\s*=\s*readStoredUser\(\);/);
   assert.match(
     source,
     /const\s+readOnly\s*=\s*mode\s*===\s*['"]demo['"]\s*\|\|\s*!canWriteCompetitionData\(user\);/,
   );
-  assert.match(source, /function\s+readStoredUser\(\)\s*{[\s\S]*?try\s*{[\s\S]*?JSON\.parse\(localStorage\.getItem\(['"]user['"]\)\s*\|\|\s*['"]null['"]\)[\s\S]*?catch[\s\S]*?return\s+null/s);
+  assert.match(source, /function\s+readStoredUser\(storage\)/);
+  assert.match(source, /globalThis\.localStorage/);
   assert.match(source, /id:\s*['"]preview-draft['"]/);
   assert.match(source, /source_kind:\s*sourceKind/);
   assert.match(source, /template_version:\s*['"]mos2-v1['"]/);
@@ -325,12 +343,101 @@ test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', 
   assert.equal(source.match(/provider\.saveDraft\(draft\)/g)?.length, 1);
   assert.equal(source.match(/provider\.submitWorkflow\(draft\.id\)/g)?.length, 1);
   assert.ok((source.match(/disabled=\{readOnly\}/g) || []).length >= 2);
-  assert.match(source, /async\s+function\s+handleSaveDraft[\s\S]*?try\s*{[\s\S]*?await\s+provider\.saveDraft\(draft\)[\s\S]*?catch/s);
-  assert.match(source, /async\s+function\s+handleSubmitWorkflow[\s\S]*?try\s*{[\s\S]*?await\s+provider\.submitWorkflow\(draft\.id\)[\s\S]*?catch/s);
+  assert.match(source, /async\s+function\s+handleSaveDraft[\s\S]*?try\s*{[\s\S]*?await\s+executeCompetitionWrite\([\s\S]*?catch/s);
+  assert.match(source, /async\s+function\s+handleSubmitWorkflow[\s\S]*?try\s*{[\s\S]*?await\s+executeCompetitionWrite\([\s\S]*?catch/s);
   assert.doesNotMatch(source, /alert\s*\([^)]*成功|toast\s*\([^)]*成功/i);
   assert.doesNotMatch(source, /\b(?:add|delete|drag|reorder)(?:Step)?\b|添加|删除|拖拽|重排/i);
   assert.doesNotMatch(source, /Agent|Machine Learning|\bML\b|Quantum ESPRESSO|\bQE\b/);
   assert.doesNotMatch(source, /card/i);
+});
+
+test('new calculation upload source hides builtin structure and draft claims', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const sourceConditionals = findNodes(ast, (node) => (
+    node.type === 'ConditionalExpression'
+    && source.slice(node.test.start, node.test.end).replaceAll(' ', '') === "sourceKind==='builtin'"
+  ));
+  const branchSource = (node, branch) => source.slice(node[branch].start, node[branch].end);
+  const structureConditional = sourceConditionals.find((node) => (
+    branchSource(node, 'consequent').includes('competition-structure-summary')
+    && branchSource(node, 'alternate').includes('competition-structure-summary')
+  ));
+
+  assert.ok(structureConditional, 'structure summary must branch on builtin versus upload');
+  const builtinSummary = branchSource(structureConditional, 'consequent');
+  const uploadSummary = branchSource(structureConditional, 'alternate');
+  for (const token of ['MoS2', 'DEMO_STRUCTURE.symbols.length', '3.158', '20.000']) {
+    assert.match(builtinSummary, new RegExp(token.replaceAll('.', '\\.')));
+  }
+  for (const token of ['待选择', '未解析', '不可提交']) assert.match(uploadSummary, new RegExp(token));
+  assert.doesNotMatch(uploadSummary, /MoS2|DEMO_STRUCTURE|3\.158|20\.000|内置结构/);
+
+  const draftConditional = sourceConditionals.find((node) => (
+    branchSource(node, 'consequent').includes('preview-draft')
+    && branchSource(node, 'alternate').includes('preview-draft')
+  ));
+  assert.ok(draftConditional, 'draft summary must branch on builtin versus upload');
+  assert.match(branchSource(draftConditional, 'consequent'), /mos2-v1.*4 步/s);
+  assert.match(branchSource(draftConditional, 'alternate'), /上传结构待选择.*未解析.*不可提交/s);
+  assert.doesNotMatch(branchSource(draftConditional, 'alternate'), /mos2-v1/);
+});
+
+test('new calculation executes writes only for live builtin operators', async () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const executeCompetitionWrite = loadFunction(source, 'executeCompetitionWrite', {
+    canWriteCompetitionData,
+  });
+  let writeCount = 0;
+  const write = async () => {
+    writeCount += 1;
+  };
+
+  assert.equal(await executeCompetitionWrite({
+    mode: 'demo', user: { role: 'operator' }, sourceKind: 'builtin', write,
+  }), false);
+  assert.equal(await executeCompetitionWrite({
+    mode: 'standard', user: { role: 'operator' }, sourceKind: 'builtin', write,
+  }), false);
+  assert.equal(await executeCompetitionWrite({
+    mode: 'live', user: { role: 'viewer' }, sourceKind: 'builtin', write,
+  }), false);
+  assert.equal(await executeCompetitionWrite({
+    mode: 'live', user: { role: 'operator' }, sourceKind: 'upload', write,
+  }), false);
+  assert.equal(writeCount, 0);
+  assert.equal(await executeCompetitionWrite({
+    mode: 'live', user: { role: 'operator' }, sourceKind: 'builtin', write,
+  }), true);
+  assert.equal(writeCount, 1);
+
+  assert.equal(source.match(/await\s+executeCompetitionWrite\(\{/g)?.length, 2);
+  assert.match(source, /write:\s*\(\)\s*=>\s*provider\.saveDraft\(draft\)/);
+  assert.match(source, /write:\s*\(\)\s*=>\s*provider\.submitWorkflow\(draft\.id\)/);
+});
+
+test('new calculation stored user parsing fails closed and accepts valid JSON', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const readStoredUser = loadFunction(source, 'readStoredUser', { globalThis: {} });
+
+  assert.equal(readStoredUser(), null);
+  assert.equal(readStoredUser({ getItem() { throw new Error('storage unavailable'); } }), null);
+  assert.equal(readStoredUser({ getItem() { return '{not-json'; } }), null);
+  assert.deepEqual(
+    readStoredUser({ getItem() { return '{"role":"operator","name":"Ada"}'; } }),
+    { role: 'operator', name: 'Ada' },
+  );
+});
+
+test('new calculation source selection clears stale command failures', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+
+  assert.match(
+    source,
+    /function\s+handleSourceKindChange\(nextSourceKind\)\s*{[^}]*setSourceKind\(nextSourceKind\);[^}]*setCommandError\(['"]['"]\);[^}]*}/s,
+  );
+  assert.match(source, /onClick=\{\(\)\s*=>\s*handleSourceKindChange\(['"]builtin['"]\)\}/);
+  assert.match(source, /onClick=\{\(\)\s*=>\s*handleSourceKindChange\(['"]upload['"]\)\}/);
 });
 
 test('new calculation workflow preserves the approved dependency fork', () => {

@@ -41,12 +41,21 @@ const STEP_PARAMETERS = {
   },
 };
 
-function readStoredUser() {
+function readStoredUser(storage) {
   try {
-    return JSON.parse(localStorage.getItem('user') || 'null');
+    const selectedStorage = storage === undefined ? globalThis.localStorage : storage;
+    return JSON.parse(selectedStorage?.getItem('user') || 'null');
   } catch {
     return null;
   }
+}
+
+async function executeCompetitionWrite({ mode, user, sourceKind, write }) {
+  if (mode !== 'live' || !canWriteCompetitionData(user) || sourceKind !== 'builtin') {
+    return false;
+  }
+  await write();
+  return true;
 }
 
 export default function CompetitionNewCalculation() {
@@ -64,29 +73,40 @@ export default function CompetitionNewCalculation() {
     steps: WORKFLOW_STEPS.map((step) => step.key),
   };
 
+  function handleSourceKindChange(nextSourceKind) {
+    setSourceKind(nextSourceKind);
+    setCommandError('');
+  }
+
   async function handleSaveDraft() {
-    if (readOnly) return;
-    if (sourceKind !== 'builtin') {
-      setCommandError('上传来源仅供只读占位，未选择结构，不能保存。');
-      return;
-    }
     setCommandError('');
     try {
-      await provider.saveDraft(draft);
+      const executed = await executeCompetitionWrite({
+        mode,
+        user,
+        sourceKind,
+        write: () => provider.saveDraft(draft),
+      });
+      if (!executed && sourceKind === 'upload') {
+        setCommandError('上传结构待选择且未解析，不可保存。');
+      }
     } catch (error) {
       setCommandError(error?.message || '草稿保存失败');
     }
   }
 
   async function handleSubmitWorkflow() {
-    if (readOnly) return;
-    if (sourceKind !== 'builtin') {
-      setCommandError('上传来源仅供只读占位，未选择结构，不能提交。');
-      return;
-    }
     setCommandError('');
     try {
-      await provider.submitWorkflow(draft.id);
+      const executed = await executeCompetitionWrite({
+        mode,
+        user,
+        sourceKind,
+        write: () => provider.submitWorkflow(draft.id),
+      });
+      if (!executed && sourceKind === 'upload') {
+        setCommandError('上传结构待选择且未解析，不可提交。');
+      }
     } catch (error) {
       setCommandError(error?.message || '工作流提交失败');
     }
@@ -116,7 +136,7 @@ export default function CompetitionNewCalculation() {
             className={sourceKind === 'builtin' ? 'is-active' : ''}
             type="button"
             aria-pressed={sourceKind === 'builtin'}
-            onClick={() => setSourceKind('builtin')}
+            onClick={() => handleSourceKindChange('builtin')}
           >
             内置 MoS2
           </button>
@@ -124,7 +144,7 @@ export default function CompetitionNewCalculation() {
             className={sourceKind === 'upload' ? 'is-active' : ''}
             type="button"
             aria-pressed={sourceKind === 'upload'}
-            onClick={() => setSourceKind('upload')}
+            onClick={() => handleSourceKindChange('upload')}
           >
             上传结构
           </button>
@@ -150,18 +170,30 @@ export default function CompetitionNewCalculation() {
             )}
           </div>
 
-          <aside className="competition-structure-summary" aria-label="晶格摘要">
-            <h3>晶格摘要</h3>
-            <dl>
-              <div><dt>化学式</dt><dd>MoS2</dd></div>
-              <div><dt>原子数</dt><dd>{DEMO_STRUCTURE.symbols.length}</dd></div>
-              <div><dt>a</dt><dd>3.158 Å</dd></div>
-              <div><dt>b</dt><dd>3.158 Å</dd></div>
-              <div><dt>c</dt><dd>20.000 Å</dd></div>
-              <div><dt>周期性</dt><dd>x / y</dd></div>
-            </dl>
-            <p>内置结构 · 演示数据</p>
-          </aside>
+          {sourceKind === 'builtin' ? (
+            <aside className="competition-structure-summary" aria-label="晶格摘要">
+              <h3>晶格摘要</h3>
+              <dl>
+                <div><dt>化学式</dt><dd>MoS2</dd></div>
+                <div><dt>原子数</dt><dd>{DEMO_STRUCTURE.symbols.length}</dd></div>
+                <div><dt>a</dt><dd>3.158 Å</dd></div>
+                <div><dt>b</dt><dd>3.158 Å</dd></div>
+                <div><dt>c</dt><dd>20.000 Å</dd></div>
+                <div><dt>周期性</dt><dd>x / y</dd></div>
+              </dl>
+              <p>内置结构 · 演示数据</p>
+            </aside>
+          ) : (
+            <aside className="competition-structure-summary" aria-label="上传结构状态">
+              <h3>结构状态</h3>
+              <dl>
+                <div><dt>文件</dt><dd>待选择</dd></div>
+                <div><dt>解析</dt><dd>未解析</dd></div>
+                <div><dt>提交</dt><dd>不可提交</dd></div>
+              </dl>
+              <p>上传来源 · 未选择结构</p>
+            </aside>
+          )}
         </div>
       </section>
 
@@ -237,7 +269,11 @@ export default function CompetitionNewCalculation() {
       <footer className="competition-command-bar">
         <div>
           <strong>预览草稿</strong>
-          <span>preview-draft · mos2-v1 · 4 步</span>
+          <span>
+            {sourceKind === 'builtin'
+              ? 'preview-draft · mos2-v1 · 4 步'
+              : 'preview-draft · 上传结构待选择 · 未解析 · 不可提交'}
+          </span>
           {commandError ? <p role="alert">{commandError}</p> : null}
         </div>
         <div className="competition-command-actions">
