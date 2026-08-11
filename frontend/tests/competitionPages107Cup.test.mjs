@@ -126,3 +126,86 @@ test('disabled competition table actions do not receive hover styling', () => {
   assert.match(source, /\.vasp-viewer-reset:hover/);
   assert.doesNotMatch(source, /\.competition-table-action button:hover/);
 });
+
+test('competition dashboard loads operational preview data without placeholder claims', () => {
+  const source = read('../src/pages/CompetitionDashboard.jsx');
+
+  for (const token of [
+    'getDashboard',
+    '新建计算',
+    '最近工作流',
+    'WorkflowTimeline',
+    'Slurm 资源',
+    'DemoDataBanner',
+    '107 杯 VASP 计算工作台',
+    '结构到 BAND/DOS 的固定可追溯闭环',
+    'summary.total',
+    'summary.running',
+    'summary.recent_succeeded',
+    'summary.needs_attention',
+    'recent_workflows',
+    'active_workflow',
+    'slurm.partition',
+    'slurm.queued',
+    'slurm.running',
+    'slurm.updated_at',
+    '演示快照',
+  ]) {
+    assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.match(source, /import\s+['"]\.\/Dashboard\.css['"];?/);
+  assert.match(source, /const\s*{\s*provider,\s*mode\s*}\s*=\s*useCompetitionData\(\);/);
+  assert.match(source, /const\s+loadDashboard\s*=\s*useCallback\(\(\)\s*=>\s*provider\.getDashboard\(\),\s*\[provider\]\);/);
+  assert.match(source, /const\s+state\s*=\s*useCompetitionResource\(loadDashboard\);/);
+  assert.match(source, /state\.status\s*!==\s*['"]ready['"]/);
+  assert.match(source, /<main\s+className=['"]competition-page['"]>/);
+  assert.match(source, /message=\{state\.error\?\.message\}/);
+  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*<DemoDataBanner\s*\/>\s*:\s*null/);
+  assert.match(source, /<Link[\s\S]*?to=['"]\/dashboard\/calculations\/new['"][\s\S]*?aria-label=['"]新建计算['"][\s\S]*?title=['"]新建计算['"][\s\S]*?<SquarePlus\b/);
+  assert.match(source, /<CompetitionTable\s+items=\{recent_workflows\}\s+kind=['"]workflow['"]\s+onOpen=\{openWorkflow\}/);
+  assert.match(source, /navigate\(`\/dashboard\/workflows\/\$\{/);
+  assert.match(source, /<WorkflowTimeline\s+steps=\{active_workflow\.steps\}\s+compact\s*\/>/);
+  assert.match(source, /<CompetitionState\s+status=['"]empty['"]\s+message=['"]暂无当前工作流['"]\s*\/>/);
+  assert.doesNotMatch(source, />0</);
+  assert.doesNotMatch(source, /暂无工作流记录/);
+  assert.doesNotMatch(source, /正常运行/);
+  assert.doesNotMatch(source, /username|job[ _-]?name|work[ _-]?directory/i);
+});
+
+test('competition dashboard styles keep the approved responsive work layout', () => {
+  const source = read('../src/pages/Dashboard.css');
+
+  assert.match(
+    source,
+    /\.lm-dashboard-grid\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.65fr\)\s+minmax\(280px,\s*\.85fr\)/s,
+  );
+  assert.match(
+    source,
+    /@media\s*\(max-width:\s*1120px\)[\s\S]*?\.lm-dashboard-grid\s*{[^}]*grid-template-columns:\s*1fr/s,
+  );
+  const mobile = source.match(/@media\s*\(max-width:\s*700px\)\s*{([\s\S]*)}\s*$/)?.[1] || '';
+  assert.match(mobile, /\.lm-overview-grid\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(mobile, /\.lm-primary-action\s*{[^}]*width:\s*36px[^}]*height:\s*36px/s);
+  assert.doesNotMatch(source, /letter-spacing:\s*-/);
+  for (const radius of source.matchAll(/border-radius:\s*(\d+)px/g)) {
+    assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
+  }
+});
+
+test('competition dashboard compact timeline fits the narrow side band', () => {
+  const source = read('../src/pages/Dashboard.css');
+
+  assert.match(
+    source,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*overflow-x:\s*visible/s,
+  );
+  assert.match(
+    source,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li:nth-child\(n\)\s*{[^}]*grid-column:\s*1[^}]*grid-row:\s*auto/s,
+  );
+  assert.match(
+    source,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li::before,[\s\S]*?li::after\s*{[^}]*display:\s*none/s,
+  );
+});
