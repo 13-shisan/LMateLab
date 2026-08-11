@@ -39,6 +39,8 @@ Thumbs.db
 /frontend/.cache/
 /frontend/.vite/
 /frontend/.eslintcache
+/frontend/test-results/
+/frontend/playwright-report/
 
 # 前端本地环境文件（如果你用到）
 /frontend/.env
