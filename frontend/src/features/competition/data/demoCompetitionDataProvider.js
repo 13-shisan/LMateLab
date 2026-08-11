@@ -30,7 +30,14 @@ function rejectMutation(action) {
 function matchesQuery(record, query) {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return true;
-  return [record.id, record.workflow_id, record.material, record.formula, record.source]
+  return [record.id, record.material, record.source]
+    .some((value) => String(value || '').toLowerCase().includes(needle));
+}
+
+function matchesDatabaseQuery(record, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  return [record.formula, record.source, record.workflow_id]
     .some((value) => String(value || '').toLowerCase().includes(needle));
 }
 
@@ -48,15 +55,19 @@ export function createDemoCompetitionDataProvider() {
     },
 
     async listWorkflows({ query = '', status = '' } = {}) {
-      return clone(DEMO_WORKFLOWS.filter((workflow) => (
+      const items = DEMO_WORKFLOWS.filter((workflow) => (
         matchesQuery(workflow, query) && matchesStatus(workflow, status)
-      )));
+      ));
+      return {
+        items: clone(items),
+        total: items.length,
+        data_kind: 'demo',
+      };
     },
 
     async getWorkflow(id) {
       const workflow = DEMO_WORKFLOWS.find((item) => item.id === id);
-      if (!workflow) return notFound(`Workflow not found: ${id}`);
-      return clone(workflow);
+      return clone(workflow || null);
     },
 
     async listResults({ query = '', status = '' } = {}) {
@@ -65,13 +76,16 @@ export function createDemoCompetitionDataProvider() {
         && matchesQuery(result, query)
         && matchesStatus(result, status)
       ));
-      return clone(results);
+      return {
+        items: clone(results),
+        total: results.length,
+        data_kind: 'demo',
+      };
     },
 
     async getResult(id) {
       const result = DEMO_RESULTS_BY_ID[id];
-      if (!result) return notFound(`Result not found: ${id}`);
-      return clone(result);
+      return clone(result || null);
     },
 
     async listDatabase({
@@ -85,12 +99,12 @@ export function createDemoCompetitionDataProvider() {
       const currentPageSize = Math.max(1, Number(pageSize) || 20);
       const filtered = DEMO_DATABASE_ROWS.filter((row) => (
         matchesElementSelection(row.elements, elements, elementMode)
-        && matchesQuery(row, query)
+        && matchesDatabaseQuery(row, query)
       ));
       const start = (currentPage - 1) * currentPageSize;
 
       return clone({
-        rows: filtered.slice(start, start + currentPageSize),
+        items: filtered.slice(start, start + currentPageSize),
         total: filtered.length,
         page: currentPage,
         page_size: currentPageSize,
@@ -102,8 +116,7 @@ export function createDemoCompetitionDataProvider() {
 
     async getDatabaseRecord(id) {
       const row = DEMO_DATABASE_ROWS.find((item) => item.id === id || item._rowId === id);
-      if (!row) return notFound(`Database record not found: ${id}`);
-      return clone(row);
+      return clone(row || null);
     },
 
     async loadPlot(id, kind) {

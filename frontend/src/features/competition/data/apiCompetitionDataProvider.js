@@ -167,7 +167,7 @@ export function createApiCompetitionDataProvider({
       return jsonPost(`/api/competition/workflows/${encodeURIComponent(id)}/cancel`, {});
     },
 
-    retryWorkflow(id, step) {
+    retryWorkflow({ id, step }) {
       return jsonPost(
         `/api/competition/workflows/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/retry`,
         {},

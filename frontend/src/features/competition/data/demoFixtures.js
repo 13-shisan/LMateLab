@@ -219,8 +219,8 @@ export const DEMO_DATABASE_ROWS = markDemoCollection(DEMO_WORKFLOWS.map((workflo
     status: workflow.status,
     latest_job_id: workflow.latest_job_id,
     data_kind: DATA_KIND,
-    bandgap_eV: 1.78,
-    energy: -22.418731,
+    bandgap_eV: succeeded ? 1.78 : null,
+    energy: succeeded ? -22.418731 : null,
     completed_at: succeeded ? workflow.updated_at : null,
     vasp_detail: succeeded ? vaspDetail : unavailableVaspDetail,
   };
