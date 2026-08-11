@@ -78,6 +78,22 @@ function databasePageNormalization(page, total, pageSize) {
   return {
     required: targetPage !== page,
     targetPage,
+    totalPages,
+  };
+}
+
+function databasePageViewState(listStatus, page, pageNormalization, result) {
+  const pageNormalizing = listStatus === 'ready' && pageNormalization.required;
+  return {
+    pageNormalizing,
+    listStatus: pageNormalizing ? 'loading' : listStatus,
+    showTable: !pageNormalizing && (listStatus === 'ready' || listStatus === 'loading'),
+    records: pageNormalizing
+      ? []
+      : result.items.map((item) => ({ ...item, _rowId: item.id })),
+    headingPage: pageNormalizing ? null : page,
+    totalPages: pageNormalization.totalPages,
+    paginationDisabled: pageNormalizing || listStatus !== 'ready',
   };
 }
 
@@ -406,10 +422,14 @@ export default function CompetitionVaspDatabase() {
     [listState.data, listState.status],
   );
   const result = normalizedResult || EMPTY_DATABASE_RESULT;
-  const records = useMemo(
-    () => result.items.map((item) => ({ ...item, _rowId: item.id })),
-    [result.items],
+  const listStatus = listState.status === 'ready' && normalizedResult === null
+    ? 'parse-error'
+    : databaseDetailState(listState, { status: 'ready' });
+  const pageNormalization = useMemo(
+    () => databasePageNormalization(page, result.total, DATABASE_PAGE_SIZE),
+    [page, result.total],
   );
+  const pageView = databasePageViewState(listStatus, page, pageNormalization, result);
   const selectedRecord = useMemo(
     () => (detailResource.status === 'ready'
       ? normalizeDatabaseRecord(detailResource.data, selectedRecordId)
@@ -419,7 +439,6 @@ export default function CompetitionVaspDatabase() {
   const detailStatus = selectedRecordId
     ? databaseDetailState(detailResource, selectedRecord)
     : 'empty';
-  const totalPages = Math.max(1, Math.ceil(result.total / DATABASE_PAGE_SIZE));
 
   const updateUrlState = useCallback((changes, options = {}) => {
     const next = {
@@ -455,44 +474,38 @@ export default function CompetitionVaspDatabase() {
   }, [updateUrlState]);
   const changePage = useCallback((nextPage) => {
     updateUrlState(
-      { page: Math.min(totalPages, Math.max(1, nextPage)) },
+      { page: Math.min(pageNormalization.totalPages, Math.max(1, nextPage)) },
       { clearRecord: true },
     );
-  }, [totalPages, updateUrlState]);
+  }, [pageNormalization.totalPages, updateUrlState]);
   const selectRecord = useCallback((item) => {
     const recordId = safeText(item?.id).trim();
     if (!recordId) return;
     updateUrlState({ selectedRecordId: recordId });
   }, [updateUrlState]);
 
-  const listStatus = listState.status === 'ready' && normalizedResult === null
-    ? 'parse-error'
-    : databaseDetailState(listState, { status: 'ready' });
-  const showTable = listStatus === 'ready' || listStatus === 'loading';
-
   useEffect(() => {
     if (listStatus !== 'ready') {
       pageNormalizationRef.current = '';
       return;
     }
-    const normalization = databasePageNormalization(page, result.total, DATABASE_PAGE_SIZE);
-    if (!normalization.required) return;
+    if (!pageNormalization.required) return;
     const normalizationKey = JSON.stringify([
       listRequestKey,
       result.total,
-      normalization.targetPage,
+      pageNormalization.targetPage,
     ]);
     if (!shouldApplyPageNormalization(
-      normalization.required,
+      pageNormalization.required,
       normalizationKey,
       pageNormalizationRef.current,
     )) return;
     pageNormalizationRef.current = normalizationKey;
     updateUrlState(
-      { page: normalization.targetPage },
+      { page: pageNormalization.targetPage },
       { clearRecord: true },
     );
-  }, [listRequestKey, listStatus, page, result.total, updateUrlState]);
+  }, [listRequestKey, listStatus, pageNormalization, result.total, updateUrlState]);
 
   return (
     <main className="competition-database-page">
@@ -506,7 +519,7 @@ export default function CompetitionVaspDatabase() {
       <section className="competition-database-filters" aria-labelledby="competition-database-filter-title">
         <div className="competition-database-section-heading">
           <h2 id="competition-database-filter-title">元素筛选</h2>
-          {listStatus === 'ready' ? <span>{result.total} 条结果</span> : null}
+          {pageView.listStatus === 'ready' ? <span>{result.total} 条结果</span> : null}
         </div>
         <PeriodicTableFilter
           availableElements={result.available_elements}
@@ -534,38 +547,43 @@ export default function CompetitionVaspDatabase() {
         <section className="competition-database-records" aria-labelledby="competition-database-records-title">
           <div className="competition-database-section-heading">
             <h2 id="competition-database-records-title">记录</h2>
-            <span>第 {page} / {totalPages} 页</span>
+            {pageView.pageNormalizing
+              ? <span>正在校正页码...</span>
+              : <span>第 {pageView.headingPage} / {pageView.totalPages} 页</span>}
           </div>
 
-          {showTable ? (
+          {pageView.showTable ? (
             <VaspRecordTable
-              records={records}
+              records={pageView.records}
               columns={DATABASE_COLUMNS}
               metadata={result.metadata}
-              loading={listState.status === 'loading'}
-              loadedOnce={listState.status !== 'loading'}
+              loading={pageView.listStatus === 'loading'}
+              loadedOnce={pageView.listStatus !== 'loading'}
               detailPathForItem={databaseRecordUrl}
               onSelect={selectRecord}
               renderCell={renderDatabaseCell}
               mobileMode="scroll"
             />
           ) : (
-            <CompetitionState status={listStatus} message={listState.error?.message} />
+            <CompetitionState
+              status={pageView.listStatus}
+              message={pageView.pageNormalizing ? '正在校正页码' : listState.error?.message}
+            />
           )}
 
           <nav className="competition-database-pagination" aria-label="数据库分页">
             <button
               type="button"
-              disabled={page <= 1 || listStatus !== 'ready'}
-              onClick={() => changePage(page - 1)}
+              disabled={pageView.paginationDisabled || pageView.headingPage <= 1}
+              onClick={() => changePage(pageView.headingPage - 1)}
             >
               上一页
             </button>
             <span>{result.total} 条记录</span>
             <button
               type="button"
-              disabled={page >= totalPages || listStatus !== 'ready'}
-              onClick={() => changePage(page + 1)}
+              disabled={pageView.paginationDisabled || pageView.headingPage >= pageView.totalPages}
+              onClick={() => changePage(pageView.headingPage + 1)}
             >
               下一页
             </button>

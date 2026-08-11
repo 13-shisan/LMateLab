@@ -127,14 +127,17 @@ test('competition database page normalization clamps once and preserves filters'
   assert.deepEqual(databasePageNormalization(999, 21, 20), {
     required: true,
     targetPage: 2,
+    totalPages: 2,
   });
   assert.deepEqual(databasePageNormalization(999, 0, 20), {
     required: true,
     targetPage: 1,
+    totalPages: 1,
   });
   assert.deepEqual(databasePageNormalization(2, 21, 20), {
     required: false,
     targetPage: 2,
+    totalPages: 2,
   });
   assert.equal(shouldApplyPageNormalization(true, 'page:999->2', ''), true);
   assert.equal(shouldApplyPageNormalization(true, 'page:999->2', 'page:999->2'), false);
@@ -153,13 +156,56 @@ test('competition database page normalization clamps once and preserves filters'
   assert.equal(params.has('record'), false);
   assert.match(
     source,
-    /useEffect\(\(\)\s*=>\s*\{[\s\S]*?databasePageNormalization\(page,\s*result\.total,\s*DATABASE_PAGE_SIZE\)[\s\S]*?if\s*\(!normalization\.required\)\s*return;[\s\S]*?updateUrlState\([\s\S]*?page:\s*normalization\.targetPage[\s\S]*?clearRecord:\s*true/s,
+    /const\s+pageNormalization\s*=\s*useMemo\(\s*\(\)\s*=>\s*databasePageNormalization\(page,\s*result\.total,\s*DATABASE_PAGE_SIZE\)/,
+  );
+  assert.match(
+    source,
+    /useEffect\(\(\)\s*=>\s*\{[\s\S]*?if\s*\(!pageNormalization\.required\)\s*return;[\s\S]*?updateUrlState\([\s\S]*?page:\s*pageNormalization\.targetPage[\s\S]*?clearRecord:\s*true/s,
   );
   assert.match(source, /const\s+pageNormalizationRef\s*=\s*useRef\(['"]['"]\)/);
   assert.match(
     source,
-    /shouldApplyPageNormalization\(\s*normalization\.required,\s*normalizationKey,\s*pageNormalizationRef\.current,?\s*\)/,
+    /shouldApplyPageNormalization\(\s*pageNormalization\.required,\s*normalizationKey,\s*pageNormalizationRef\.current,?\s*\)/,
   );
+});
+
+test('competition database render state masks out-of-range ready frames', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const databasePageNormalization = loadFunction(source, 'databasePageNormalization');
+  const databasePageViewState = loadFunction(source, 'databasePageViewState');
+  const pageNormalization = databasePageNormalization(999, 21, 20);
+  const result = {
+    items: [{ id: 'out-of-range', formula: 'MoS2' }],
+    total: 21,
+  };
+
+  assert.deepEqual(databasePageViewState('ready', 999, pageNormalization, result), {
+    pageNormalizing: true,
+    listStatus: 'loading',
+    showTable: false,
+    records: [],
+    headingPage: null,
+    totalPages: 2,
+    paginationDisabled: true,
+  });
+  assert.deepEqual(databasePageViewState(
+    'ready',
+    2,
+    databasePageNormalization(2, 21, 20),
+    result,
+  ), {
+    pageNormalizing: false,
+    listStatus: 'ready',
+    showTable: true,
+    records: [{ id: 'out-of-range', formula: 'MoS2', _rowId: 'out-of-range' }],
+    headingPage: 2,
+    totalPages: 2,
+    paginationDisabled: false,
+  });
+  assert.match(source, /const\s+pageView\s*=\s*databasePageViewState\(listStatus,\s*page,\s*pageNormalization,\s*result\)/);
+  assert.match(source, /pageView\.pageNormalizing\s*\?\s*<span>[^<]*校正页码[^<]*<\/span>/);
+  assert.match(source, /\{pageView\.showTable\s*\?\s*\([\s\S]*?records=\{pageView\.records\}/s);
+  assert.match(source, /disabled=\{pageView\.paginationDisabled\s*\|\|/);
 });
 
 test('competition database request envelopes reject stale list and detail frames', async () => {
