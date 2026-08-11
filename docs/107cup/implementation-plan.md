@@ -558,14 +558,14 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 
 专项设计：`docs/superpowers/specs/2026-08-10-107cup-frontend-preview-design.md`。
 
-- [ ] 按 `superpowers:writing-plans` 生成可执行实施计划并经用户复核。
-- [ ] 建立独立功能工作树和分支，不在受保护 `main` 直接修改。
-- [ ] 优先复用现有结构、晶体详情、BAND/DOS、元素颜色和导出组件。
-- [ ] 从原 VASP 数据库提取完整周期表筛选和只读表格核心，保持原页面兼容。
-- [ ] 为工作台、新建计算、工作流、结果和 VASP 数据库增加 107 专用路由。
-- [ ] 实现 demo/live 数据提供器；预览模式的全部 mutation 失败关闭且不伪造成功。
-- [ ] 使用内置 MoS2 演示成功、运行中和人为失败状态；不导入 4090 生产数据。
-- [ ] 在本地完成针对性测试、构建和代码检查，只记录为本地预检。
+- [x] 按 `superpowers:writing-plans` 生成可执行实施计划并经用户复核。
+- [x] 建立独立功能工作树和分支，不在受保护 `main` 直接修改。
+- [x] 优先复用现有结构、晶体详情、BAND/DOS、元素颜色和导出组件。
+- [x] 从原 VASP 数据库提取完整周期表筛选和只读表格核心，保持原页面兼容。
+- [x] 为工作台、新建计算、工作流、结果和 VASP 数据库增加 107 专用路由。
+- [x] 实现 demo/live 数据提供器；预览模式的全部 mutation 失败关闭且不伪造成功。
+- [x] 使用内置 MoS2 演示成功、运行中和人为失败状态；不导入 4090 生产数据。
+- [x] 在本地完成针对性测试、构建和代码检查，只记录为本地预检。
 - [ ] 将功能分支推送 Gitea 并通过 PR 合并；107 只拉取固定合并提交，不直接检出未合并功能分支。
 - [ ] 通过 107 Slurm 构建不晋升的 `previews/<commit>` 发布和独立 manifest。
 - [ ] 启动独立 Slurm 预览 Job，使用独立数据库、runtime 目录和未占用端口；不得切换 `current` 或修改稳定数据库。
@@ -666,3 +666,6 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Task 9 已新增 URL 驱动的结果列表和科学结果详情：列表只接受 `succeeded`、`failed`、`parse-error` 三类完成记录并排除运行中工作流；详情直接复用现有 `VaspTaskSummary`、`VaspStructureViewer`、`VaspCrystalDetails` 和 `VaspElectronicProperties`，通过 competition provider 加载 BAND/DOS 图和下载结构、数据及证据工件。成功科学区与失败证据区在 AST 分支中互斥，demo 结果和全部下载文件持续标记为“演示内容”及 `DEMO-` 文件名。
 - Task 9 规格复审发现并已修复五类演示工件回归不足、空嵌套科学合同误判成功，以及工作流 ID 中 `band`/`dos` 子串干扰工件和绘图类型的问题。质量复审进一步修复无四步验收证据仍挂载成功科学区、合法 live 可空科学字段被误拒、畸形 provenance/时间线触发 React 渲染崩溃、结果行 `id` 覆盖权威 `workflow_id`，以及布尔值或非法数字冒充 Job ID/失败证据的问题；最终规格与质量复审均通过。绘图 `AbortSignal` 仍因现有 demo/live provider 接口只接受 `(id, kind)` 而留待真实接口阶段处理，本 Task 未越界修改 Task 1 provider。
 - 当前功能实现检查点更新为 `38a653bb2575e45e38fb0804fdf282f5ed4e4953`（不含本次方案状态提交）；Task 9 相关聚焦测试 `65/65`、前端全套 `89/89`、定向 ESLint、3 个 JSX Babel 解析、demo/live/标准三种 Vite 构建和 `git diff --check` 均通过。Task 10 前结果页仍未接入路由，因此 107 两种构建仍只证明现有入口未回归；尚未执行 Task 11 三视口浏览器与 Canvas 像素验收，未合并或部署到 107，也未产生真实 Slurm/VASP 结果，阶段 5 至 8 继续保持 `PENDING`。
+- Task 10 已完成周期表驱动的只读 VASP 数据库页和七条受保护竞赛路由接入：筛选、页码与选中记录由 URL 驱动，列表、详情及 provider 响应均严格校验；损坏响应、过期请求和页码归一化期间均失败关闭。数据库仅显示只读记录和结构检查器，竞赛导航保留紧凑“演示数据”标记，没有接入旧数据库写操作或完整旧 VASP router。规格复审与两轮质量复审均通过。
+- 当前功能实现检查点更新为 `c9bcf5ed828866da7fca7978f1abc030e6e6e271`（不含本次方案状态提交）；Task 10 聚焦测试 `99/99`、前端全套 `103/103`、定向 ESLint、数据库页/`App107Cup`/`AppShell` 三项 Babel JSX 解析和 `git diff --check` 均通过。demo 与 live 107 构建各转换 `1857` 个模块，标准完整构建转换 `2201` 个模块；demo `dist/assets` 对 `AgentEntry`、`PersonalVaspDatabase`、`ServerMonitor*`、`AcademicReports` 和 `NotesJournal` 扫描为零命中。
+- 上述结果仍仅是 Windows 本地实现和预检事实；Task 11 三视口浏览器及 3D Canvas 像素验收、Gitea PR 合并和 Task 12/13 的 107 独立 Slurm 预览尚未执行，也没有产生真实工作流、Slurm 控制或 VASP 计算证据。阶段 5 至 8 继续保持 `PENDING`。
