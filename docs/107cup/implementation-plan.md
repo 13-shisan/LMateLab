@@ -85,9 +85,9 @@
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`11bac230cb9cd714596c4a460512699db76e0aca`。
-- PR #10 已将 `codex/107cup-main-protection-evidence` 合并到 `main`。
-- 本地 `main`、Gitea `main` 和 107 源码检出均已同步到 PR #10 的合并提交 `11bac230cb9cd714596c4a460512699db76e0aca`；107 工作树干净且为 detached HEAD。
+- Gitea `main`：`f8aee97e4367fa45befab77c3a248d99dd3e36ae`，Windows 于 `2026-08-11` 重新 fetch 后确认。
+- PR #11 已将 `codex/107cup-frontend-preview-design` 合并到 `main`，包含已批准设计和 14 项实施计划。
+- 107 源码检出最后一次已记录同步仍为 PR #10 的合并提交 `11bac230cb9cd714596c4a460512699db76e0aca`；本次本地前端实现尚未合并或部署，下一次远端操作前必须重新现场核验 detached HEAD 和工作树状态。
 - 当前生产仍为 Job `33852`、节点 `anode16` 和发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，本次仓库收尾未重建或重启服务。
 
 ### 4.2 构建与发布
@@ -137,7 +137,7 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #10 已合并，三端 `main`/检出已同步到 `11bac23`；107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份证据；按用户决定暂不阻塞当前前端预览批次 |
+| 1. 竞赛仓库初始化 | PARTIAL | Gitea `main` 已由 PR #11 更新到 `f8aee97`，本地前端功能检查点为 `ab6064d`，107 检出最后记录仍为 `11bac23` 且本批次未刷新；107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份证据；实现 PR 合并后再核验并刷新 107 detached checkout |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
@@ -639,3 +639,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 预览采用 demo/live 双数据提供器和独立 107 Slurm 预览发布，不切换 `current`、不修改正式数据库或稳定服务。
 - 本次提交只增加设计文档并更新总实施方案；未修改功能源码，未运行 107 构建，未启动预览 Job，也未改变阶段 5 至 8 的 `PENDING` 状态。
 - 已生成专项实施计划 `docs/superpowers/plans/2026-08-10-107cup-frontend-preview.md`，按 TDD 拆分数据提供器、周期表与只读表格提取、五页前端、浏览器验收和独立 Slurm 预览链路；当前仍只是计划文档，尚未实现、构建、合并或部署，相关执行清单保持未勾选。
+
+### 2026-08-11
+
+- 在隔离工作树和分支 `codex/107cup-frontend-preview` 开始执行前端预览计划；该分支将随本次团队指南提交推送到 Gitea，但尚未合并或部署到 107，阶段 5 至 8 继续保持 `PENDING`。
+- Task 1 已在本地实现 demo/live 数据提供器、MoS2 成功/运行/失败 fixture、BAND/DOS 演示数据和预览只读 mutation；规格与质量复审已通过。
+- Task 2 已从旧 VASP 页面提取 118 元素周期表和受控筛选组件，保留旧页面兼容；规格与质量复审已通过。旧数组的视觉顺序与实施计划中的 `Z=1..118` 验收测试冲突，实际采用按 `Z` 机械重排、对象字段完全不变、由 `row/col` 保持视觉布局的澄清。
+- 功能实现检查点为 `ab6064dcc869553b5e2d90f77826ccd87a6a42aa`（不含本次文档提交），前端测试 `44/44` 通过且生产构建通过；这些仅是本地事实，不能表述为 107 preview 或真实 VASP 验收。
+- Task 3 在源码修改前暂停，先新增 `docs/107cup/team-guide.md` 作为三名成员的统一仓库入口，记录阅读顺序、固定范围、分工建议、个人 Gitea 身份、PR、107/Slurm、安全和证据规则；README 同步增加入口。
