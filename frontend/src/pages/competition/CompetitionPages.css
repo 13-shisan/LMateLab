@@ -270,6 +270,14 @@
   grid-column: 1 / -1;
 }
 
+.competition-workflow-step.is-band {
+  grid-column: 1;
+}
+
+.competition-workflow-step.is-dos {
+  grid-column: 2;
+}
+
 .competition-workflow-step button {
   width: 100%;
   min-height: 55px;
@@ -320,12 +328,45 @@
 
 .competition-workflow-step.is-scf::after {
   width: 2px;
-  height: 12px;
+  height: 6px;
   position: absolute;
   right: 50%;
-  bottom: -12px;
+  bottom: -6px;
   content: '';
   background: #98a2b3;
+  pointer-events: none;
+}
+
+.competition-workflow-step.is-band::before,
+.competition-workflow-step.is-dos::before {
+  height: 2px;
+  position: absolute;
+  top: -6px;
+  content: '';
+  background: #98a2b3;
+  pointer-events: none;
+}
+
+.competition-workflow-step.is-band::before {
+  right: -6px;
+  left: 50%;
+}
+
+.competition-workflow-step.is-dos::before {
+  right: 50%;
+  left: -6px;
+}
+
+.competition-workflow-step.is-band::after,
+.competition-workflow-step.is-dos::after {
+  width: 2px;
+  height: 6px;
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  content: '';
+  background: #98a2b3;
+  pointer-events: none;
 }
 
 .competition-review-grid {
@@ -501,6 +542,18 @@
 
   .competition-structure-summary dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .competition-workflow-graph {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .competition-workflow-step.is-band {
+    grid-column: 1;
+  }
+
+  .competition-workflow-step.is-dos {
+    grid-column: 2;
   }
 
   .competition-workflow-step button {
