@@ -29,6 +29,7 @@ test('107 cup UI removes registration and unrelated dashboard surfaces', () => {
 
   assert.doesNotMatch(competitionApp, /Register|ForgotPassword/);
   assert.match(competitionApp, /path="\/dashboard"/);
+  assert.match(competitionApp, /CompetitionDataProvider/);
   assert.match(login, /registrationEnabledForEdition/);
   assert.match(login, /passwordResetEnabledForEdition/);
   assert.match(dashboard, /CompetitionDashboard/);

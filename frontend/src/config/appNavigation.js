@@ -151,19 +151,58 @@ const fullNavigationGroups = [
   },
 ];
 
-const competitionNavigationKeys = new Set([
-  'dashboard',
+const competitionNavigationGroups = Object.freeze([
+  Object.freeze({
+    key: 'competition',
+    label: 'VASP 计算闭环',
+    items: Object.freeze([
+      Object.freeze({
+        key: 'dashboard',
+        label: '工作台',
+        path: '/dashboard',
+        icon: 'LayoutDashboard',
+        exact: true,
+        description: '竞赛工作流与资源概览',
+      }),
+      Object.freeze({
+        key: 'competition-new',
+        label: '新建计算',
+        path: '/dashboard/calculations/new',
+        icon: 'SquarePlus',
+        exact: true,
+        description: '配置固定四步 VASP 工作流',
+      }),
+      Object.freeze({
+        key: 'competition-workflows',
+        label: '工作流',
+        path: '/dashboard/workflows',
+        icon: 'Workflow',
+        activePrefixes: Object.freeze(['/dashboard/workflows/']),
+        description: '查看步骤、作业与失败证据',
+      }),
+      Object.freeze({
+        key: 'competition-results',
+        label: '结果',
+        path: '/dashboard/results',
+        icon: 'ChartNoAxesCombined',
+        activePrefixes: Object.freeze(['/dashboard/results/']),
+        description: '查看结构、BAND 与 DOS',
+      }),
+      Object.freeze({
+        key: 'competition-vasp-db',
+        label: 'VASP 数据库',
+        path: '/dashboard/database/vasp',
+        icon: 'Database',
+        exact: true,
+        description: '按元素检索竞赛结果',
+      }),
+    ]),
+  }),
 ]);
 
 export function navigationGroupsForEdition(edition = '') {
-  if (edition !== '107cup') return fullNavigationGroups;
-
-  return fullNavigationGroups
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => competitionNavigationKeys.has(item.key)),
-    }))
-    .filter((group) => group.items.length > 0);
+  if (edition === '107cup') return competitionNavigationGroups;
+  return fullNavigationGroups;
 }
 
 export const activeEdition = import.meta.env?.VITE_LMATELAB_EDITION || '';

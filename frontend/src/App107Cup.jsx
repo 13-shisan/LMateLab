@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import AppShell from './components/AppShell';
 import CenterLoadingOverlay from './components/CenterLoadingOverlay';
+import { CompetitionDataProvider } from './features/competition/CompetitionDataContext';
 import RequireAuth from './routes/RequireAuth';
 
 
@@ -22,7 +23,9 @@ function RouteFallback() {
 function ProtectedAppShell() {
   return (
     <RequireAuth>
-      <AppShell />
+      <CompetitionDataProvider>
+        <AppShell />
+      </CompetitionDataProvider>
     </RequireAuth>
   );
 }
