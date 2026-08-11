@@ -158,6 +158,7 @@ test('competition dashboard loads operational preview data without placeholder c
   assert.match(source, /const\s*{\s*provider,\s*mode\s*}\s*=\s*useCompetitionData\(\);/);
   assert.match(source, /const\s+loadDashboard\s*=\s*useCallback\(\(\)\s*=>\s*provider\.getDashboard\(\),\s*\[provider\]\);/);
   assert.match(source, /const\s+state\s*=\s*useCompetitionResource\(loadDashboard\);/);
+  assert.match(source, /normalizeCompetitionDashboardData\(state\.data\)/);
   assert.match(source, /state\.status\s*!==\s*['"]ready['"]/);
   assert.match(source, /<main\s+className=['"]competition-page['"]>/);
   assert.match(source, /message=\{state\.error\?\.message\}/);
@@ -173,17 +174,61 @@ test('competition dashboard loads operational preview data without placeholder c
   assert.doesNotMatch(source, /username|job[ _-]?name|work[ _-]?directory/i);
 });
 
+test('competition dashboard normalizes malformed ready payloads', () => {
+  const source = read('../src/pages/CompetitionDashboard.jsx');
+  const normalizeDashboard = loadFunction(source, 'normalizeCompetitionDashboardData');
+  const emptyDashboard = {
+    summary: {},
+    recent_workflows: [],
+    active_workflow: null,
+    slurm: {},
+  };
+
+  for (const payload of [null, undefined, false, 42, 'dashboard', [], new Date()]) {
+    assert.deepEqual(normalizeDashboard(payload), emptyDashboard);
+  }
+
+  for (const payload of [
+    { summary: null, slurm: null, recent_workflows: null, active_workflow: [] },
+    { summary: [], slurm: new Date(), recent_workflows: {}, active_workflow: 'workflow' },
+  ]) {
+    const normalized = normalizeDashboard(payload);
+    assert.deepEqual(normalized, emptyDashboard);
+    assert.equal(Object.getPrototypeOf(normalized.summary), Object.prototype);
+    assert.equal(Object.getPrototypeOf(normalized.slurm), Object.prototype);
+  }
+
+  const summary = { total: 1 };
+  const recentWorkflows = [{ id: 'wf-1' }];
+  const activeWorkflow = { id: 'wf-1', steps: [] };
+  const slurm = { partition: 'P107' };
+  assert.deepEqual(normalizeDashboard({
+    summary,
+    recent_workflows: recentWorkflows,
+    active_workflow: activeWorkflow,
+    slurm,
+  }), {
+    summary,
+    recent_workflows: recentWorkflows,
+    active_workflow: activeWorkflow,
+    slurm,
+  });
+});
+
 test('competition dashboard styles keep the approved responsive work layout', () => {
   const source = read('../src/pages/Dashboard.css');
 
   assert.match(
     source,
-    /\.lm-dashboard-grid\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.65fr\)\s+minmax\(280px,\s*\.85fr\)/s,
+    /\.lm-dashboard-grid\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.65fr\)\s+minmax\(310px,\s*0\.95fr\)/s,
   );
   assert.match(
     source,
-    /@media\s*\(max-width:\s*1120px\)[\s\S]*?\.lm-dashboard-grid\s*{[^}]*grid-template-columns:\s*1fr/s,
+    /\.lm-dashboard-grid\.competition-dashboard-grid\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.65fr\)\s+minmax\(280px,\s*\.85fr\)/s,
   );
+  const tablet = source.match(/@media\s*\(max-width:\s*1120px\)\s*{([\s\S]*?)}\s*@media/)?.[1] || '';
+  assert.match(tablet, /\.lm-dashboard-grid\s*{[^}]*grid-template-columns:\s*1fr[^}]*align-items:\s*start/s);
+  assert.match(tablet, /\.lm-dashboard-grid\.competition-dashboard-grid\s*{[^}]*grid-template-columns:\s*1fr[^}]*align-items:\s*start/s);
   const mobile = source.match(/@media\s*\(max-width:\s*700px\)\s*{([\s\S]*)}\s*$/)?.[1] || '';
   assert.match(mobile, /\.lm-overview-grid\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(mobile, /\.lm-primary-action\s*{[^}]*width:\s*36px[^}]*height:\s*36px/s);
@@ -193,19 +238,39 @@ test('competition dashboard styles keep the approved responsive work layout', ()
   }
 });
 
-test('competition dashboard compact timeline fits the narrow side band', () => {
+test('competition dashboard compact timeline keeps the scf band dos fork visible', () => {
   const source = read('../src/pages/Dashboard.css');
 
   assert.match(
     source,
-    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)[^}]*overflow-x:\s*visible/s,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*grid-template-rows:\s*repeat\(3,\s*auto\)[^}]*overflow-x:\s*hidden/s,
   );
   assert.match(
     source,
-    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li:nth-child\(n\)\s*{[^}]*grid-column:\s*1[^}]*grid-row:\s*auto/s,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li:nth-child\(1\)\s*{[^}]*grid-column:\s*1\s*\/\s*-1[^}]*grid-row:\s*1/s,
   );
   assert.match(
     source,
-    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li::before,[\s\S]*?li::after\s*{[^}]*display:\s*none/s,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li:nth-child\(2\)\s*{[^}]*grid-column:\s*1\s*\/\s*-1[^}]*grid-row:\s*2/s,
+  );
+  assert.match(
+    source,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li:nth-child\(3\)\s*{[^}]*grid-column:\s*1[^}]*grid-row:\s*3/s,
+  );
+  assert.match(
+    source,
+    /\.competition-active-workflow\s+\.competition-timeline\.is-compact\s*>\s*li:nth-child\(4\)\s*{[^}]*grid-column:\s*2[^}]*grid-row:\s*3/s,
+  );
+  assert.match(
+    source,
+    /\.competition-active-workflow[\s\S]*?li:nth-child\(3\)::before,[\s\S]*?li:nth-child\(4\)::before\s*{[^}]*border-left:\s*2px\s+solid\s+#98a2b3/s,
+  );
+  assert.match(
+    source,
+    /\.competition-active-workflow[\s\S]*?li:nth-child\(3\)::after\s*{[^}]*border-top:\s*2px\s+solid\s+#98a2b3/s,
+  );
+  assert.doesNotMatch(
+    source,
+    /\.competition-active-workflow[^{]*li::before,[\s\S]*?li::after\s*{[^}]*display:\s*none/s,
   );
 });

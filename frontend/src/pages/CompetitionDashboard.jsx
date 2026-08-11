@@ -21,6 +21,27 @@ import WorkflowTimeline from '../features/competition/components/WorkflowTimelin
 import './Dashboard.css';
 
 
+function normalizeCompetitionDashboardData(value) {
+  const isPlainObject = (candidate) => {
+    if (candidate === null || typeof candidate !== 'object') return false;
+    const prototype = Object.getPrototypeOf(candidate);
+    return prototype === Object.prototype || prototype === null;
+  };
+  const payload = isPlainObject(value) ? value : {};
+
+  return {
+    summary: isPlainObject(payload.summary) ? { ...payload.summary } : {},
+    recent_workflows: Array.isArray(payload.recent_workflows)
+      ? [...payload.recent_workflows]
+      : [],
+    active_workflow: isPlainObject(payload.active_workflow)
+      ? { ...payload.active_workflow }
+      : null,
+    slurm: isPlainObject(payload.slurm) ? { ...payload.slurm } : {},
+  };
+}
+
+
 export default function CompetitionDashboard() {
   const navigate = useNavigate();
   const { provider, mode } = useCompetitionData();
@@ -41,11 +62,11 @@ export default function CompetitionDashboard() {
   }
 
   const {
-    summary = {},
-    recent_workflows = [],
-    active_workflow = null,
-    slurm = {},
-  } = state.data || {};
+    summary,
+    recent_workflows,
+    active_workflow,
+    slurm,
+  } = normalizeCompetitionDashboardData(state.data);
 
   return (
     <main className="competition-page">
