@@ -13,132 +13,11 @@ import {
   savePresetState,
 } from "../../utils/presetStorage";
 import { normalizeElementSymbol } from "../../utils/elementUtils";
-import { hexToRgba } from "../../utils/colorUtils";
 import { flattenObjectToPairs, parseCpValue } from "../../utils/cpValueUtils";
-import { CATEGORY_BY_SYMBOL, CATEGORY_COLOR } from "../../utils/elementCategory";
+import PeriodicTableFilter from "./PeriodicTableFilter";
 import VaspDataTable from "./VaspDataTable";
 import "./PersonalVaspDatabase.css";
 
-const ELEMENTS = [
-  { Z: 1, symbol: "H", name: "Hydrogen", row: 1, col: 1 },
-  { Z: 2, symbol: "He", name: "Helium", row: 1, col: 18 },
-  { Z: 3, symbol: "Li", name: "Lithium", row: 2, col: 1 },
-  { Z: 4, symbol: "Be", name: "Beryllium", row: 2, col: 2 },
-  { Z: 5, symbol: "B", name: "Boron", row: 2, col: 13 },
-  { Z: 6, symbol: "C", name: "Carbon", row: 2, col: 14 },
-  { Z: 7, symbol: "N", name: "Nitrogen", row: 2, col: 15 },
-  { Z: 8, symbol: "O", name: "Oxygen", row: 2, col: 16 },
-  { Z: 9, symbol: "F", name: "Fluorine", row: 2, col: 17 },
-  { Z: 10, symbol: "Ne", name: "Neon", row: 2, col: 18 },
-  { Z: 11, symbol: "Na", name: "Sodium", row: 3, col: 1 },
-  { Z: 12, symbol: "Mg", name: "Magnesium", row: 3, col: 2 },
-  { Z: 13, symbol: "Al", name: "Aluminium", row: 3, col: 13 },
-  { Z: 14, symbol: "Si", name: "Silicon", row: 3, col: 14 },
-  { Z: 15, symbol: "P", name: "Phosphorus", row: 3, col: 15 },
-  { Z: 16, symbol: "S", name: "Sulfur", row: 3, col: 16 },
-  { Z: 17, symbol: "Cl", name: "Chlorine", row: 3, col: 17 },
-  { Z: 18, symbol: "Ar", name: "Argon", row: 3, col: 18 },
-  { Z: 19, symbol: "K", name: "Potassium", row: 4, col: 1 },
-  { Z: 20, symbol: "Ca", name: "Calcium", row: 4, col: 2 },
-  { Z: 21, symbol: "Sc", name: "Scandium", row: 4, col: 3 },
-  { Z: 22, symbol: "Ti", name: "Titanium", row: 4, col: 4 },
-  { Z: 23, symbol: "V", name: "Vanadium", row: 4, col: 5 },
-  { Z: 24, symbol: "Cr", name: "Chromium", row: 4, col: 6 },
-  { Z: 25, symbol: "Mn", name: "Manganese", row: 4, col: 7 },
-  { Z: 26, symbol: "Fe", name: "Iron", row: 4, col: 8 },
-  { Z: 27, symbol: "Co", name: "Cobalt", row: 4, col: 9 },
-  { Z: 28, symbol: "Ni", name: "Nickel", row: 4, col: 10 },
-  { Z: 29, symbol: "Cu", name: "Copper", row: 4, col: 11 },
-  { Z: 30, symbol: "Zn", name: "Zinc", row: 4, col: 12 },
-  { Z: 31, symbol: "Ga", name: "Gallium", row: 4, col: 13 },
-  { Z: 32, symbol: "Ge", name: "Germanium", row: 4, col: 14 },
-  { Z: 33, symbol: "As", name: "Arsenic", row: 4, col: 15 },
-  { Z: 34, symbol: "Se", name: "Selenium", row: 4, col: 16 },
-  { Z: 35, symbol: "Br", name: "Bromine", row: 4, col: 17 },
-  { Z: 36, symbol: "Kr", name: "Krypton", row: 4, col: 18 },
-  { Z: 37, symbol: "Rb", name: "Rubidium", row: 5, col: 1 },
-  { Z: 38, symbol: "Sr", name: "Strontium", row: 5, col: 2 },
-  { Z: 39, symbol: "Y", name: "Yttrium", row: 5, col: 3 },
-  { Z: 40, symbol: "Zr", name: "Zirconium", row: 5, col: 4 },
-  { Z: 41, symbol: "Nb", name: "Niobium", row: 5, col: 5 },
-  { Z: 42, symbol: "Mo", name: "Molybdenum", row: 5, col: 6 },
-  { Z: 43, symbol: "Tc", name: "Technetium", row: 5, col: 7 },
-  { Z: 44, symbol: "Ru", name: "Ruthenium", row: 5, col: 8 },
-  { Z: 45, symbol: "Rh", name: "Rhodium", row: 5, col: 9 },
-  { Z: 46, symbol: "Pd", name: "Palladium", row: 5, col: 10 },
-  { Z: 47, symbol: "Ag", name: "Silver", row: 5, col: 11 },
-  { Z: 48, symbol: "Cd", name: "Cadmium", row: 5, col: 12 },
-  { Z: 49, symbol: "In", name: "Indium", row: 5, col: 13 },
-  { Z: 50, symbol: "Sn", name: "Tin", row: 5, col: 14 },
-  { Z: 51, symbol: "Sb", name: "Antimony", row: 5, col: 15 },
-  { Z: 52, symbol: "Te", name: "Tellurium", row: 5, col: 16 },
-  { Z: 53, symbol: "I", name: "Iodine", row: 5, col: 17 },
-  { Z: 54, symbol: "Xe", name: "Xenon", row: 5, col: 18 },
-  { Z: 55, symbol: "Cs", name: "Caesium", row: 6, col: 1 },
-  { Z: 56, symbol: "Ba", name: "Barium", row: 6, col: 2 },
-  { Z: 57, symbol: "La", name: "Lanthanum", row: 6, col: 3, isLanActMark: true },
-  { Z: 72, symbol: "Hf", name: "Hafnium", row: 6, col: 4 },
-  { Z: 73, symbol: "Ta", name: "Tantalum", row: 6, col: 5 },
-  { Z: 74, symbol: "W", name: "Tungsten", row: 6, col: 6 },
-  { Z: 75, symbol: "Re", name: "Rhenium", row: 6, col: 7 },
-  { Z: 76, symbol: "Os", name: "Osmium", row: 6, col: 8 },
-  { Z: 77, symbol: "Ir", name: "Iridium", row: 6, col: 9 },
-  { Z: 78, symbol: "Pt", name: "Platinum", row: 6, col: 10 },
-  { Z: 79, symbol: "Au", name: "Gold", row: 6, col: 11 },
-  { Z: 80, symbol: "Hg", name: "Mercury", row: 6, col: 12 },
-  { Z: 81, symbol: "Tl", name: "Thallium", row: 6, col: 13 },
-  { Z: 82, symbol: "Pb", name: "Lead", row: 6, col: 14 },
-  { Z: 83, symbol: "Bi", name: "Bismuth", row: 6, col: 15 },
-  { Z: 84, symbol: "Po", name: "Polonium", row: 6, col: 16 },
-  { Z: 85, symbol: "At", name: "Astatine", row: 6, col: 17 },
-  { Z: 86, symbol: "Rn", name: "Radon", row: 6, col: 18 },
-  { Z: 87, symbol: "Fr", name: "Francium", row: 7, col: 1 },
-  { Z: 88, symbol: "Ra", name: "Radium", row: 7, col: 2 },
-  { Z: 89, symbol: "Ac", name: "Actinium", row: 7, col: 3, isLanActMark: true },
-  { Z: 104, symbol: "Rf", name: "Rutherfordium", row: 7, col: 4 },
-  { Z: 105, symbol: "Db", name: "Dubnium", row: 7, col: 5 },
-  { Z: 106, symbol: "Sg", name: "Seaborgium", row: 7, col: 6 },
-  { Z: 107, symbol: "Bh", name: "Bohrium", row: 7, col: 7 },
-  { Z: 108, symbol: "Hs", name: "Hassium", row: 7, col: 8 },
-  { Z: 109, symbol: "Mt", name: "Meitnerium", row: 7, col: 9 },
-  { Z: 110, symbol: "Ds", name: "Darmstadtium", row: 7, col: 10 },
-  { Z: 111, symbol: "Rg", name: "Roentgenium", row: 7, col: 11 },
-  { Z: 112, symbol: "Cn", name: "Copernicium", row: 7, col: 12 },
-  { Z: 113, symbol: "Nh", name: "Nihonium", row: 7, col: 13 },
-  { Z: 114, symbol: "Fl", name: "Flerovium", row: 7, col: 14 },
-  { Z: 115, symbol: "Mc", name: "Moscovium", row: 7, col: 15 },
-  { Z: 116, symbol: "Lv", name: "Livermorium", row: 7, col: 16 },
-  { Z: 117, symbol: "Ts", name: "Tennessine", row: 7, col: 17 },
-  { Z: 118, symbol: "Og", name: "Oganesson", row: 7, col: 18 },
-  { Z: 58, symbol: "Ce", name: "Cerium", row: 8, col: 4 },
-  { Z: 59, symbol: "Pr", name: "Praseodymium", row: 8, col: 5 },
-  { Z: 60, symbol: "Nd", name: "Neodymium", row: 8, col: 6 },
-  { Z: 61, symbol: "Pm", name: "Promethium", row: 8, col: 7 },
-  { Z: 62, symbol: "Sm", name: "Samarium", row: 8, col: 8 },
-  { Z: 63, symbol: "Eu", name: "Europium", row: 8, col: 9 },
-  { Z: 64, symbol: "Gd", name: "Gadolinium", row: 8, col: 10 },
-  { Z: 65, symbol: "Tb", name: "Terbium", row: 8, col: 11 },
-  { Z: 66, symbol: "Dy", name: "Dysprosium", row: 8, col: 12 },
-  { Z: 67, symbol: "Ho", name: "Holmium", row: 8, col: 13 },
-  { Z: 68, symbol: "Er", name: "Erbium", row: 8, col: 14 },
-  { Z: 69, symbol: "Tm", name: "Thulium", row: 8, col: 15 },
-  { Z: 70, symbol: "Yb", name: "Ytterbium", row: 8, col: 16 },
-  { Z: 71, symbol: "Lu", name: "Lutetium", row: 8, col: 17 },
-  { Z: 90, symbol: "Th", name: "Thorium", row: 9, col: 4 },
-  { Z: 91, symbol: "Pa", name: "Protactinium", row: 9, col: 5 },
-  { Z: 92, symbol: "U", name: "Uranium", row: 9, col: 6 },
-  { Z: 93, symbol: "Np", name: "Neptunium", row: 9, col: 7 },
-  { Z: 94, symbol: "Pu", name: "Plutonium", row: 9, col: 8 },
-  { Z: 95, symbol: "Am", name: "Americium", row: 9, col: 9 },
-  { Z: 96, symbol: "Cm", name: "Curium", row: 9, col: 10 },
-  { Z: 97, symbol: "Bk", name: "Berkelium", row: 9, col: 11 },
-  { Z: 98, symbol: "Cf", name: "Californium", row: 9, col: 12 },
-  { Z: 99, symbol: "Es", name: "Einsteinium", row: 9, col: 13 },
-  { Z: 100, symbol: "Fm", name: "Fermium", row: 9, col: 14 },
-  { Z: 101, symbol: "Md", name: "Mendelevium", row: 9, col: 15 },
-  { Z: 102, symbol: "No", name: "Nobelium", row: 9, col: 16 },
-  { Z: 103, symbol: "Lr", name: "Lawrencium", row: 9, col: 17 },
-];
 
 // --------- 元素分类上色（尽量像你第二张图） ----------
 const CP_CATALOG = [
@@ -234,10 +113,6 @@ export default function PersonalVaspDatabase() {
   const TASKS_MIN_LOADING_MS = 300;
   
 
-  // 周期表响应式：动态格子大小
-  const tableWrapRef = useRef(null);
-  const [cellSize, setCellSize] = useState(44);
-  const GAP = 6;
   const location = useLocation();
 
   function stopAddAllPoll() {
@@ -433,110 +308,11 @@ export default function PersonalVaspDatabase() {
     }
   }, [selectedDbKey]);
 
-  useEffect(() => {
-    const el = tableWrapRef.current;
-    if (!el) return;
-
-    const MAX = 44;
-    const MIN = 30; // 小屏可读下限（你可调 28~34）
-
-    const ro = new ResizeObserver(() => {
-      const w = el.clientWidth || 0;
-      const usable = Math.max(0, w - 24); // 预留 padding
-      const size = Math.floor((usable - GAP * 17) / 18);
-      const clamped = Math.max(MIN, Math.min(MAX, size));
-      setCellSize(clamped);
-    });
-
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const gridStyle = useMemo(
-    () => ({
-      display: "grid",
-      gridTemplateColumns: `repeat(18, ${cellSize}px)`,
-      gridAutoRows: `${cellSize}px`,
-      gap: `${GAP}px`,
-      alignItems: "stretch",
-    }),
-    [cellSize]
-  );
-
-  const cellBase = useMemo(
-    () => ({
-      borderRadius: Math.max(8, Math.floor(cellSize * 0.22)),
-      border: "1px solid rgba(229,231,235,1)",
-      padding: Math.max(4, Math.floor(cellSize * 0.13)),
-      lineHeight: 1.05,
-      cursor: "default",
-      userSelect: "none",
-      boxSizing: "border-box",
-      transition: "all .15s ease",
-    }),
-    [cellSize]
-  );
-  
   function saveCpPresets(nextPresets, defaultPreset = selectedPresetName) {
     setCpPresets(nextPresets);
     try {
         savePresetState(getVaspPresetStorageKey(selectedDbKey), nextPresets, defaultPreset);
     } catch {}
-  }
-
-  function renderElementCell(el) {
-    const sym = el.symbol;
-
-    // ✅ 高亮集合来自后端“当前筛选条件”返回的 elements
-    const present = highlightElemsSet.has(sym);
-
-    // ✅ 是否被用户选中
-    const active = selectedElems.includes(sym);
-
-    const category = CATEGORY_BY_SYMBOL[sym] || "unknown";
-    const catColor = CATEGORY_COLOR[category] || CATEGORY_COLOR.unknown;
-
-    const bg = present ? catColor : hexToRgba(catColor, 0.18);
-
-    const style = {
-        ...cellBase,
-        gridColumn: el.col,
-        gridRow: el.row,
-
-        background: bg,
-        opacity: present ? 1 : 0.35,
-        borderColor: active ? "rgba(59,130,246,1)" : (present ? "rgba(17,24,39,.18)" : "rgba(229,231,235,1)"),
-        boxShadow: active ? "0 0 0 3px rgba(59,130,246,.25)" : (present ? "0 0 0 3px rgba(59,130,246,.10)" : "none"),
-        filter: present ? "none" : "grayscale(0.2)",
-        cursor: "pointer",
-    };
-
-    const title = `${sym} (Z=${el.Z}) ${el.name}${present ? "" : " — not in current filter"}`;
-
-    const zFont = Math.max(9, Math.floor(cellSize * 0.23));
-    const symFont = Math.max(11, Math.floor(cellSize * 0.34));
-
-    return (
-        <div
-        key={el.Z}
-        style={style}
-        title={title}
-        onClick={() => {
-            setTasksPage(1);
-            setSelectedElems((prev) => {
-            const s = new Set(prev);
-            if (s.has(sym)) s.delete(sym);
-            else s.add(sym);
-            return Array.from(s);
-            });
-        }}
-        >
-        <div style={{ fontSize: zFont, color: "rgba(17,24,39,.55)" }}>{el.Z}</div>
-        <div style={{ fontSize: symFont, fontWeight: 800, color: "rgba(17,24,39,.85)" }}>
-            {sym}
-        </div>
-        </div>
-    );
   }
 
   // 1) 加载可用数据库列表
@@ -889,23 +665,6 @@ export default function PersonalVaspDatabase() {
     }
   }
 
-  const lanActLabelStyle = {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingRight: 10,
-    color: "#6b7280",
-    fontSize: Math.max(11, Math.floor(cellSize * 0.28)),
-    userSelect: "none",
-  };
-
-  const presentElements = useMemo(() => {
-    const s = elementsSet;
-    return ELEMENTS
-        .filter((e) => s.has(e.symbol))
-        .sort((a, b) => a.Z - b.Z);
-  }, [elementsSet]);
-
   const totalPages = Math.max(1, Math.ceil((tasksTotal || 0) / (tasksPageSize || 20)));
 
   // 保证始终给 3 个页码按钮（边界自动贴边）
@@ -1223,96 +982,13 @@ export default function PersonalVaspDatabase() {
             元素周期表（存在于该 DB 的元素会高亮）
           </div>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button
-                type="button"
-                onClick={() => { setTasksPage(1); setElemMode("only"); }}
-                style={{
-                height: 34,
-                borderRadius: 10,
-                padding: "0 10px",
-                border: elemMode === "only" ? "1px solid rgba(59,130,246,1)" : "1px solid rgba(209,213,219,1)",
-                background: elemMode === "only" ? "rgba(59,130,246,0.10)" : "white",
-                color: "#111827",
-                cursor: "pointer",
-                fontWeight: elemMode === "only" ? 800 : 500,
-                }}
-            >
-                只含所选元素
-            </button>
-
-            <button
-                type="button"
-                onClick={() => { setTasksPage(1); setElemMode("at_least"); }}
-                style={{
-                height: 34,
-                borderRadius: 10,
-                padding: "0 10px",
-                border: elemMode === "at_least" ? "1px solid rgba(59,130,246,1)" : "1px solid rgba(209,213,219,1)",
-                background: elemMode === "at_least" ? "rgba(59,130,246,0.10)" : "white",
-                color: "#111827",
-                cursor: "pointer",
-                fontWeight: elemMode === "at_least" ? 800 : 500,
-                }}
-            >
-                至少含有所选元素
-            </button>
-
-            <button
-                type="button"
-                onClick={() => { setTasksPage(1); setSelectedElems([]); }}
-                style={{
-                height: 34,
-                borderRadius: 10,
-                padding: "0 10px",
-                border: "1px solid rgba(209,213,219,1)",
-                background: "white",
-                color: "#111827",
-                cursor: "pointer",
-                }}
-            >
-                清空选择
-            </button>
-
-            <div style={{ fontSize: 12, color: "#6b7280" }}>
-                已选：<span style={{ color: "#111827", fontWeight: 700 }}>{selectedElems.join(", ") || "无"}</span>
-            </div>
-          </div>
-
-          {/* ✅ 不截断：横向滚动兜底 + 宽屏居中 */}
-          <div
-            ref={tableWrapRef}
-            className="vasp-periodic-scroll"
-            style={{
-              flex: "1 1 auto",
-              minHeight: 0,
-              overflowX: "auto",
-              overflowY: "auto",
-              display: "flex",
-              justifyContent: "center",
-              paddingBottom: 4,
-            }}
-          >
-            <div
-              style={{
-                width: "fit-content",
-                // 最小宽度按“最大格子尺寸”估计，保证大屏/默认情况下不被挤压
-                minWidth: 18 * 44 + 17 * GAP + 24,
-                padding: "6px 10px",
-              }}
-            >
-              <div style={gridStyle}>
-                {ELEMENTS.map(renderElementCell)}
-
-                <div style={{ gridColumn: "1 / span 3", gridRow: 8, ...lanActLabelStyle }}>
-                  Lanthanides →
-                </div>
-                <div style={{ gridColumn: "1 / span 3", gridRow: 9, ...lanActLabelStyle }}>
-                  Actinides →
-                </div>
-              </div>
-            </div>
-          </div>
+          <PeriodicTableFilter
+            availableElements={[...highlightElemsSet]}
+            selectedElements={selectedElems}
+            mode={elemMode}
+            onSelectionChange={(next) => { setTasksPage(1); setSelectedElems(next); }}
+            onModeChange={(next) => { setTasksPage(1); setElemMode(next); }}
+          />
 
           <div style={{ color: "#6b7280", fontSize: 12 }}>
             说明：首次进入某个库可能需要后台扫描一次；扫描完成后会被缓存，后续打开将非常快。
