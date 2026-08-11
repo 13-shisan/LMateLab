@@ -146,10 +146,31 @@ test('demo database energy fields are populated only for succeeded workflows', (
     [succeeded.bandgap_eV, succeeded.energy, succeeded.completed_at],
     [1.78, -22.418731, '2026-08-10T09:40:00+08:00'],
   );
+  assert.deepEqual(
+    [
+      succeeded.vasp_detail.row.energy,
+      succeeded.vasp_detail.row.fmax,
+      succeeded.vasp_detail.properties.bandgap_eV,
+      succeeded.vasp_detail.properties.vbm_eV,
+      succeeded.vasp_detail.properties.cbm_eV,
+    ],
+    [-22.418731, 0.0062, 1.78, 0, 1.78],
+  );
   for (const row of [running, failed]) {
     assert.equal(row.bandgap_eV, null);
     assert.equal(row.energy, null);
     assert.equal(row.completed_at, null);
+    assert.deepEqual(
+      [
+        row.vasp_detail.row.energy,
+        row.vasp_detail.row.fmax,
+        row.vasp_detail.properties.bandgap_eV,
+        row.vasp_detail.properties.vbm_eV,
+        row.vasp_detail.properties.cbm_eV,
+      ],
+      [null, null, null, null, null],
+    );
+    assert.equal(Object.values(row.vasp_detail.capabilities).every((value) => value === false), true);
   }
 });
 
@@ -196,6 +217,31 @@ test('demo fixture collections expose provenance without adding a result id', ()
     kind: 'text',
     priority: 1,
   });
+});
+
+test('direct fixture imports cannot mutate later demo provider reads', async () => {
+  const workflowStep = DEMO_WORKFLOWS[0].steps[0];
+  const databaseProperties = DEMO_DATABASE_ROWS[0].vasp_detail.properties;
+  const originalStepStatus = workflowStep.status;
+  const originalBandgap = databaseProperties.bandgap_eV;
+  const workflowWasMutated = Reflect.set(workflowStep, 'status', 'failed');
+  const databaseWasMutated = Reflect.set(databaseProperties, 'bandgap_eV', 0);
+
+  try {
+    const provider = createDemoCompetitionDataProvider();
+    const workflows = await provider.listWorkflows();
+    const database = await provider.listDatabase();
+
+    assert.equal(workflows.items[0].steps[0].status, 'succeeded');
+    assert.equal(database.items[0].vasp_detail.properties.bandgap_eV, 1.78);
+    assert.equal(workflowWasMutated, false);
+    assert.equal(databaseWasMutated, false);
+    assert.equal(Object.isFrozen(workflowStep), true);
+    assert.equal(Object.isFrozen(databaseProperties), true);
+  } finally {
+    if (workflowWasMutated) Reflect.set(workflowStep, 'status', originalStepStatus);
+    if (databaseWasMutated) Reflect.set(databaseProperties, 'bandgap_eV', originalBandgap);
+  }
 });
 
 test('live database queries omit empty filters and map non-empty query names', async () => {
