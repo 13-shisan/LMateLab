@@ -40,11 +40,12 @@
 
 1. [`README.md`](../../README.md)：确认这是独立的 107 杯项目。
 2. 本文：理解边界、分工、Git 流程、107 操作和证据要求。
-3. [`implementation-plan.md`](./implementation-plan.md)：查看唯一阶段状态和下一门禁。
-4. [`source-provenance.md`](./source-provenance.md)：查看初始来源、清理范围和哈希。
-5. [`2026-08-10-107cup-frontend-preview-design.md`](../superpowers/specs/2026-08-10-107cup-frontend-preview-design.md)：查看已批准的前端预览设计。
-6. [`2026-08-10-107cup-frontend-preview.md`](../superpowers/plans/2026-08-10-107cup-frontend-preview.md)：查看当前 14 个实现任务和逐步验收命令。
-7. [`.gitea/PULL_REQUEST_TEMPLATE.md`](../../.gitea/PULL_REQUEST_TEMPLATE.md)：提交 PR 前逐项填写。
+3. [`TEAMMATE_AI_START.md`](../../TEAMMATE_AI_START.md)：队友只需把这一个文件交给各自的 AI，由 AI 帮助连接 Gitea 并完成只读接手。
+4. [`implementation-plan.md`](./implementation-plan.md)：查看唯一阶段状态和下一门禁。
+5. [`source-provenance.md`](./source-provenance.md)：查看初始来源、清理范围和哈希。
+6. [`2026-08-10-107cup-frontend-preview-design.md`](../superpowers/specs/2026-08-10-107cup-frontend-preview-design.md)：查看已批准的前端预览设计。
+7. [`2026-08-10-107cup-frontend-preview.md`](../superpowers/plans/2026-08-10-107cup-frontend-preview.md)：查看当前 14 个实现任务和逐步验收命令。
+8. [`.gitea/PULL_REQUEST_TEMPLATE.md`](../../.gitea/PULL_REQUEST_TEMPLATE.md)：提交 PR 前逐项填写。
 
 如果文档之间出现冲突，优先级为：
 
