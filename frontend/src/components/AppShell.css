@@ -213,6 +213,21 @@
   gap: 9px;
 }
 
+.lm-app-shell.is-competition-edition .lm-demo-build-badge {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid #d6a74e;
+  border-radius: 5px;
+  color: #7a4f06;
+  background: #fff8e8;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .lm-icon-button,
 .lm-mobile-menu,
 .lm-drawer-close {
@@ -517,5 +532,15 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  .lm-app-shell.is-competition-edition .lm-page-heading h1 {
+    max-width: 132px;
+  }
+
+  .lm-app-shell.is-competition-edition .lm-demo-build-badge {
+    min-height: 24px;
+    padding-inline: 6px;
+    font-size: 9px;
   }
 }

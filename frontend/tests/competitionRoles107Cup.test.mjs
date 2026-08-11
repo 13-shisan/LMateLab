@@ -61,3 +61,60 @@ test('107 cup build uses a dedicated route entry without unrelated pages', () =>
     assert.equal(competitionApp.includes(unrelated), false, unrelated);
   }
 });
+
+test('107 cup entry atomically exposes exactly seven protected preview routes', () => {
+  const competitionApp = readFileSync(new URL('../src/App107Cup.jsx', import.meta.url), 'utf8');
+  const lazyPages = [...competitionApp.matchAll(
+    /const\s+(\w+)\s*=\s*lazy\(\(\)\s*=>\s*import\(/g,
+  )].map((match) => match[1]);
+  const protectedPaths = [...competitionApp.matchAll(/<Route\s+path="([^"]+)"\s+element=/g)]
+    .map((match) => match[1])
+    .filter((path) => path.startsWith('/dashboard'));
+
+  assert.deepEqual(lazyPages, [
+    'Login',
+    'CompetitionDashboard',
+    'CompetitionNewCalculation',
+    'CompetitionWorkflows',
+    'CompetitionWorkflowDetail',
+    'CompetitionResults',
+    'CompetitionResultDetail',
+    'CompetitionVaspDatabase',
+  ]);
+  assert.deepEqual(protectedPaths, [
+    '/dashboard',
+    '/dashboard/calculations/new',
+    '/dashboard/workflows',
+    '/dashboard/workflows/:workflowId',
+    '/dashboard/results',
+    '/dashboard/results/:workflowId',
+    '/dashboard/database/vasp',
+  ]);
+  assert.match(
+    competitionApp,
+    /function\s+ProtectedCompetitionShell\(\)[\s\S]*?<RequireAuth>[\s\S]*?<CompetitionDataProvider>[\s\S]*?<AppShell\s*\/>/,
+  );
+  assert.match(competitionApp, /<Route\s+path="\*"\s+element=\{<Navigate\s+to="\/dashboard"\s+replace\s*\/>\}/);
+  assert.doesNotMatch(
+    competitionApp,
+    /import\(['"]\.\/pages\/(?:Dashboard(?:\.jsx)?|PersonalVaspDatabase|AcademicReports|Agent|Notes|ServerMonitor)/,
+  );
+});
+
+test('107 cup shell renders the compact demo build marker and route icons', () => {
+  const source = readFileSync(new URL('../src/components/AppShell.jsx', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../src/components/AppShell.css', import.meta.url), 'utf8');
+
+  for (const icon of ['SquarePlus', 'Workflow', 'ChartNoAxesCombined']) {
+    assert.match(source, new RegExp(`\\b${icon}\\b`));
+  }
+  assert.match(
+    source,
+    /const\s+competitionDemo\s*=\s*activeEdition\s*===\s*['"]107cup['"]\s*&&\s*import\.meta\.env\.VITE_COMPETITION_DATA_MODE\s*===\s*['"]demo['"]/,
+  );
+  assert.match(source, /className="lm-demo-build-badge"/);
+  assert.match(source, /title="此发布只使用版本控制内的演示数据"/);
+  assert.match(source, />演示数据<\/span>/);
+  assert.match(styles, /\.lm-demo-build-badge\s*\{/);
+  assert.match(styles, /@media\s*\(max-width:\s*420px\)[\s\S]*?\.lm-demo-build-badge/);
+});

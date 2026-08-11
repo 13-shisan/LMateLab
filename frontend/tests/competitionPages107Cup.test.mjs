@@ -34,6 +34,144 @@ function findNodes(value, predicate, matches = []) {
   return matches;
 }
 
+test('competition VASP database composes the extracted read-only units', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+
+  for (const token of [
+    'PeriodicTableFilter',
+    'VaspRecordTable',
+    'getDatabaseRecord',
+    'available_elements',
+    'elementMode',
+    'selectedElements',
+    'VaspStructureViewer',
+  ]) {
+    assert.match(source, new RegExp(token));
+  }
+  assert.match(source, /const\s+DATABASE_COLUMNS\s*=\s*Object\.freeze\(\[\s*['"]formula['"],\s*['"]source['"],\s*['"]workflow_id['"],\s*['"]status['"],\s*['"]bandgap_eV['"],\s*['"]energy['"],\s*['"]completed_at['"]\s*\]\)/);
+  assert.match(
+    source,
+    /provider\.listDatabase\(\{\s*query,\s*elements:\s*selectedElements,\s*elementMode,\s*page,\s*pageSize:\s*20,?\s*\}\)/,
+  );
+  assert.match(source, /_rowId:\s*item\.id/);
+  assert.match(source, /detailPathForItem=\{databaseRecordUrl\}/);
+  assert.match(source, /onSelect=\{selectRecord\}/);
+  assert.match(source, /renderCell=\{renderDatabaseCell\}/);
+  assert.match(source, /mobileMode="scroll"/);
+  assert.match(source, /column\s*===\s*['"]status['"]\s*\?\s*<StatusBadge\s+status=\{item\.status\}\s*\/>/);
+  assert.match(source, /import\s+['"]\.\.\/db\/vasp-detail\/VaspTaskDetail\.css['"];?/);
+  assert.doesNotMatch(source, /renderActions|onCollect|onRemove|customDbs|uploadFiles/);
+  assert.doesNotMatch(source, /fetch\s*\(|axios|mutateDatabase|uploadStructure/);
+});
+
+test('competition database URL state normalizes invalid page mode and elements', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const validElements = new Set(['H', 'Mo', 'S']);
+  const readDatabaseUrlState = loadFunction(source, 'readDatabaseUrlState', {
+    VALID_ELEMENT_SYMBOLS: validElements,
+  });
+
+  assert.deepEqual(readDatabaseUrlState(new URLSearchParams(
+    'q=MoS2&elements=Mo,Nope,S,Mo&element_mode=unexpected&page=-4&record=db%2F1',
+  )), {
+    query: 'MoS2',
+    selectedElements: ['Mo', 'S'],
+    elementMode: 'at_least',
+    page: 1,
+    selectedRecordId: 'db/1',
+  });
+  assert.deepEqual(readDatabaseUrlState(new URLSearchParams(
+    'elements=H&element_mode=only&page=3&record=%20',
+  )), {
+    query: '',
+    selectedElements: ['H'],
+    elementMode: 'only',
+    page: 3,
+    selectedRecordId: '',
+  });
+});
+
+test('competition database URL writer uses canonical query keys', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const writeDatabaseUrlState = loadFunction(source, 'writeDatabaseUrlState');
+  const params = writeDatabaseUrlState({
+    query: 'Mo S',
+    selectedElements: ['Mo', 'S'],
+    elementMode: 'only',
+    page: 4,
+    selectedRecordId: 'db/demo 1',
+  });
+
+  assert.equal(params.get('q'), 'Mo S');
+  assert.equal(params.get('elements'), 'Mo,S');
+  assert.equal(params.get('element_mode'), 'only');
+  assert.equal(params.get('page'), '4');
+  assert.equal(params.get('record'), 'db/demo 1');
+  assert.deepEqual([...params.keys()], ['q', 'elements', 'element_mode', 'page', 'record']);
+});
+
+test('competition database detail fails closed for malformed records and resource states', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  const normalizeDatabaseRecord = loadFunction(source, 'normalizeDatabaseRecord');
+  const databaseDetailState = loadFunction(source, 'databaseDetailState');
+
+  for (const malformed of [null, undefined, [], 'record', 42, new Date()]) {
+    assert.equal(normalizeDatabaseRecord(malformed), null);
+  }
+  assert.deepEqual(normalizeDatabaseRecord({ id: 'db-1', formula: 'MoS2' }), {
+    id: 'db-1',
+    formula: 'MoS2',
+    elements: [],
+    source: '',
+    workflow_id: '',
+    status: 'unknown',
+    bandgap_eV: null,
+    energy: null,
+    completed_at: '',
+    latest_job_id: '',
+    data_kind: 'unknown',
+    vasp_detail: null,
+    artifacts: [],
+  });
+  assert.equal(databaseDetailState({ status: 'loading' }, null), 'loading');
+  assert.equal(databaseDetailState({ status: 'empty' }, null), 'empty');
+  assert.equal(databaseDetailState({ status: 'forbidden' }, null), 'forbidden');
+  assert.equal(databaseDetailState({ status: 'error', error: { code: 'parse-error' } }, null), 'parse-error');
+  assert.equal(databaseDetailState({ status: 'error', error: { code: 'stale' } }, null), 'stale');
+  assert.equal(databaseDetailState({ status: 'error', error: new Error('network') }, null), 'error');
+  assert.equal(databaseDetailState({ status: 'ready' }, null), 'parse-error');
+  assert.equal(databaseDetailState({ status: 'ready' }, { status: 'parse-error' }), 'parse-error');
+  assert.equal(databaseDetailState({ status: 'ready' }, { status: 'stale' }), 'stale');
+  assert.equal(databaseDetailState({ status: 'ready' }, { status: 'succeeded' }), 'ready');
+});
+
+test('competition database inspector exposes required evidence without success inference', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+  for (const label of [
+    '成分',
+    '源工作流',
+    '状态',
+    '带隙',
+    '总能',
+    '完成时间',
+    '最新演示 Job ID',
+    'BAND 可用性',
+    'DOS 可用性',
+    '证据包状态',
+    '来源未验证',
+  ]) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.match(source, /record\.artifacts\.includes\(['"]evidence-bundle['"]\)/);
+  assert.doesNotMatch(source, /record\.status\s*===\s*['"]succeeded['"]\s*\?\s*['"]真实数据['"]/);
+
+  const styles = read('../src/pages/competition/CompetitionPages.css');
+  assert.match(styles, /\.competition-database-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*[^)]+\)\s+minmax\(320px,/s);
+  assert.match(styles, /@media\s*\(max-width:\s*1024px\)\s*{[\s\S]*?\.competition-database-workspace\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.doesNotMatch(styles, /letter-spacing:\s*-/);
+});
+
 test('competition state surfaces keep demo, loading, and failures explicit', () => {
   const source = read('../src/features/competition/components/CompetitionState.jsx');
   for (const pattern of [

@@ -8,7 +8,13 @@ import RequireAuth from './routes/RequireAuth';
 
 
 const Login = lazy(() => import('./pages/Login'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
+const CompetitionDashboard = lazy(() => import('./pages/CompetitionDashboard'));
+const CompetitionNewCalculation = lazy(() => import('./pages/competition/CompetitionNewCalculation'));
+const CompetitionWorkflows = lazy(() => import('./pages/competition/CompetitionWorkflows'));
+const CompetitionWorkflowDetail = lazy(() => import('./pages/competition/CompetitionWorkflowDetail'));
+const CompetitionResults = lazy(() => import('./pages/competition/CompetitionResults'));
+const CompetitionResultDetail = lazy(() => import('./pages/competition/CompetitionResultDetail'));
+const CompetitionVaspDatabase = lazy(() => import('./pages/competition/CompetitionVaspDatabase'));
 
 
 function RouteFallback() {
@@ -20,7 +26,7 @@ function RouteFallback() {
 }
 
 
-function ProtectedAppShell() {
+function ProtectedCompetitionShell() {
   return (
     <RequireAuth>
       <CompetitionDataProvider>
@@ -38,8 +44,14 @@ export default function App107Cup() {
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
-          <Route element={<ProtectedAppShell />}>
-            <Route path="/dashboard" element={<Dashboard />} />
+          <Route element={<ProtectedCompetitionShell />}>
+            <Route path="/dashboard" element={<CompetitionDashboard />} />
+            <Route path="/dashboard/calculations/new" element={<CompetitionNewCalculation />} />
+            <Route path="/dashboard/workflows" element={<CompetitionWorkflows />} />
+            <Route path="/dashboard/workflows/:workflowId" element={<CompetitionWorkflowDetail />} />
+            <Route path="/dashboard/results" element={<CompetitionResults />} />
+            <Route path="/dashboard/results/:workflowId" element={<CompetitionResultDetail />} />
+            <Route path="/dashboard/database/vasp" element={<CompetitionVaspDatabase />} />
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
