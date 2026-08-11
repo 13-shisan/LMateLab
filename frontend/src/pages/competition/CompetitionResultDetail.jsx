@@ -150,6 +150,10 @@ function normalizeResultDetailState(resource, workflowId) {
   }
 
   const requiredStepKeys = ['relax', 'scf', 'band', 'dos'];
+  const hasValidJobId = (value) => (
+    (typeof value === 'string' && value.trim() !== '')
+    || (Number.isInteger(value) && value > 0)
+  );
   const acceptedStepsAreComplete = Array.isArray(result.steps)
     && result.steps.length === requiredStepKeys.length
     && result.steps.every(isPlainObject)
@@ -158,11 +162,7 @@ function normalizeResultDetailState(resource, workflowId) {
       step.key === key
       && step.status === 'succeeded'
       && step.accepted === true
-      && (
-        (typeof step.job_id === 'string' && step.job_id.trim() !== '')
-        || (typeof step.job_id === 'number' && Number.isFinite(step.job_id))
-        || typeof step.job_id === 'boolean'
-      )
+      && hasValidJobId(step.job_id)
       && (step.exit_code === '0:0' || step.exit_code === 0)
     )));
   if (!acceptedStepsAreComplete) {
@@ -330,16 +330,25 @@ function normalizeEvidenceLines(value) {
 
 function hasCompleteFailureEvidence(evidence) {
   if (evidence === null || typeof evidence !== 'object' || Array.isArray(evidence)) return false;
-  const isEvidenceScalar = (value) => (
-    (typeof value === 'string' && value.trim() !== '')
-    || (typeof value === 'number' && Number.isFinite(value))
-    || typeof value === 'boolean'
+  const hasText = (value) => typeof value === 'string' && value.trim() !== '';
+  const hasValidJobId = (value) => (
+    hasText(value) || (Number.isInteger(value) && value > 0)
   );
-  return ['step', 'job_id', 'exit_code', 'reason']
-    .every((key) => isEvidenceScalar(evidence[key]))
-    && ['expected_files', 'missing_files', 'log_tail'].every((key) => (
-      Array.isArray(evidence[key]) && evidence[key].every(isEvidenceScalar)
-    ));
+  const hasValidExitCode = (value) => (
+    hasText(value) || (Number.isInteger(value) && value >= 0)
+  );
+  const hasStringArray = (value, allowEmpty) => (
+    Array.isArray(value)
+    && (allowEmpty || value.length > 0)
+    && value.every(hasText)
+  );
+  return ['relax', 'scf', 'band', 'dos'].includes(evidence.step)
+    && hasValidJobId(evidence.job_id)
+    && hasValidExitCode(evidence.exit_code)
+    && hasText(evidence.reason)
+    && hasStringArray(evidence.expected_files, false)
+    && hasStringArray(evidence.missing_files, true)
+    && hasStringArray(evidence.log_tail, false);
 }
 
 function EvidenceList({ values }) {

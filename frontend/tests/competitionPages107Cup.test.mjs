@@ -1195,10 +1195,18 @@ test('result detail state classifier fails closed before mounting science', () =
     acceptedSteps.slice(0, 3),
     [acceptedSteps[0], acceptedSteps[0], acceptedSteps[2], acceptedSteps[3]],
     acceptedSteps.map((step, index) => (index === 0 ? { ...step, job_id: '' } : step)),
+    acceptedSteps.map((step, index) => (index === 0 ? { ...step, job_id: '   ' } : step)),
     acceptedSteps.map((step, index) => (index === 1 ? { ...step, exit_code: null } : step)),
     acceptedSteps.map((step, index) => (index === 2 ? { ...step, accepted: false } : step)),
     acceptedSteps.map((step, index) => (index === 3 ? { ...step, status: 'waiting' } : step)),
   ];
+  for (const invalidJobId of [false, true, 0, -3.5, -1, 1.5, {}, []]) {
+    invalidAcceptedSteps.push(
+      acceptedSteps.map((step, index) => (
+        index === 0 ? { ...step, job_id: invalidJobId } : step
+      )),
+    );
+  }
   for (const invalidSteps of invalidAcceptedSteps) {
     assert.deepEqual(
       normalizeResultDetailState({
@@ -1207,6 +1215,16 @@ test('result detail state classifier fails closed before mounting science', () =
       { status: 'parse-error', message: '结果验收合同不完整', variant: null, result: null },
     );
   }
+  const numericJobSuccess = {
+    ...success,
+    steps: acceptedSteps.map((step, index) => (
+      index === 0 ? { ...step, job_id: 17 } : step
+    )),
+  };
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: numericJobSuccess }, 'wf-1'),
+    { status: 'ready', message: undefined, variant: 'success', result: numericJobSuccess },
+  );
 });
 
 test('result detail sanitizes identity and workflow step evidence before JSX', () => {
@@ -1273,15 +1291,34 @@ test('failure evidence completeness rejects unsafe array entries', () => {
     job_id: 'JOB-1',
     exit_code: '1:0',
     reason: 'failed',
-    expected_files: ['OUTCAR', 2],
+    expected_files: ['OUTCAR', 'vasprun.xml'],
     missing_files: [],
-    log_tail: ['line', false],
+    log_tail: ['line'],
   };
 
   assert.equal(hasCompleteFailureEvidence(complete), true);
-  assert.equal(hasCompleteFailureEvidence({ ...complete, expected_files: [{}] }), false);
-  assert.equal(hasCompleteFailureEvidence({ ...complete, missing_files: [[]] }), false);
-  assert.equal(hasCompleteFailureEvidence({ ...complete, log_tail: [new Date()] }), false);
+  assert.equal(hasCompleteFailureEvidence({ ...complete, job_id: 42, exit_code: 0 }), true);
+  for (const step of ['', 'opt', false, 0, {}]) {
+    assert.equal(hasCompleteFailureEvidence({ ...complete, step }), false);
+  }
+  for (const jobId of ['', '   ', false, true, 0, -3.5, -1, 1.5, {}]) {
+    assert.equal(hasCompleteFailureEvidence({ ...complete, job_id: jobId }), false);
+  }
+  for (const exitCode of ['', '   ', false, true, -1, 1.5, {}]) {
+    assert.equal(hasCompleteFailureEvidence({ ...complete, exit_code: exitCode }), false);
+  }
+  for (const reason of ['', '   ', false, 0, {}]) {
+    assert.equal(hasCompleteFailureEvidence({ ...complete, reason }), false);
+  }
+  for (const field of ['expected_files', 'missing_files', 'log_tail']) {
+    for (const invalidEntry of [false, true, 0, 2, {}, [], new Date()]) {
+      assert.equal(hasCompleteFailureEvidence({ ...complete, [field]: [invalidEntry] }), false);
+    }
+    assert.equal(hasCompleteFailureEvidence({ ...complete, [field]: ['   '] }), false);
+  }
+  assert.equal(hasCompleteFailureEvidence({ ...complete, expected_files: [] }), false);
+  assert.equal(hasCompleteFailureEvidence({ ...complete, log_tail: [] }), false);
+  assert.equal(hasCompleteFailureEvidence({ ...complete, missing_files: [] }), true);
   assert.deepEqual(normalizeEvidenceLines([{}, 'line', 0, false]), ['line', '0', 'false']);
 });
 
