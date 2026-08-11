@@ -613,7 +613,6 @@ test('workflow detail page loads immutable evidence and handles missing ids expl
   assert.match(source, /provider\.getWorkflow\(workflowId\)/);
   assert.match(source, /workflowId\s*\?[^:]+:\s*Promise\.resolve\(null\)/s);
   assert.match(source, /缺少工作流 ID|未找到工作流/);
-  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*['"]演示数据['"]\s*:\s*['"]真实数据['"]/);
   assert.match(source, /<WorkflowTimeline\s+steps=\{workflowSteps\}\s*\/>/);
   assert.doesNotMatch(source, /<WorkflowTimeline[^>]*compact/);
   assert.ok(
@@ -635,6 +634,98 @@ test('workflow detail page loads immutable evidence and handles missing ids expl
   );
   assert.match(source, /role=['"]alert['"]/);
   assert.doesNotMatch(source, /alert\s*\(|toast\s*\(|sbatch|squeue|sacct|scancel|vasp_db|legacy/i);
+});
+
+test('workflow detail data kind labels follow record provenance instead of provider mode', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const workflowDataKindLabel = loadFunction(source, 'workflowDataKindLabel');
+
+  assert.equal(workflowDataKindLabel('demo'), '演示数据');
+  for (const dataKind of ['live', 'unknown', '', null, undefined]) {
+    assert.equal(workflowDataKindLabel(dataKind), '真实数据');
+  }
+  assert.match(
+    source,
+    /const\s+dataKindLabel\s*=\s*workflowDataKindLabel\(workflow\.data_kind\);/,
+  );
+  assert.equal(source.match(/\{dataKindLabel\}/g)?.length, 2);
+  assert.doesNotMatch(source, /mode\s*===\s*['"]demo['"]\s*\?\s*['"]演示数据['"]\s*:\s*['"]真实数据['"]/);
+  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*<DemoDataBanner\s*\/>\s*:\s*null/g);
+});
+
+test('workflow detail immutable identity uses explicit Chinese labels', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+
+  for (const label of [
+    '工作流 ID',
+    '创建人',
+    '模板版本',
+    '输入 SHA-256',
+    '发布提交',
+    '数据类型',
+  ]) {
+    assert.match(source, new RegExp(`<dt>${label}</dt>`));
+  }
+  for (const internalName of [
+    'workflow.id',
+    'creator',
+    'template_version',
+    'input_sha256',
+    'release_commit',
+    'data_kind',
+  ]) {
+    assert.doesNotMatch(source, new RegExp(`<dt>${internalName.replace('.', '\\.')}</dt>`));
+  }
+});
+
+test('workflow detail state normalization preserves provider failures and rejects malformed records', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const normalizeWorkflowDetailState = loadFunction(source, 'normalizeWorkflowDetailState');
+  const workflow = { id: 'wf-1', data_kind: 'demo' };
+
+  assert.deepEqual(
+    normalizeWorkflowDetailState({ status: 'loading', data: null, error: null }, 'wf-1'),
+    { status: 'loading', message: undefined, workflow: null },
+  );
+  assert.deepEqual(
+    normalizeWorkflowDetailState({
+      status: 'forbidden', data: null, error: { message: 'viewer denied' },
+    }, 'wf-1'),
+    { status: 'forbidden', message: 'viewer denied', workflow: null },
+  );
+  assert.deepEqual(
+    normalizeWorkflowDetailState({
+      status: 'error', data: null, error: { message: 'service unavailable' },
+    }, 'wf-1'),
+    { status: 'error', message: 'service unavailable', workflow: null },
+  );
+  assert.deepEqual(
+    normalizeWorkflowDetailState({ status: 'empty', data: null, error: null }, 'wf-1'),
+    { status: 'empty', message: '未找到工作流', workflow: null },
+  );
+  assert.deepEqual(
+    normalizeWorkflowDetailState({ status: 'ready', data: null, error: null }, undefined),
+    { status: 'empty', message: '缺少工作流 ID', workflow: null },
+  );
+  assert.deepEqual(
+    normalizeWorkflowDetailState({ status: 'ready', data: workflow, error: null }, 'wf-1'),
+    { status: 'ready', message: undefined, workflow },
+  );
+  for (const malformed of [[], 'wf-1', 0, true, new Date()]) {
+    assert.deepEqual(
+      normalizeWorkflowDetailState({ status: 'ready', data: malformed, error: null }, 'wf-1'),
+      { status: 'empty', message: '未找到工作流', workflow: null },
+    );
+  }
+
+  assert.match(
+    source,
+    /const\s+detailState\s*=\s*normalizeWorkflowDetailState\(state,\s*workflowId\);/,
+  );
+  assert.match(source, /detailState\.status\s*!==\s*['"]ready['"]/);
+  assert.match(source, /status=\{detailState\.status\}/);
+  assert.match(source, /message=\{detailState\.message\}/);
+  assert.match(source, /const\s+workflow\s*=\s*detailState\.workflow;/);
 });
 
 test('workflow detail commands execute only for live operators', async () => {
