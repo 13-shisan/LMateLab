@@ -111,9 +111,18 @@
     display: none;
   }
 
+  .vasp-data-surface.is-mobile-scroll .vasp-table-scroll {
+    display: block;
+    overflow-x: auto;
+  }
+
   .vasp-mobile-records {
     display: grid;
     gap: 10px;
+  }
+
+  .vasp-data-surface.is-mobile-scroll .vasp-mobile-records {
+    display: none;
   }
 
   .vasp-mobile-record {

@@ -35,3 +35,14 @@ test('VASP task surface does not restore fixed-height row clipping', () => {
   assert.doesNotMatch(pageSource, /TABLE_ROW_H|TABLE_HEAD_H/);
   assert.doesNotMatch(pageSource, /height:\s*TABLE_HEAD_H\s*\+\s*tasksPageSize/);
 });
+
+test('read-only table core is separate from legacy mutations', () => {
+  const core = readFileSync(new URL('../src/pages/db/VaspRecordTable.jsx', import.meta.url), 'utf8');
+  const wrapper = readFileSync(new URL('../src/pages/db/VaspDataTable.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(core, /收藏|移除|onCollect|onRemove|customDbs/);
+  assert.match(core, /detailPathForItem/);
+  assert.match(core, /mobileMode/);
+  assert.match(core, /is-mobile-scroll/);
+  assert.match(wrapper, /VaspRecordTable/);
+  assert.match(wrapper, /RowActions/);
+});
