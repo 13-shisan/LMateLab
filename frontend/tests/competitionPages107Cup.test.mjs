@@ -963,10 +963,20 @@ test('demo result provider filters all succeeded failed and parse-error without 
     assert.equal(response.items.some((item) => item.status === 'running'), false);
   }
 
-  const artifact = await provider.downloadArtifact('wf-demo-mos2-success', 'band-data');
-  assert.equal(artifact.filename, 'DEMO-band.dat');
-  assert.match(artifact.filename, /^DEMO-/);
-  assert.ok(artifact.blob instanceof Blob);
+  const artifactExpectations = new Map([
+    ['band-data', ['DEMO-band.dat', '# DEMO MoS2 band data']],
+    ['dos-data', ['DEMO-dos.dat', '# DEMO MoS2 DOS data']],
+    ['structure-cif', ['DEMO-MoS2.cif', 'data_DEMO_MoS2']],
+    ['structure-poscar', ['DEMO-POSCAR', 'DEMO MoS2']],
+    ['evidence-bundle', ['DEMO-evidence.json', '"id": "wf-demo-mos2-success"']],
+  ]);
+  for (const [kind, [expectedFilename, fixtureMarker]] of artifactExpectations) {
+    const artifact = await provider.downloadArtifact('wf-demo-mos2-success', kind);
+    assert.equal(artifact.filename, expectedFilename);
+    assert.match(artifact.filename, /^DEMO-/);
+    assert.ok(artifact.blob instanceof Blob);
+    assert.match(await artifact.blob.text(), new RegExp(fixtureMarker));
+  }
 });
 
 test('result detail state classifier fails closed before mounting science', () => {
@@ -975,8 +985,20 @@ test('result detail state classifier fails closed before mounting science', () =
   const normalizeResultDetailState = loadFunction(source, 'normalizeResultDetailState');
   const scientificDetail = {
     db: { dbname: 'demo' },
-    row: { id: 1, formula: 'MoS2', natoms: 1 },
-    properties: { spacegroup: 'P1' },
+    row: {
+      id: 1,
+      formula: 'MoS2',
+      energy: -22.4,
+      fmax: 0.006,
+      natoms: 1,
+      pbc: [true, true, false],
+    },
+    properties: {
+      spacegroup: 'P1',
+      bandgap_eV: 1.78,
+      vbm_eV: 0,
+      cbm_eV: 1.78,
+    },
     structure: {
       symbols: ['Mo'],
       positions: [[0, 0, 0]],
@@ -984,7 +1006,17 @@ test('result detail state classifier fails closed before mounting science', () =
       pbc: [true, true, true],
     },
     crystal: {
-      lattice: { a: 1, b: 1, c: 1 },
+      lattice: {
+        a: 1,
+        b: 1,
+        c: 10,
+        alpha: 90,
+        beta: 90,
+        gamma: 90,
+        volume: 10,
+      },
+      density_g_cm3: 1.2,
+      dimensionality: 2,
       atomic_positions_frac: [{ element: 'Mo', x: 0, y: 0, z: 0 }],
     },
     capabilities: {
@@ -1063,13 +1095,27 @@ test('result detail state classifier fails closed before mounting science', () =
       { status: 'parse-error', message: '结果状态不受支持', variant: null, result: null },
     );
   }
-  for (const incompleteDetail of [
+  const incompleteDetails = [
     null,
     {},
+    { ...scientificDetail, db: {} },
+    { ...scientificDetail, row: {} },
+    { ...scientificDetail, row: { ...scientificDetail.row, formula: '' } },
+    { ...scientificDetail, row: { ...scientificDetail.row, energy: null } },
+    { ...scientificDetail, properties: {} },
     { ...scientificDetail, structure: null },
     { ...scientificDetail, structure: { symbols: [], positions: [], cell: [] } },
+    { ...scientificDetail, structure: { ...scientificDetail.structure, pbc: [] } },
+    { ...scientificDetail, crystal: { ...scientificDetail.crystal, lattice: {} } },
+    {
+      ...scientificDetail,
+      crystal: { ...scientificDetail.crystal, atomic_positions_frac: [{}] },
+    },
+    { ...scientificDetail, crystal: { ...scientificDetail.crystal, density_g_cm3: null } },
+    { ...scientificDetail, crystal: { ...scientificDetail.crystal, dimensionality: null } },
     { ...scientificDetail, capabilities: { ...scientificDetail.capabilities, band_plot: false } },
-  ]) {
+  ];
+  for (const incompleteDetail of incompleteDetails) {
     assert.deepEqual(
       normalizeResultDetailState({
         status: 'ready', data: { ...success, vasp_detail: incompleteDetail },
@@ -1116,12 +1162,61 @@ test('result scientific adapters infer artifacts and keep callback cleanup stabl
   const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
   const inferArtifactKind = loadFunction(source, 'inferArtifactKind');
 
-  assert.equal(inferArtifactKind('/band-dat'), 'band-data');
-  assert.equal(inferArtifactKind('DOS_DATA.ZIP'), 'dos-data');
-  assert.equal(inferArtifactKind('final.CIF'), 'structure-cif');
-  assert.equal(inferArtifactKind('POSCAR'), 'structure-poscar');
-  assert.equal(inferArtifactKind('relaxed.vasp'), 'structure-poscar');
-  assert.equal(inferArtifactKind('evidence.json'), 'evidence-bundle');
+  assert.equal(
+    inferArtifactKind('/api/task/wf-band-study/export?format=cif', 'wf-band-study.cif'),
+    'structure-cif',
+  );
+  assert.equal(
+    inferArtifactKind('/api/task/wf-dos-study/band-dat', 'wf-dos-study_band.dat'),
+    'band-data',
+  );
+  assert.equal(
+    inferArtifactKind('/api/task/wf-band-study/dos-dat', 'wf-band-study_dos_data.zip'),
+    'dos-data',
+  );
+  assert.equal(
+    inferArtifactKind('/api/task/wf-dos-study/export?format=poscar', 'wf-dos-study.vasp'),
+    'structure-poscar',
+  );
+  assert.equal(
+    inferArtifactKind('/api/task/wf-band-study/artifacts/evidence-bundle', 'DEMO-evidence.json'),
+    'evidence-bundle',
+  );
+  assert.equal(inferArtifactKind('/api/task/wf-dos-study/band-dat'), 'band-data');
+  assert.equal(
+    inferArtifactKind('/api/task/wf-band-study/export?format=poscar'),
+    'structure-poscar',
+  );
+  assert.throws(
+    () => inferArtifactKind('/api/task/wf-band-study/metadata', 'report.json'),
+    /未知科学工件类型/,
+  );
+  assert.throws(
+    () => inferArtifactKind('/api/task/wf-band-study/band-dat', 'report.json'),
+    /未知科学工件类型/,
+  );
+
+  const requestScientificArtifact = loadFunction(source, 'requestScientificArtifact', {
+    inferArtifactKind,
+  });
+  const artifactCalls = [];
+  const artifactProvider = {
+    downloadArtifact(...args) {
+      artifactCalls.push(args);
+      return { blob: new Blob(['fixture']), filename: 'DEMO-fixture' };
+    },
+  };
+  assert.throws(
+    () => requestScientificArtifact(
+      artifactProvider, 'wf-band-study', '/api/task/wf-band-study/band-dat', 'report.json',
+    ),
+    /未知科学工件类型/,
+  );
+  assert.deepEqual(artifactCalls, []);
+  requestScientificArtifact(
+    artifactProvider, 'wf-band-study', '/api/task/wf-band-study/export?format=cif', 'wf-band-study.cif',
+  );
+  assert.deepEqual(artifactCalls, [['wf-band-study', 'structure-cif']]);
 
   const callbackNames = ['fetchScientificJson', 'downloadScientificFile'];
   for (const callbackName of callbackNames) {
@@ -1135,8 +1230,8 @@ test('result scientific adapters infer artifacts and keep callback cleanup stabl
     const callbackSource = source.slice(declarations[0].start, declarations[0].end);
     assert.match(callbackSource, /\[provider,\s*workflowId\]/);
   }
-  assert.match(source, /provider\.loadPlot\(workflowId,\s*kind\)/);
-  assert.match(source, /provider\.downloadArtifact\(workflowId,\s*inferArtifactKind\(/);
+  assert.match(source, /requestScientificPlot\(provider,\s*workflowId,\s*path\)/);
+  assert.match(source, /requestScientificArtifact\(provider,\s*workflowId,\s*path,\s*filename\)/);
   assert.match(source, /anchor\.download\s*=\s*artifact\.filename/);
   assert.doesNotMatch(source, /anchor\.download\s*=\s*filename/);
 
@@ -1148,6 +1243,34 @@ test('result scientific adapters infer artifacts and keep callback cleanup stabl
   assert.ok(downloadTries[0].finalizer, 'download cleanup must use finally');
   const cleanupSource = source.slice(downloadTries[0].finalizer.start, downloadTries[0].finalizer.end);
   assert.match(cleanupSource, /URL\.revokeObjectURL\(href\)/);
+});
+
+test('result plot adapter maps only controlled terminal paths before provider calls', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const inferPlotKind = loadFunction(source, 'inferPlotKind');
+  const requestScientificPlot = loadFunction(source, 'requestScientificPlot', { inferPlotKind });
+
+  assert.equal(inferPlotKind('/api/task/wf-band-study/dos-plot?emin=-3&emax=3'), 'dos');
+  assert.equal(inferPlotKind('/api/task/wf-dos-study/band-plot?align=fermi'), 'band');
+  assert.throws(
+    () => inferPlotKind('/api/task/wf-band-study/metadata'),
+    /未知科学图类型/,
+  );
+
+  const plotCalls = [];
+  const plotProvider = {
+    loadPlot(...args) {
+      plotCalls.push(args);
+      return { image_url: '/fixture.svg' };
+    },
+  };
+  assert.throws(
+    () => requestScientificPlot(plotProvider, 'wf-band-study', '/api/task/wf-band-study/metadata'),
+    /未知科学图类型/,
+  );
+  assert.deepEqual(plotCalls, []);
+  requestScientificPlot(plotProvider, 'wf-band-study', '/api/task/wf-band-study/dos-plot');
+  assert.deepEqual(plotCalls, [['wf-band-study', 'dos']]);
 });
 
 test('result detail preserves identity timeline ordering and explicit failure evidence', () => {

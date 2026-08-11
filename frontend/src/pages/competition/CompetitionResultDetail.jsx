@@ -18,13 +18,66 @@ import VaspTaskSummary from '../db/vasp-detail/VaspTaskSummary';
 import '../db/vasp-detail/VaspTaskDetail.css';
 import './CompetitionPages.css';
 
-function inferArtifactKind(value) {
-  const text = String(value).toLowerCase();
-  if (text.includes('band')) return 'band-data';
-  if (text.includes('dos')) return 'dos-data';
-  if (text.includes('cif')) return 'structure-cif';
-  if (text.includes('poscar') || text.includes('.vasp')) return 'structure-poscar';
-  return 'evidence-bundle';
+function inferArtifactKind(path, filename) {
+  const hasSuppliedFilename = filename !== undefined
+    && filename !== null
+    && String(filename).trim() !== '';
+  const filenameLeaf = String(hasSuppliedFilename ? filename : path)
+    .trim()
+    .toLowerCase()
+    .split(/[\\/]/)
+    .pop()
+    .split(/[?#]/)[0];
+  if (filenameLeaf.endsWith('.cif')) return 'structure-cif';
+  if (filenameLeaf.endsWith('.vasp') || /(?:^|[-_])poscar$/.test(filenameLeaf)) {
+    return 'structure-poscar';
+  }
+  if (/(?:^|[-_])band(?:[-_]?data)?\.dat$/.test(filenameLeaf)) return 'band-data';
+  if (/(?:^|[-_])dos(?:[-_]?data)?\.(?:dat|zip)$/.test(filenameLeaf)) return 'dos-data';
+  if (/(?:^|[-_])evidence(?:[-_]?bundle)?\.json$/.test(filenameLeaf)) {
+    return 'evidence-bundle';
+  }
+  if (hasSuppliedFilename) throw new Error('未知科学工件类型');
+
+  const pathText = String(path).trim().toLowerCase();
+  const queryStart = pathText.indexOf('?');
+  const pathname = queryStart === -1 ? pathText : pathText.slice(0, queryStart);
+  const query = queryStart === -1 ? '' : pathText.slice(queryStart + 1).split('#')[0];
+  const terminal = pathname.split('/').filter(Boolean).pop() || '';
+  const terminalKinds = {
+    'band-data': 'band-data',
+    'band-dat': 'band-data',
+    'dos-data': 'dos-data',
+    'dos-dat': 'dos-data',
+    'structure-cif': 'structure-cif',
+    'structure-poscar': 'structure-poscar',
+    'evidence-bundle': 'evidence-bundle',
+  };
+  if (Object.hasOwn(terminalKinds, terminal)) return terminalKinds[terminal];
+  if (terminal === 'export') {
+    const format = new URLSearchParams(query).get('format');
+    if (format === 'cif') return 'structure-cif';
+    if (format === 'poscar') return 'structure-poscar';
+  }
+  throw new Error('未知科学工件类型');
+}
+
+function inferPlotKind(path) {
+  const pathname = String(path).trim().toLowerCase().split(/[?#]/)[0];
+  const terminal = pathname.split('/').filter(Boolean).pop() || '';
+  if (terminal === 'band-plot') return 'band';
+  if (terminal === 'dos-plot') return 'dos';
+  throw new Error('未知科学图类型');
+}
+
+function requestScientificArtifact(provider, workflowId, path, filename) {
+  const kind = inferArtifactKind(path, filename);
+  return provider.downloadArtifact(workflowId, kind);
+}
+
+function requestScientificPlot(provider, workflowId, path) {
+  const kind = inferPlotKind(path);
+  return provider.loadPlot(workflowId, kind);
 }
 
 function normalizeResultDetailState(resource, workflowId) {
@@ -33,6 +86,18 @@ function normalizeResultDetailState(resource, workflowId) {
     const prototype = Object.getPrototypeOf(value);
     return prototype === Object.prototype || prototype === null;
   };
+  const hasText = (value) => typeof value === 'string' && value.trim() !== '';
+  const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+  const isPbc = (value) => (
+    Array.isArray(value)
+    && value.length === 3
+    && value.every((entry) => typeof entry === 'boolean')
+  );
+  const isVector = (value) => (
+    Array.isArray(value)
+    && value.length === 3
+    && value.every(isFiniteNumber)
+  );
   const emptyMessage = workflowId ? '未找到结果' : '缺少工作流 ID';
   const emptyState = {
     status: 'empty', message: emptyMessage, variant: null, result: null,
@@ -84,37 +149,70 @@ function normalizeResultDetailState(resource, workflowId) {
   }
 
   const detail = result.vasp_detail;
+  const db = detail?.db;
+  const row = detail?.row;
+  const properties = detail?.properties;
   const structure = detail?.structure;
   const crystal = detail?.crystal;
+  const lattice = crystal?.lattice;
   const capabilities = detail?.capabilities;
   const coordinateRows = crystal?.atomic_positions_frac;
+  const dbIsComplete = isPlainObject(db) && hasText(db.dbname);
+  const rowIsComplete = isPlainObject(row)
+    && ((typeof row.id === 'number' && Number.isFinite(row.id)) || hasText(row.id))
+    && hasText(row.formula)
+    && isFiniteNumber(row.energy)
+    && isFiniteNumber(row.fmax)
+    && Number.isInteger(row.natoms)
+    && row.natoms > 0
+    && isPbc(row.pbc);
+  const propertiesAreComplete = isPlainObject(properties)
+    && hasText(properties.spacegroup)
+    && ['bandgap_eV', 'vbm_eV', 'cbm_eV'].every((key) => isFiniteNumber(properties[key]));
   const structureIsComplete = isPlainObject(structure)
     && Array.isArray(structure.symbols)
     && structure.symbols.length > 0
-    && structure.symbols.every((symbol) => typeof symbol === 'string' && symbol.trim() !== '')
+    && structure.symbols.every(hasText)
     && Array.isArray(structure.positions)
     && structure.positions.length === structure.symbols.length
-    && structure.positions.every((position) => (
-      Array.isArray(position)
-      && position.length === 3
-      && position.every((value) => Number.isFinite(Number(value)))
-    ))
+    && structure.positions.every(isVector)
     && Array.isArray(structure.cell)
     && structure.cell.length === 3
-    && structure.cell.every((vector) => (
-      Array.isArray(vector)
-      && vector.length === 3
-      && vector.every((value) => Number.isFinite(Number(value)))
+    && structure.cell.every(isVector)
+    && isPbc(structure.pbc)
+    && rowIsComplete
+    && structure.symbols.length === row.natoms;
+  const latticeIsComplete = isPlainObject(lattice)
+    && ['a', 'b', 'c', 'alpha', 'beta', 'gamma', 'volume']
+      .every((key) => isFiniteNumber(lattice[key]))
+    && lattice.a > 0
+    && lattice.b > 0
+    && lattice.c > 0
+    && lattice.volume > 0
+    && [lattice.alpha, lattice.beta, lattice.gamma]
+      .every((angle) => angle > 0 && angle <= 180);
+  const coordinateRowsAreComplete = Array.isArray(coordinateRows)
+    && rowIsComplete
+    && coordinateRows.length === row.natoms
+    && coordinateRows.every((position) => (
+      isPlainObject(position)
+      && hasText(position.element)
+      && ['x', 'y', 'z'].every((key) => isFiniteNumber(position[key]))
     ));
+  const crystalIsComplete = isPlainObject(crystal)
+    && latticeIsComplete
+    && isFiniteNumber(crystal.density_g_cm3)
+    && crystal.density_g_cm3 > 0
+    && Number.isInteger(crystal.dimensionality)
+    && crystal.dimensionality >= 0
+    && crystal.dimensionality <= 3
+    && coordinateRowsAreComplete;
   const detailIsComplete = isPlainObject(detail)
-    && isPlainObject(detail.db)
-    && isPlainObject(detail.row)
-    && isPlainObject(detail.properties)
+    && dbIsComplete
+    && rowIsComplete
+    && propertiesAreComplete
     && structureIsComplete
-    && isPlainObject(crystal)
-    && isPlainObject(crystal.lattice)
-    && Array.isArray(coordinateRows)
-    && coordinateRows.length > 0
+    && crystalIsComplete
     && isPlainObject(capabilities)
     && ['structure_export', 'band_plot', 'dos_plot', 'band_data', 'dos_data']
       .every((key) => capabilities[key] === true);
@@ -220,15 +318,14 @@ export default function CompetitionResultDetail() {
   const detailState = normalizeResultDetailState(state, workflowId);
 
   const fetchScientificJson = useCallback((path) => {
-    const kind = String(path).includes('band-plot') ? 'band' : 'dos';
-    return provider.loadPlot(workflowId, kind);
+    return requestScientificPlot(provider, workflowId, path);
   }, [provider, workflowId]);
 
   const downloadScientificFile = useCallback(async (path, filename) => {
     let href = '';
     let anchor = null;
     try {
-      const artifact = await provider.downloadArtifact(workflowId, inferArtifactKind(`${path} ${filename}`));
+      const artifact = await requestScientificArtifact(provider, workflowId, path, filename);
       if (!artifact?.blob || typeof artifact.filename !== 'string' || artifact.filename === '') {
         throw new Error('科学工件合同不完整');
       }
