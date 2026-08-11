@@ -660,3 +660,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Task 8 已新增 URL 驱动的工作流检索列表和不可变证据详情，包含 query/status 筛选、显式 loading/empty/forbidden/error 状态、六项中文 provenance、完整非紧凑四步时间线及未来 live Operator 的取消/失败步骤重试控制。实施时发现原任务文件清单遗漏了“验收结论”所需的共享时间线改动，因此按最小范围纠偏：复用现有 `WorkflowTimeline` 并只为非紧凑模式增加 `accepted` 证据，不在详情页复制时间线。
 - Task 8 规格复审发现并已修复按 provider mode 而非记录 `data_kind` 标记来源、身份字段使用内部键名以及 missing/error 仅靠字符串测试的问题；质量复审进一步修复 ready 坏对象向 provider 传递 `undefined` ID/step、未知 provenance 误标真实和重复命令窗口。详情现在要求路由与记录 ID 精确一致、`data_kind` 仅为 `demo/live`、失败步骤键仅为固定四步，按钮与可执行命令 helper 双层失败关闭并共享 pending 门禁。规格与质量复审最终均通过。
 - 当前功能实现检查点更新为 `5e85981de92e900270065c7c3eb2355f9f1d30bf`（不含本次方案状态提交）；Task 8 页面与 provider 聚焦测试 `45/45`、前端全套 `78/78`、定向 ESLint、demo/live/标准三种 Vite 构建和 `git diff --check` 通过。Task 10 前两个新页面仍未接入路由，构建结果仍只证明现有入口未回归；尚未执行 Task 11 浏览器验收，未合并或部署到 107，也未实现真实工作流/Slurm 写接口，阶段 5 至 8 继续保持 `PENDING`。
+
+### 2026-08-12
+
+- Task 9 已新增 URL 驱动的结果列表和科学结果详情：列表只接受 `succeeded`、`failed`、`parse-error` 三类完成记录并排除运行中工作流；详情直接复用现有 `VaspTaskSummary`、`VaspStructureViewer`、`VaspCrystalDetails` 和 `VaspElectronicProperties`，通过 competition provider 加载 BAND/DOS 图和下载结构、数据及证据工件。成功科学区与失败证据区在 AST 分支中互斥，demo 结果和全部下载文件持续标记为“演示内容”及 `DEMO-` 文件名。
+- Task 9 规格复审发现并已修复五类演示工件回归不足、空嵌套科学合同误判成功，以及工作流 ID 中 `band`/`dos` 子串干扰工件和绘图类型的问题。质量复审进一步修复无四步验收证据仍挂载成功科学区、合法 live 可空科学字段被误拒、畸形 provenance/时间线触发 React 渲染崩溃、结果行 `id` 覆盖权威 `workflow_id`，以及布尔值或非法数字冒充 Job ID/失败证据的问题；最终规格与质量复审均通过。绘图 `AbortSignal` 仍因现有 demo/live provider 接口只接受 `(id, kind)` 而留待真实接口阶段处理，本 Task 未越界修改 Task 1 provider。
+- 当前功能实现检查点更新为 `38a653bb2575e45e38fb0804fdf282f5ed4e4953`（不含本次方案状态提交）；Task 9 相关聚焦测试 `65/65`、前端全套 `89/89`、定向 ESLint、3 个 JSX Babel 解析、demo/live/标准三种 Vite 构建和 `git diff --check` 均通过。Task 10 前结果页仍未接入路由，因此 107 两种构建仍只证明现有入口未回归；尚未执行 Task 11 三视口浏览器与 Canvas 像素验收，未合并或部署到 107，也未产生真实 Slurm/VASP 结果，阶段 5 至 8 继续保持 `PENDING`。
