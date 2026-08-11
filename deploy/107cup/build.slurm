@@ -109,13 +109,14 @@ python -m unittest \
   tests.test_107cup_authz \
   tests.test_107cup_runtime \
   tests.test_107cup_deploy_contract \
+  tests.test_107cup_preview_deploy_contract \
   tests.test_health_readiness \
   -v
 
 cd "$project/frontend"
 npm ci
 npm test
-VITE_LMATELAB_EDITION=107cup npm run build
+VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=live npm run build
 
 export LMATELAB_FRONTEND_DIST="$project/frontend/dist"
 cd "$project/backend"
