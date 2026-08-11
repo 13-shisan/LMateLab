@@ -336,7 +336,7 @@
   cursor: pointer;
 }
 
-.competition-table-action button:hover,
+.competition-table-action button:not(:disabled):hover,
 .vasp-viewer-reset:hover {
   border-color: #84adff;
   color: #175cd3;

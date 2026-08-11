@@ -71,6 +71,7 @@ export default function VaspStructureViewer({ structure }) {
 
   useEffect(() => {
     if (!hostRef.current || positions.length === 0) return undefined;
+    setRenderState({ status: 'loading', message: '' });
     let alive = true;
     let viewer = null;
     let resizeObserver = null;

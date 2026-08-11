@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { parse } from '@babel/parser';
 
 import {
   formatTaskValue,
@@ -8,6 +9,17 @@ import {
 } from '../src/pages/db/vasp-detail/vaspTaskDetailPresentation.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+function loadFunction(source, name) {
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const declaration = ast.program.body
+    .map((node) => (node.type === 'ExportNamedDeclaration' ? node.declaration : node))
+    .find((node) => node?.type === 'FunctionDeclaration' && node.id?.name === name);
+  assert.ok(declaration, `${name} must exist for executable regression coverage`);
+  return new Function(
+    `${source.slice(declaration.start, declaration.end)}\nreturn ${name};`,
+  )();
+}
 
 test('VASP task detail uses readable labels and bounded precision', () => {
   assert.deepEqual(getTaskFieldPresentation('energy'), {
@@ -47,6 +59,44 @@ test('structure viewer exposes reset and electronic plots accept provider URLs',
   assert.match(electronic, /image_url/);
   assert.match(electronic, /image_base64/);
   assert.match(electronic, /<img src=\{activeImage\}/);
+});
+
+test('electronic plot requests reject stale completions even when abort is ignored', () => {
+  const source = read('../src/pages/db/vasp-detail/VaspElectronicProperties.jsx');
+  const isCurrentPlotRequest = loadFunction(source, 'isCurrentPlotRequest');
+  const applied = [];
+  let currentGeneration = 1;
+  const oldGeneration = currentGeneration;
+  currentGeneration += 1;
+  const latestGeneration = currentGeneration;
+  const settle = (generation, outcome) => {
+    if (isCurrentPlotRequest(currentGeneration, generation)) applied.push(outcome);
+  };
+
+  settle(oldGeneration, 'stale-success');
+  settle(oldGeneration, 'stale-error');
+  settle(oldGeneration, 'stale-finally');
+  settle(latestGeneration, 'latest-success');
+  assert.deepEqual(applied, ['latest-success']);
+  assert.match(source, /requestGenerationRef/);
+  assert.ok(
+    (source.match(/if \(!isCurrentRequest\(\)\) return;/g) || []).length >= 3,
+    'success, error, and finally paths must all reject stale requests',
+  );
+  assert.match(source, /controller\.abort\(\)/);
+});
+
+test('structure viewer resets to loading at effect start without cleanup state updates', () => {
+  const source = read('../src/pages/db/vasp-detail/VaspStructureViewer.jsx');
+  const effectStart = source.indexOf('  useEffect(() => {');
+  const asyncStart = source.indexOf('    (async () => {', effectStart);
+  const loadingReset = source.indexOf("setRenderState({ status: 'loading', message: '' })", effectStart);
+  const cleanupStart = source.indexOf('    return () => {', asyncStart);
+  const cleanupEnd = source.indexOf('    };', cleanupStart);
+
+  assert.ok(effectStart >= 0 && asyncStart > effectStart);
+  assert.ok(loadingReset > effectStart && loadingReset < asyncStart);
+  assert.doesNotMatch(source.slice(cleanupStart, cleanupEnd), /setRenderState/);
 });
 
 test('detail components use responsive class-owned grids', () => {

@@ -9,8 +9,22 @@ const STEP_LABELS = {
   dos: '态密度',
 };
 
+function displayEvidenceValue(value) {
+  return value === null || value === undefined || value === '' ? '-' : value;
+}
+
+function indexWorkflowSteps(steps) {
+  const byKey = new Map();
+  if (!Array.isArray(steps)) return byKey;
+  for (const step of steps) {
+    if (!step || typeof step !== 'object' || typeof step.key !== 'string' || !step.key) continue;
+    byKey.set(step.key, step);
+  }
+  return byKey;
+}
+
 export default function WorkflowTimeline({ steps = [], compact = false }) {
-  const byKey = new Map(steps.map((step) => [step.key, step]));
+  const byKey = indexWorkflowSteps(steps);
 
   return (
     <ol
@@ -30,11 +44,11 @@ export default function WorkflowTimeline({ steps = [], compact = false }) {
             </div>
             {!compact ? (
               <dl className="competition-timeline-evidence">
-                <div><dt>Job ID</dt><dd>{step.job_id || '-'}</dd></div>
-                <div><dt>Attempt</dt><dd>{step.attempt ?? '-'}</dd></div>
-                <div><dt>attempt_dir</dt><dd className="is-path" title={step.attempt_dir || undefined}>{step.attempt_dir || '-'}</dd></div>
-                <div><dt>Slurm state / exit_code</dt><dd>{step.slurm_state || '-'} / {step.exit_code || '-'}</dd></div>
-                <div><dt>reason</dt><dd>{step.reason || '-'}</dd></div>
+                <div><dt>Job ID</dt><dd>{displayEvidenceValue(step.job_id)}</dd></div>
+                <div><dt>Attempt</dt><dd>{displayEvidenceValue(step.attempt)}</dd></div>
+                <div><dt>attempt_dir</dt><dd className="is-path" title={step.attempt_dir || undefined}>{displayEvidenceValue(step.attempt_dir)}</dd></div>
+                <div><dt>Slurm state / exit_code</dt><dd>{displayEvidenceValue(step.slurm_state)} / {displayEvidenceValue(step.exit_code)}</dd></div>
+                <div><dt>reason</dt><dd>{displayEvidenceValue(step.reason)}</dd></div>
               </dl>
             ) : null}
           </li>
