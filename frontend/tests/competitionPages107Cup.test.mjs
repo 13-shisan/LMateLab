@@ -363,16 +363,16 @@ test('new calculation styles keep stable responsive geometry without nested card
     /\.competition-calculation-grid\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1\.2fr\)\s+minmax\(280px,\s*\.8fr\)/s,
   );
   assert.match(source, /\.competition-structure-viewer\s*{[^}]*min-width:\s*0[^}]*overflow:\s*hidden/s);
-  assert.match(source, /\.competition-workflow-graph\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(source, /\.competition-workflow-graph\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*gap:\s*12px/s);
   assert.match(source, /\.competition-workflow-step\.is-relax\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(source, /\.competition-workflow-step\.is-scf\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(
     source,
-    /\.competition-workflow-step\.is-scf::after\s*{[^}]*width:\s*2px[^}]*height:\s*6px[^}]*right:\s*50%[^}]*bottom:\s*-6px[^}]*background:\s*#98a2b3/s,
+    /\.competition-workflow-step\.is-scf::after\s*{[^}]*width:\s*2px[^}]*height:\s*6px[^}]*right:\s*50%[^}]*bottom:\s*-6px[^}]*content:\s*''[^}]*background:\s*#98a2b3/s,
   );
   assert.match(
     source,
-    /\.competition-workflow-step\.is-band::before,\s*\.competition-workflow-step\.is-dos::before\s*{[^}]*height:\s*2px[^}]*position:\s*absolute[^}]*top:\s*-6px[^}]*background:\s*#98a2b3/s,
+    /\.competition-workflow-step\.is-band::before,\s*\.competition-workflow-step\.is-dos::before\s*{[^}]*height:\s*2px[^}]*position:\s*absolute[^}]*top:\s*-6px[^}]*content:\s*''[^}]*background:\s*#98a2b3/s,
   );
   assert.match(
     source,
@@ -384,7 +384,7 @@ test('new calculation styles keep stable responsive geometry without nested card
   );
   assert.match(
     source,
-    /\.competition-workflow-step\.is-band::after,\s*\.competition-workflow-step\.is-dos::after\s*{[^}]*width:\s*2px[^}]*height:\s*6px[^}]*position:\s*absolute[^}]*top:\s*-6px[^}]*left:\s*50%[^}]*background:\s*#98a2b3/s,
+    /\.competition-workflow-step\.is-band::after,\s*\.competition-workflow-step\.is-dos::after\s*{[^}]*width:\s*2px[^}]*height:\s*6px[^}]*position:\s*absolute[^}]*top:\s*-6px[^}]*left:\s*50%[^}]*content:\s*''[^}]*background:\s*#98a2b3/s,
   );
   assert.match(source, /\.competition-command-bar\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
   assert.match(source, /:focus-visible/);
