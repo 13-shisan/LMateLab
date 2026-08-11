@@ -37,7 +37,9 @@ export default function VaspElectronicProperties({
     setErrors((current) => ({ ...current, [activeTab]: '' }));
     fetchJson(path, { signal: controller.signal })
       .then((data) => {
-        setPlotCache((current) => ({ ...current, [activeTab]: data?.image_base64 || '' }));
+        const imageSource = data?.image_url
+          || (data?.image_base64 ? `data:image/png;base64,${data.image_base64}` : '');
+        setPlotCache((current) => ({ ...current, [activeTab]: imageSource }));
       })
       .catch((error) => {
         if (error?.name !== 'AbortError') {
@@ -96,7 +98,7 @@ export default function VaspElectronicProperties({
         {!activeAvailable ? <div className="vasp-detail-message">当前数据不可用</div> : null}
         {loadingTab === activeTab ? <div className="vasp-detail-message">正在生成{plotAlt}…</div> : null}
         {activeError ? <div className="vasp-detail-message vasp-detail-error">加载失败：{activeError}</div> : null}
-        {activeImage ? <img src={`data:image/png;base64,${activeImage}`} alt={plotAlt} /> : null}
+        {activeImage ? <img src={activeImage} alt={plotAlt} /> : null}
       </div>
       {errors.download ? <div className="vasp-detail-error" role="alert">导出失败：{errors.download}</div> : null}
     </>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 import { colorForElement } from '../../../utils/elementColors';
+import '../../../features/competition/components/competitionComponents.css';
 
 function addVectors(left, right) {
   return { x: left.x + right.x, y: left.y + right.y, z: left.z + right.z };
@@ -63,6 +65,7 @@ function drawCellAndAxes(viewer, cell) {
 
 export default function VaspStructureViewer({ structure }) {
   const hostRef = useRef(null);
+  const viewerRef = useRef(null);
   const [renderState, setRenderState] = useState({ status: 'loading', message: '' });
   const positions = Array.isArray(structure?.positions) ? structure.positions : [];
 
@@ -86,6 +89,7 @@ export default function VaspStructureViewer({ structure }) {
 
         host.innerHTML = '';
         viewer = threeDmol.createViewer(host, { backgroundColor: '#ffffff' });
+        viewerRef.current = viewer;
         viewer.addModel(buildXyz(structure), 'xyz');
         const elements = [...new Set((structure.symbols || []).filter(Boolean))];
         if (elements.length === 0) {
@@ -120,6 +124,7 @@ export default function VaspStructureViewer({ structure }) {
       alive = false;
       resizeObserver?.disconnect();
       if (viewer && typeof viewer.clear === 'function') viewer.clear();
+      viewerRef.current = null;
       host.innerHTML = '';
     };
   }, [positions.length, structure]);
@@ -131,6 +136,20 @@ export default function VaspStructureViewer({ structure }) {
   return (
     <div className="vasp-structure-viewer">
       <div className="vasp-viewer-canvas" ref={hostRef} />
+      {renderState.status === 'ready' ? (
+        <button
+          className="vasp-viewer-reset"
+          type="button"
+          onClick={() => {
+            viewerRef.current?.zoomTo();
+            viewerRef.current?.render();
+          }}
+          title="重置结构视角"
+          aria-label="重置结构视角"
+        >
+          <RotateCcw size={16} aria-hidden="true" />
+        </button>
+      ) : null}
       {renderState.status === 'loading' ? (
         <div className="vasp-viewer-state">正在加载结构查看器…</div>
       ) : null}

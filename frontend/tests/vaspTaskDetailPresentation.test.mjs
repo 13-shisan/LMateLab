@@ -36,6 +36,19 @@ test('structure viewer owns canvas bounds and lifecycle', () => {
   assert.match(css, /@media\s*\(max-width:\s*700px\)/);
 });
 
+test('structure viewer exposes reset and electronic plots accept provider URLs', () => {
+  const viewer = read('../src/pages/db/vasp-detail/VaspStructureViewer.jsx');
+  const electronic = read('../src/pages/db/vasp-detail/VaspElectronicProperties.jsx');
+  assert.match(viewer, /RotateCcw/);
+  assert.match(viewer, /viewerRef/);
+  assert.match(viewer, /重置结构视角/);
+  assert.match(viewer, /viewerRef\.current\?\.zoomTo\(\)/);
+  assert.match(viewer, /viewerRef\.current\?\.render\(\)/);
+  assert.match(electronic, /image_url/);
+  assert.match(electronic, /image_base64/);
+  assert.match(electronic, /<img src=\{activeImage\}/);
+});
+
 test('detail components use responsive class-owned grids', () => {
   const summary = read('../src/pages/db/vasp-detail/VaspTaskSummary.jsx');
   const crystal = read('../src/pages/db/vasp-detail/VaspCrystalDetails.jsx');
