@@ -274,3 +274,110 @@ test('competition dashboard compact timeline keeps the scf band dos fork visible
     /\.competition-active-workflow[^{]*li::before,[\s\S]*?li::after\s*{[^}]*display:\s*none/s,
   );
 });
+
+test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+
+  for (const token of [
+    'DEMO_STRUCTURE',
+    'VaspStructureViewer',
+    'PreviewReadOnlyNotice',
+    'relax',
+    'scf',
+    'band',
+    'dos',
+    'POSCAR/CIF 文本，最大 1 MiB，最多 200 个原子',
+    'mos2-v1',
+    '提交前生成',
+    'ENCUT',
+    'k-point',
+    'convergence',
+    'P107-RTX5090',
+    '最大 4 GPU / 16 CPU',
+    '每步独立一个 Job / attempt 证据记录',
+    '演示参数',
+  ]) {
+    assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.match(source, /import\s+['"]\.\.\/db\/vasp-detail\/VaspTaskDetail\.css['"];?/);
+  assert.match(source, /import\s+['"]\.\/CompetitionPages\.css['"];?/);
+  assert.match(source, /useState\(['"]builtin['"]\)/);
+  assert.match(source, /setSourceKind\(['"]builtin['"]\)/);
+  assert.match(source, /setSourceKind\(['"]upload['"]\)/);
+  assert.match(source, /const\s*\{\s*provider,\s*mode\s*\}\s*=\s*useCompetitionData\(\);/);
+  assert.match(source, /const\s+user\s*=\s*readStoredUser\(\);/);
+  assert.match(
+    source,
+    /const\s+readOnly\s*=\s*mode\s*===\s*['"]demo['"]\s*\|\|\s*!canWriteCompetitionData\(user\);/,
+  );
+  assert.match(source, /function\s+readStoredUser\(\)\s*{[\s\S]*?try\s*{[\s\S]*?JSON\.parse\(localStorage\.getItem\(['"]user['"]\)\s*\|\|\s*['"]null['"]\)[\s\S]*?catch[\s\S]*?return\s+null/s);
+  assert.match(source, /id:\s*['"]preview-draft['"]/);
+  assert.match(source, /source_kind:\s*sourceKind/);
+  assert.match(source, /template_version:\s*['"]mos2-v1['"]/);
+  assert.match(source, /steps:\s*WORKFLOW_STEPS\.map\(\(step\)\s*=>\s*step\.key\)/);
+  assert.match(source, /演示参数 · 模板 mos2-v1 · 输入 SHA-256：提交前生成/);
+  assert.match(source, /<VaspStructureViewer\s+structure=\{DEMO_STRUCTURE\}\s*\/>/);
+  assert.match(source, /<input[^>]*type=['"]file['"][^>]*disabled[^>]*>/s);
+  assert.doesNotMatch(source, /<input[^>]*onChange=/s);
+  assert.doesNotMatch(source, /uploadStructure|FileReader|FormData/);
+  assert.equal(source.match(/provider\.saveDraft\(draft\)/g)?.length, 1);
+  assert.equal(source.match(/provider\.submitWorkflow\(draft\.id\)/g)?.length, 1);
+  assert.ok((source.match(/disabled=\{readOnly\}/g) || []).length >= 2);
+  assert.match(source, /async\s+function\s+handleSaveDraft[\s\S]*?try\s*{[\s\S]*?await\s+provider\.saveDraft\(draft\)[\s\S]*?catch/s);
+  assert.match(source, /async\s+function\s+handleSubmitWorkflow[\s\S]*?try\s*{[\s\S]*?await\s+provider\.submitWorkflow\(draft\.id\)[\s\S]*?catch/s);
+  assert.doesNotMatch(source, /alert\s*\([^)]*成功|toast\s*\([^)]*成功/i);
+  assert.doesNotMatch(source, /\b(?:add|delete|drag|reorder)(?:Step)?\b|添加|删除|拖拽|重排/i);
+  assert.doesNotMatch(source, /Agent|Machine Learning|\bML\b|Quantum ESPRESSO|\bQE\b/);
+  assert.doesNotMatch(source, /card/i);
+});
+
+test('new calculation workflow preserves the approved dependency fork', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const declaration = ast.program.body.find((node) => (
+    node.type === 'VariableDeclaration'
+    && node.declarations.some(({ id }) => id.type === 'Identifier' && id.name === 'WORKFLOW_STEPS')
+  ));
+  assert.ok(declaration, 'WORKFLOW_STEPS must be a module constant');
+  const workflowSteps = new Function(
+    `${source.slice(declaration.start, declaration.end)}\nreturn WORKFLOW_STEPS;`,
+  )();
+
+  assert.deepEqual(workflowSteps, [
+    { key: 'relax', label: 'relax', dependsOn: [], purpose: '优化离子位置与晶格' },
+    { key: 'scf', label: 'SCF', dependsOn: ['relax'], purpose: '生成已验收自洽电荷密度' },
+    { key: 'band', label: 'BAND', dependsOn: ['scf'], purpose: '沿固定高对称路径计算能带' },
+    { key: 'dos', label: 'DOS', dependsOn: ['scf'], purpose: '基于自洽结果计算态密度' },
+  ]);
+  assert.match(source, /WORKFLOW_STEPS\.map\(\(step\)\s*=>/);
+  assert.match(source, /step\.dependsOn\.map/);
+});
+
+test('new calculation styles keep stable responsive geometry without nested cards', () => {
+  const source = read('../src/pages/competition/CompetitionPages.css');
+
+  assert.match(
+    source,
+    /\.competition-calculation-grid\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1\.2fr\)\s+minmax\(280px,\s*\.8fr\)/s,
+  );
+  assert.match(source, /\.competition-structure-viewer\s*{[^}]*min-width:\s*0[^}]*overflow:\s*hidden/s);
+  assert.match(source, /\.competition-workflow-graph\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(source, /\.competition-workflow-step\.is-relax\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  assert.match(source, /\.competition-workflow-step\.is-scf\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  assert.match(source, /\.competition-command-bar\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
+  assert.match(source, /:focus-visible/);
+  assert.match(source, /:disabled/);
+  assert.match(source, /:not\(:disabled\):hover/);
+  assert.match(source, /@media\s*\(max-width:\s*900px\)[\s\S]*?\.competition-calculation-grid\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(source, /@media\s*\(max-width:\s*520px\)[\s\S]*?\.competition-command-button\s*{[^}]*width:\s*100%/s);
+  assert.match(source, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(source, /\.vasp-(?:structure-viewer|viewer-canvas)\s*{/);
+  assert.doesNotMatch(source, /card/i);
+  assert.doesNotMatch(source, /font-size:\s*[^;]*vw/);
+  assert.doesNotMatch(source, /letter-spacing:\s*-/);
+  for (const radius of source.matchAll(/border-radius:\s*(\d+)px/g)) {
+    assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
+  }
+});
