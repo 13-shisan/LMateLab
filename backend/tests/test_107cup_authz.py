@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sqlite3
 import stat
 import sys
@@ -104,6 +105,10 @@ class CompetitionRoleMigrationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.script_path = REPO_ROOT / "deploy" / "107cup" / "migrate-competition-roles.py"
 
+    def assert_posix_mode(self, path: Path, expected: int):
+        if os.name != "nt":
+            self.assertEqual(expected, stat.S_IMODE(path.stat().st_mode))
+
     def load_migration(self):
         self.assertTrue(self.script_path.is_file(), str(self.script_path))
         if not self.script_path.is_file():
@@ -153,8 +158,8 @@ class CompetitionRoleMigrationTests(unittest.TestCase):
                 first = migration.migrate_database(database, backups, "pb23030683")
             self.assertTrue(first.changed)
             self.assertTrue(first.backup_path.is_file())
-            self.assertEqual(0o700, stat.S_IMODE(backups.stat().st_mode))
-            self.assertEqual(0o600, stat.S_IMODE(first.backup_path.stat().st_mode))
+            self.assert_posix_mode(backups, 0o700)
+            self.assert_posix_mode(first.backup_path, 0o600)
             self.assertEqual(1, len(open_calls))
             _, flags, mode = open_calls[0]
             self.assertTrue(flags & migration.os.O_CREAT)
@@ -240,7 +245,7 @@ class CompetitionRoleMigrationTests(unittest.TestCase):
 
             backup_files = list(backups.glob("eln.db.before-competition-roles.*.sqlite"))
             self.assertEqual(1, len(backup_files))
-            self.assertEqual(0o600, stat.S_IMODE(backup_files[0].stat().st_mode))
+            self.assert_posix_mode(backup_files[0], 0o600)
             with closing(sqlite3.connect(backup_files[0])) as backup_connection:
                 backup_role = backup_connection.execute(
                     "SELECT role FROM users WHERE alias = ?", ("pb23030683",)

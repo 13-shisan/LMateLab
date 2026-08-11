@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- Keep the approved helper compatibility re-exports. */
 import { matchesElementSelection, toggleElementSelection } from '../../utils/elementSelection';
 import { PERIODIC_TABLE_ELEMENTS } from './periodicTableElements';
 import './PeriodicTableFilter.css';
