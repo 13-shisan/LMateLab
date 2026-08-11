@@ -3,6 +3,22 @@ import CenterLoadingOverlay from '../../components/CenterLoadingOverlay';
 import { formatVaspValue, getVaspColumnPresentation } from './vaspTablePresentation';
 import './VaspDataTable.css';
 
+const INTERACTIVE_TARGET_SELECTOR = 'a, button, input, select, textarea, summary, [role="button"], [role="link"]';
+
+function handleRecordInteraction(event, onSelect, item) {
+  if (event.type === 'click') {
+    const isNestedControl = event.target !== event.currentTarget
+      && event.target?.closest?.(INTERACTIVE_TARGET_SELECTOR);
+    if (!isNestedControl) onSelect(item);
+    return;
+  }
+
+  if (event.type !== 'keydown' || event.target !== event.currentTarget) return;
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  onSelect(item);
+}
+
 function IdValue({ item, value, detailPathForItem }) {
   const location = useLocation();
   const rowId = item?._rowId ?? item?.row_id ?? item?.id ?? value;
@@ -70,11 +86,8 @@ export default function VaspRecordTable({
     if (typeof onSelect !== 'function') return {};
     return {
       'aria-label': accessibleLabelForItem(item),
-      onClick: () => onSelect(item),
-      onKeyDown: (event) => {
-        if (event.key === 'Enter' && event.currentTarget === event.target) onSelect(item);
-      },
-      role: 'button',
+      onClick: (event) => handleRecordInteraction(event, onSelect, item),
+      onKeyDown: (event) => handleRecordInteraction(event, onSelect, item),
       tabIndex: 0,
     };
   };

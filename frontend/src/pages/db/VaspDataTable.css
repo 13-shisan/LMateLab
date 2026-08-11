@@ -53,6 +53,12 @@
   background: #f8fbff;
 }
 
+.vasp-data-table tbody tr[tabindex="0"]:focus-visible,
+.vasp-mobile-record[tabindex="0"]:focus-visible {
+  outline: 2px solid #1f5fce;
+  outline-offset: -2px;
+}
+
 .vasp-path-value {
   display: inline-block;
   max-width: 260px;
