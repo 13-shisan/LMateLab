@@ -25,8 +25,27 @@ function readStoredUser(storage) {
   }
 }
 
-async function executeWorkflowCommand({ mode, user, write }) {
-  if (mode !== 'live' || !canWriteCompetitionData(user)) return false;
+async function executeWorkflowCommand({
+  mode,
+  user,
+  command,
+  workflowId,
+  step,
+  pending,
+  write,
+}) {
+  const validWorkflowId = typeof workflowId === 'string'
+    && workflowId.trim() !== ''
+    && workflowId === workflowId.trim();
+  if (
+    mode !== 'live'
+    || !canWriteCompetitionData(user)
+    || !['cancel', 'retry'].includes(command)
+    || !validWorkflowId
+    || pending !== false
+    || typeof write !== 'function'
+  ) return false;
+  if (command === 'retry' && !['relax', 'scf', 'band', 'dos'].includes(step)) return false;
   await write();
   return true;
 }
@@ -36,7 +55,9 @@ function displayIdentity(value) {
 }
 
 function workflowDataKindLabel(dataKind) {
-  return dataKind === 'demo' ? '演示数据' : '真实数据';
+  if (dataKind === 'demo') return '演示数据';
+  if (dataKind === 'live') return '真实数据';
+  return '来源未验证';
 }
 
 function normalizeWorkflowDetailState(resource, workflowId) {
@@ -63,13 +84,40 @@ function normalizeWorkflowDetailState(resource, workflowId) {
   if (!isPlainWorkflow) {
     return { status: 'empty', message: emptyMessage, workflow: null };
   }
+  if (
+    typeof workflow.id !== 'string'
+    || workflow.id.trim() === ''
+    || workflow.id !== workflow.id.trim()
+  ) {
+    return { status: 'parse-error', message: '工作流身份无效', workflow: null };
+  }
+  if (workflow.id !== workflowId) {
+    return { status: 'parse-error', message: '工作流身份不一致', workflow: null };
+  }
+  if (!['demo', 'live'].includes(workflow.data_kind)) {
+    return { status: 'parse-error', message: '工作流数据来源未验证', workflow: null };
+  }
   return { status: 'ready', message: undefined, workflow };
+}
+
+function findRetryableFailedStep(steps) {
+  if (!Array.isArray(steps)) return null;
+  for (const step of steps) {
+    if (
+      step
+      && typeof step === 'object'
+      && step.status === 'failed'
+      && ['relax', 'scf', 'band', 'dos'].includes(step.key)
+    ) return step;
+  }
+  return null;
 }
 
 export default function CompetitionWorkflowDetail() {
   const { workflowId } = useParams();
   const { provider, mode } = useCompetitionData();
   const [commandError, setCommandError] = useState('');
+  const [commandPending, setCommandPending] = useState(false);
   const user = readStoredUser();
   const readOnly = mode === 'demo' || !canWriteCompetitionData(user);
   const loadWorkflow = useCallback(
@@ -94,32 +142,47 @@ export default function CompetitionWorkflowDetail() {
   const workflow = detailState.workflow;
   const dataKindLabel = workflowDataKindLabel(workflow.data_kind);
   const workflowSteps = Array.isArray(workflow.steps) ? workflow.steps : [];
-  const failedStep = workflowSteps.find((step) => step?.status === 'failed') || null;
+  const failedStep = findRetryableFailedStep(workflowSteps);
 
   async function handleCancel() {
     setCommandError('');
+    if (commandPending) return;
+    setCommandPending(true);
     try {
       await executeWorkflowCommand({
         mode,
         user,
+        command: 'cancel',
+        workflowId: workflow.id,
+        step: null,
+        pending: commandPending,
         write: () => provider.cancelWorkflow(workflow.id),
       });
     } catch (error) {
       setCommandError(error?.message || '工作流取消失败');
+    } finally {
+      setCommandPending(false);
     }
   }
 
   async function handleRetry() {
     setCommandError('');
-    if (failedStep === null) return;
+    if (commandPending || failedStep === null) return;
+    setCommandPending(true);
     try {
       await executeWorkflowCommand({
         mode,
         user,
+        command: 'retry',
+        workflowId: workflow.id,
+        step: failedStep.key,
+        pending: commandPending,
         write: () => provider.retryWorkflow({ id: workflow.id, step: failedStep.key }),
       });
     } catch (error) {
       setCommandError(error?.message || '工作流重试失败');
+    } finally {
+      setCommandPending(false);
     }
   }
 
@@ -171,7 +234,7 @@ export default function CompetitionWorkflowDetail() {
           <button
             className="competition-workflow-command-button is-cancel"
             type="button"
-            disabled={readOnly}
+            disabled={readOnly || commandPending}
             onClick={handleCancel}
           >
             <CircleX size={16} aria-hidden="true" />
@@ -180,7 +243,7 @@ export default function CompetitionWorkflowDetail() {
           <button
             className="competition-workflow-command-button is-retry"
             type="button"
-            disabled={readOnly || failedStep === null}
+            disabled={readOnly || commandPending || failedStep === null}
             onClick={handleRetry}
           >
             <RotateCcw size={16} aria-hidden="true" />

@@ -620,13 +620,13 @@ test('workflow detail page loads immutable evidence and handles missing ids expl
     'immutable identity must render before the workflow timeline',
   );
   assert.match(source, /const\s+workflowSteps\s*=\s*Array\.isArray\(workflow\.steps\)\s*\?\s*workflow\.steps\s*:\s*\[\];/);
-  assert.match(source, /const\s+failedStep\s*=\s*workflowSteps\.find\(\(step\)\s*=>\s*step\?\.status\s*===\s*['"]failed['"]\)\s*\|\|\s*null;/);
+  assert.match(source, /const\s+failedStep\s*=\s*findRetryableFailedStep\(workflowSteps\);/);
   assert.match(
     source,
     /const\s+readOnly\s*=\s*mode\s*===\s*['"]demo['"]\s*\|\|\s*!canWriteCompetitionData\(user\);/,
   );
-  assert.match(source, /disabled=\{readOnly\}/);
-  assert.match(source, /disabled=\{readOnly\s*\|\|\s*failedStep\s*===\s*null\}/);
+  assert.match(source, /disabled=\{readOnly\s*\|\|\s*commandPending\}/);
+  assert.match(source, /disabled=\{readOnly\s*\|\|\s*commandPending\s*\|\|\s*failedStep\s*===\s*null\}/);
   assert.match(source, /provider\.cancelWorkflow\(workflow\.id\)/);
   assert.match(
     source,
@@ -641,8 +641,9 @@ test('workflow detail data kind labels follow record provenance instead of provi
   const workflowDataKindLabel = loadFunction(source, 'workflowDataKindLabel');
 
   assert.equal(workflowDataKindLabel('demo'), '演示数据');
-  for (const dataKind of ['live', 'unknown', '', null, undefined]) {
-    assert.equal(workflowDataKindLabel(dataKind), '真实数据');
+  assert.equal(workflowDataKindLabel('live'), '真实数据');
+  for (const dataKind of ['unknown', '', null, undefined]) {
+    assert.equal(workflowDataKindLabel(dataKind), '来源未验证');
   }
   assert.match(
     source,
@@ -681,7 +682,8 @@ test('workflow detail immutable identity uses explicit Chinese labels', () => {
 test('workflow detail state normalization preserves provider failures and rejects malformed records', () => {
   const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
   const normalizeWorkflowDetailState = loadFunction(source, 'normalizeWorkflowDetailState');
-  const workflow = { id: 'wf-1', data_kind: 'demo' };
+  const demoWorkflow = { id: 'wf-1', data_kind: 'demo' };
+  const liveWorkflow = { id: 'wf-live', data_kind: 'live' };
 
   assert.deepEqual(
     normalizeWorkflowDetailState({ status: 'loading', data: null, error: null }, 'wf-1'),
@@ -708,13 +710,42 @@ test('workflow detail state normalization preserves provider failures and reject
     { status: 'empty', message: '缺少工作流 ID', workflow: null },
   );
   assert.deepEqual(
-    normalizeWorkflowDetailState({ status: 'ready', data: workflow, error: null }, 'wf-1'),
-    { status: 'ready', message: undefined, workflow },
+    normalizeWorkflowDetailState({ status: 'ready', data: demoWorkflow, error: null }, 'wf-1'),
+    { status: 'ready', message: undefined, workflow: demoWorkflow },
+  );
+  assert.deepEqual(
+    normalizeWorkflowDetailState({ status: 'ready', data: liveWorkflow, error: null }, 'wf-live'),
+    { status: 'ready', message: undefined, workflow: liveWorkflow },
   );
   for (const malformed of [[], 'wf-1', 0, true, new Date()]) {
     assert.deepEqual(
       normalizeWorkflowDetailState({ status: 'ready', data: malformed, error: null }, 'wf-1'),
       { status: 'empty', message: '未找到工作流', workflow: null },
+    );
+  }
+  for (const invalidIdentity of [
+    {},
+    { id: '', data_kind: 'demo' },
+    { id: '   ', data_kind: 'demo' },
+    { id: ' wf-1 ', data_kind: 'demo' },
+  ]) {
+    assert.deepEqual(
+      normalizeWorkflowDetailState({ status: 'ready', data: invalidIdentity, error: null }, 'wf-1'),
+      { status: 'parse-error', message: '工作流身份无效', workflow: null },
+    );
+  }
+  assert.deepEqual(
+    normalizeWorkflowDetailState({
+      status: 'ready', data: { id: 'wf-other', data_kind: 'demo' }, error: null,
+    }, 'wf-1'),
+    { status: 'parse-error', message: '工作流身份不一致', workflow: null },
+  );
+  for (const dataKind of [undefined, null, '', 'unknown']) {
+    assert.deepEqual(
+      normalizeWorkflowDetailState({
+        status: 'ready', data: { id: 'wf-1', data_kind: dataKind }, error: null,
+      }, 'wf-1'),
+      { status: 'parse-error', message: '工作流数据来源未验证', workflow: null },
     );
   }
 
@@ -728,39 +759,101 @@ test('workflow detail state normalization preserves provider failures and reject
   assert.match(source, /const\s+workflow\s*=\s*detailState\.workflow;/);
 });
 
-test('workflow detail commands execute only for live operators', async () => {
+test('workflow detail retries only the first failed fixed-step key', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const findRetryableFailedStep = loadFunction(source, 'findRetryableFailedStep');
+
+  for (const invalidSteps of [null, undefined, {}, 'scf']) {
+    assert.equal(findRetryableFailedStep(invalidSteps), null);
+  }
+  for (const invalidStep of [
+    null,
+    {},
+    { status: 'failed' },
+    { key: '', status: 'failed' },
+    { key: ' scf ', status: 'failed' },
+    { key: 'postprocess', status: 'failed' },
+    { key: 'scf', status: 'FAILED' },
+  ]) {
+    assert.equal(findRetryableFailedStep([invalidStep]), null);
+  }
+
+  const relax = { key: 'relax', status: 'failed' };
+  const scf = { key: 'scf', status: 'failed' };
+  assert.equal(findRetryableFailedStep([
+    { key: 'unknown', status: 'failed' }, relax, scf,
+  ]), relax);
+  for (const key of ['relax', 'scf', 'band', 'dos']) {
+    const step = { key, status: 'failed' };
+    assert.equal(findRetryableFailedStep([step]), step);
+  }
+});
+
+test('workflow detail commands fail closed and execute valid cancel and retry once', async () => {
   const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
   const executeWorkflowCommand = loadFunction(source, 'executeWorkflowCommand', {
     canWriteCompetitionData,
   });
-  let writeCount = 0;
-  const write = async () => {
-    writeCount += 1;
+  const calls = [];
+  const base = {
+    mode: 'live',
+    user: { role: 'operator' },
+    workflowId: 'wf-1',
+    pending: false,
   };
+  const write = async () => calls.push('invalid');
+  const invalidCommands = [
+    { ...base, mode: 'demo', command: 'cancel', step: null, write },
+    { ...base, user: { role: 'viewer' }, command: 'cancel', step: null, write },
+    { ...base, workflowId: '', command: 'cancel', step: null, write },
+    { ...base, workflowId: '   ', command: 'cancel', step: null, write },
+    { ...base, workflowId: ' wf-1 ', command: 'cancel', step: null, write },
+    { ...base, command: 'delete', step: null, write },
+    { ...base, command: 'cancel', step: null, pending: true, write },
+    { ...base, command: 'cancel', step: null, write: null },
+    { ...base, command: 'retry', step: undefined, write },
+    { ...base, command: 'retry', step: '', write },
+    { ...base, command: 'retry', step: 'postprocess', write },
+  ];
 
+  for (const command of invalidCommands) {
+    assert.equal(await executeWorkflowCommand(command), false);
+  }
+  assert.deepEqual(calls, []);
   assert.equal(await executeWorkflowCommand({
-    mode: 'demo', user: { role: 'operator' }, write,
-  }), false);
-  assert.equal(await executeWorkflowCommand({
-    mode: 'live', user: { role: 'viewer' }, write,
-  }), false);
-  assert.equal(await executeWorkflowCommand({
-    mode: 'unknown', user: { role: 'operator' }, write,
-  }), false);
-  assert.equal(writeCount, 0);
-  assert.equal(await executeWorkflowCommand({
-    mode: 'live', user: { role: 'operator' }, write,
+    ...base,
+    command: 'cancel',
+    step: null,
+    write: async () => calls.push('cancel'),
   }), true);
-  assert.equal(writeCount, 1);
+  assert.equal(await executeWorkflowCommand({
+    ...base,
+    command: 'retry',
+    step: 'scf',
+    write: async () => calls.push('retry'),
+  }), true);
+  assert.deepEqual(calls, ['cancel', 'retry']);
 
   const rejection = new Error('provider rejected command');
   await assert.rejects(
     () => executeWorkflowCommand({
-      mode: 'live', user: { role: 'operator' }, write: async () => { throw rejection; },
+      ...base,
+      command: 'cancel',
+      step: null,
+      write: async () => { throw rejection; },
     }),
     rejection,
   );
   assert.equal(source.match(/await\s+executeWorkflowCommand\(\{/g)?.length, 2);
+  assert.equal(source.match(/workflowId:\s*workflow\.id/g)?.length, 2);
+  assert.equal(source.match(/pending:\s*commandPending/g)?.length, 2);
+  assert.match(source, /command:\s*['"]cancel['"]/);
+  assert.match(source, /command:\s*['"]retry['"]/);
+  assert.match(source, /step:\s*null/);
+  assert.match(source, /step:\s*failedStep\.key/);
+  assert.match(source, /const\s*\[commandPending,\s*setCommandPending\]\s*=\s*useState\(false\);/);
+  assert.equal(source.match(/setCommandPending\(true\)/g)?.length, 2);
+  assert.equal(source.match(/finally\s*{\s*setCommandPending\(false\);\s*}/g)?.length, 2);
   assert.match(source, /async\s+function\s+handleCancel[\s\S]*?try\s*{[\s\S]*?catch/s);
   assert.match(source, /async\s+function\s+handleRetry[\s\S]*?try\s*{[\s\S]*?catch/s);
 });
