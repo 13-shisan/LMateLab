@@ -13,6 +13,12 @@ function displayEvidenceValue(value) {
   return value === null || value === undefined || value === '' ? '-' : value;
 }
 
+function displayAcceptance(value) {
+  if (value === true) return '已验收';
+  if (value === false) return '未验收';
+  return '-';
+}
+
 function indexWorkflowSteps(steps) {
   const byKey = new Map();
   if (!Array.isArray(steps)) return byKey;
@@ -49,6 +55,7 @@ export default function WorkflowTimeline({ steps = [], compact = false }) {
                 <div><dt>attempt_dir</dt><dd className="is-path" title={step.attempt_dir || undefined}>{displayEvidenceValue(step.attempt_dir)}</dd></div>
                 <div><dt>Slurm state / exit_code</dt><dd>{displayEvidenceValue(step.slurm_state)} / {displayEvidenceValue(step.exit_code)}</dd></div>
                 <div><dt>reason</dt><dd>{displayEvidenceValue(step.reason)}</dd></div>
+                <div><dt>acceptance</dt><dd>{displayAcceptance(step.accepted)}</dd></div>
               </dl>
             ) : null}
           </li>

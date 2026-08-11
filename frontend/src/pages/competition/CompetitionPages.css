@@ -581,3 +581,319 @@
     width: 100%;
   }
 }
+
+.competition-workflows-page {
+  min-height: calc(100vh - var(--lm-topbar-height));
+  padding: 24px 28px 36px;
+  color: #172033;
+  background: #f4f6f9;
+  letter-spacing: 0;
+}
+
+.competition-workflow-detail-page {
+  min-height: calc(100vh - var(--lm-topbar-height));
+  padding: 24px 28px 36px;
+  color: #172033;
+  background: #f4f6f9;
+  letter-spacing: 0;
+}
+
+.competition-workflows-page .competition-demo-banner,
+.competition-workflow-detail-page .competition-demo-banner {
+  margin-bottom: 18px;
+}
+
+.competition-workflows-header,
+.competition-workflow-detail-header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.competition-workflows-header h1,
+.competition-workflows-header p,
+.competition-workflow-detail-header h1,
+.competition-workflow-detail-header p,
+.competition-workflows-heading h2,
+.competition-workflow-section-heading h2 {
+  margin: 0;
+}
+
+.competition-workflows-header h1,
+.competition-workflow-detail-header h1 {
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.competition-workflows-header p,
+.competition-workflow-detail-header p {
+  margin-top: 5px;
+  color: #68758a;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.competition-workflows-surface,
+.competition-workflow-evidence {
+  min-width: 0;
+  padding: 18px 0 24px;
+  border-top: 1px solid #d7dee9;
+}
+
+.competition-workflow-filters {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(170px, 220px);
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.competition-workflow-search,
+.competition-workflow-status {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #566379;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.competition-workflow-search > div {
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid #c6cfdd;
+  border-radius: 6px;
+  color: #68758a;
+  background: #ffffff;
+}
+
+.competition-workflow-search input,
+.competition-workflow-status select {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #c6cfdd;
+  border-radius: 6px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.competition-workflow-search input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+}
+
+.competition-workflow-status select {
+  width: 100%;
+  padding: 0 34px 0 10px;
+}
+
+.competition-workflow-search > div:focus-within,
+.competition-workflow-status select:focus-visible,
+.competition-workflow-command-button:focus-visible {
+  outline: 3px solid rgb(31 95 206 / 24%);
+  outline-offset: 2px;
+}
+
+.competition-workflows-heading,
+.competition-workflow-section-heading {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.competition-workflows-heading h2,
+.competition-workflow-section-heading h2 {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.competition-workflows-heading span,
+.competition-workflow-section-heading span {
+  color: #68758a;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.competition-workflow-title-line {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.competition-workflow-detail-header .competition-readonly-notice {
+  flex-shrink: 0;
+  margin: 2px 0 0;
+}
+
+.competition-workflow-identity {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 20px;
+  margin: 0;
+}
+
+.competition-workflow-identity > div {
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid #e1e6ee;
+}
+
+.competition-workflow-identity dt {
+  color: #68758a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.competition-workflow-identity dd {
+  min-width: 0;
+  margin: 4px 0 0;
+  color: #172033;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.competition-workflow-command-bar {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 17px;
+  border-top: 1px solid #bfc9d8;
+}
+
+.competition-workflow-command-bar > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.competition-workflow-command-bar strong {
+  font-size: 13px;
+}
+
+.competition-workflow-command-bar span,
+.competition-workflow-command-bar p {
+  margin: 0;
+  color: #68758a;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.competition-workflow-command-bar p[role='alert'] {
+  color: #b42318;
+}
+
+.competition-workflow-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.competition-workflow-command-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid #bcc6d5;
+  border-radius: 6px;
+  color: #344054;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.competition-workflow-command-button.is-retry {
+  border-color: #1f5fce;
+  color: #ffffff;
+  background: #1f5fce;
+}
+
+.competition-workflow-command-button:not(:disabled):hover {
+  border-color: #174fae;
+  color: #174fae;
+  background: #f8fbff;
+}
+
+.competition-workflow-command-button.is-retry:not(:disabled):hover {
+  color: #ffffff;
+  background: #174fae;
+}
+
+.competition-workflow-command-button:disabled {
+  border-color: #d4dae3;
+  color: #8994a6;
+  background: #e8ebf0;
+  cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+  .competition-workflows-page,
+  .competition-workflow-detail-page {
+    padding: 18px 18px 28px;
+  }
+
+  .competition-workflow-detail-header {
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .competition-workflow-filters,
+  .competition-workflow-identity {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .competition-workflows-page,
+  .competition-workflow-detail-page {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .competition-workflows-heading,
+  .competition-workflow-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .competition-workflow-command-actions,
+  .competition-workflow-command-button {
+    width: 100%;
+  }
+}

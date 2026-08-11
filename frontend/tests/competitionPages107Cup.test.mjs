@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from '@babel/parser';
 
 import { canWriteCompetitionData } from '../src/config/competitionAccess.js';
+import { createDemoCompetitionDataProvider } from '../src/features/competition/data/demoCompetitionDataProvider.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -85,6 +86,21 @@ test('workflow evidence preserves numeric zero exit codes', () => {
   assert.equal(displayEvidenceValue(null), '-');
   assert.equal(displayEvidenceValue(undefined), '-');
   assert.match(source, /displayEvidenceValue\(step\.exit_code\)/);
+});
+
+test('non-compact workflow evidence exposes explicit acceptance without expanding compact mode', () => {
+  const source = read('../src/features/competition/components/WorkflowTimeline.jsx');
+  const displayAcceptance = loadFunction(source, 'displayAcceptance');
+
+  assert.equal(displayAcceptance(true), '已验收');
+  assert.equal(displayAcceptance(false), '未验收');
+  assert.equal(displayAcceptance(null), '-');
+  assert.equal(displayAcceptance(undefined), '-');
+  assert.match(source, /<dt>acceptance<\/dt><dd>\{displayAcceptance\(step\.accepted\)\}<\/dd>/);
+  assert.match(
+    source,
+    /\{!compact\s*\?\s*\([\s\S]*?<dl\s+className=['"]competition-timeline-evidence['"][\s\S]*?acceptance[\s\S]*?<\/dl>[\s\S]*?\)\s*:\s*null\}/,
+  );
 });
 
 test('workflow step indexing tolerates invalid collections and entries', () => {
@@ -507,6 +523,181 @@ test('new calculation styles keep stable responsive geometry without nested card
   assert.match(source, /overflow-wrap:\s*anywhere/);
   assert.doesNotMatch(source, /\.vasp-(?:structure-viewer|viewer-canvas)\s*{/);
   assert.doesNotMatch(source, /card/i);
+  assert.doesNotMatch(source, /font-size:\s*[^;]*vw/);
+  assert.doesNotMatch(source, /letter-spacing:\s*-/);
+  for (const radius of source.matchAll(/border-radius:\s*(\d+)px/g)) {
+    assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
+  }
+});
+
+test('workflow list page keeps query and status in stable URL state', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflows.jsx');
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+  const readWorkflowFilters = loadFunction(source, 'readWorkflowFilters');
+  const writeWorkflowFilters = loadFunction(source, 'writeWorkflowFilters', { URLSearchParams });
+
+  assert.deepEqual(readWorkflowFilters(new URLSearchParams()), { query: '', status: 'all' });
+  assert.deepEqual(readWorkflowFilters(new URLSearchParams('query=MoS2&status=running')), {
+    query: 'MoS2',
+    status: 'running',
+  });
+  assert.deepEqual(readWorkflowFilters(new URLSearchParams('status=unknown')), {
+    query: '',
+    status: 'all',
+  });
+  assert.equal(
+    writeWorkflowFilters(new URLSearchParams('query=MoS2&status=failed'), {
+      query: '', status: 'all',
+    }).toString(),
+    '',
+  );
+  assert.equal(
+    writeWorkflowFilters(new URLSearchParams(), { query: 'S vacancy', status: 'succeeded' }).toString(),
+    'query=S+vacancy&status=succeeded',
+  );
+
+  for (const token of [
+    'listWorkflows',
+    'query',
+    'status',
+    'CompetitionTable',
+    'DemoDataBanner',
+    'all',
+    'running',
+    'succeeded',
+    'failed',
+  ]) {
+    assert.match(source, new RegExp(token));
+  }
+  assert.match(source, /useSearchParams\(\)/);
+  assert.match(
+    source,
+    /const\s+loadWorkflows\s*=\s*useCallback\(\(\)\s*=>\s*provider\.listWorkflows\(\{\s*query,\s*status\s*\}\),\s*\[provider,\s*query,\s*status\]\);/,
+  );
+  assert.match(source, /useCompetitionResource\(loadWorkflows\)/);
+  assert.match(source, /setSearchParams\([^;]+\{\s*replace:\s*true\s*\}\)/s);
+  assert.match(source, /navigate\(`\/dashboard\/workflows\/\$\{encodeURIComponent\(workflow\.id\)\}`\)/);
+  assert.match(source, /state\.status\s*!==\s*['"]ready['"]/);
+  assert.match(source, /<CompetitionState\s+status=\{state\.status\}\s+message=\{state\.error\?\.message\}\s*\/>/);
+  assert.match(source, /<CompetitionState\s+status=['"]empty['"]/);
+  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*<DemoDataBanner\s*\/>\s*:\s*null/g);
+  assert.doesNotMatch(source, /sbatch|squeue|sacct|scancel|vasp_db|legacy/i);
+});
+
+test('workflow list all status preserves the complete demo fixture result', async () => {
+  const provider = createDemoCompetitionDataProvider();
+  const response = await provider.listWorkflows({ query: '', status: 'all' });
+
+  assert.equal(response.total, 3);
+  assert.deepEqual(response.items.map(({ status }) => status), ['succeeded', 'running', 'failed']);
+});
+
+test('workflow detail page loads immutable evidence and handles missing ids explicitly', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+
+  for (const token of [
+    'getWorkflow',
+    'input_sha256',
+    'release_commit',
+    'template_version',
+    'WorkflowTimeline',
+    'data_kind',
+    'creator',
+    'PreviewReadOnlyNotice',
+    'DemoDataBanner',
+  ]) {
+    assert.match(source, new RegExp(token));
+  }
+  assert.match(source, /const\s*\{\s*workflowId\s*\}\s*=\s*useParams\(\);/);
+  assert.match(source, /provider\.getWorkflow\(workflowId\)/);
+  assert.match(source, /workflowId\s*\?[^:]+:\s*Promise\.resolve\(null\)/s);
+  assert.match(source, /缺少工作流 ID|未找到工作流/);
+  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*['"]演示数据['"]\s*:\s*['"]真实数据['"]/);
+  assert.match(source, /<WorkflowTimeline\s+steps=\{workflowSteps\}\s*\/>/);
+  assert.doesNotMatch(source, /<WorkflowTimeline[^>]*compact/);
+  assert.ok(
+    source.indexOf('competition-workflow-identity') < source.indexOf('<WorkflowTimeline'),
+    'immutable identity must render before the workflow timeline',
+  );
+  assert.match(source, /const\s+workflowSteps\s*=\s*Array\.isArray\(workflow\.steps\)\s*\?\s*workflow\.steps\s*:\s*\[\];/);
+  assert.match(source, /const\s+failedStep\s*=\s*workflowSteps\.find\(\(step\)\s*=>\s*step\?\.status\s*===\s*['"]failed['"]\)\s*\|\|\s*null;/);
+  assert.match(
+    source,
+    /const\s+readOnly\s*=\s*mode\s*===\s*['"]demo['"]\s*\|\|\s*!canWriteCompetitionData\(user\);/,
+  );
+  assert.match(source, /disabled=\{readOnly\}/);
+  assert.match(source, /disabled=\{readOnly\s*\|\|\s*failedStep\s*===\s*null\}/);
+  assert.match(source, /provider\.cancelWorkflow\(workflow\.id\)/);
+  assert.match(
+    source,
+    /provider\.retryWorkflow\(\{\s*id:\s*workflow\.id,\s*step:\s*failedStep\.key\s*\}\)/,
+  );
+  assert.match(source, /role=['"]alert['"]/);
+  assert.doesNotMatch(source, /alert\s*\(|toast\s*\(|sbatch|squeue|sacct|scancel|vasp_db|legacy/i);
+});
+
+test('workflow detail commands execute only for live operators', async () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const executeWorkflowCommand = loadFunction(source, 'executeWorkflowCommand', {
+    canWriteCompetitionData,
+  });
+  let writeCount = 0;
+  const write = async () => {
+    writeCount += 1;
+  };
+
+  assert.equal(await executeWorkflowCommand({
+    mode: 'demo', user: { role: 'operator' }, write,
+  }), false);
+  assert.equal(await executeWorkflowCommand({
+    mode: 'live', user: { role: 'viewer' }, write,
+  }), false);
+  assert.equal(await executeWorkflowCommand({
+    mode: 'unknown', user: { role: 'operator' }, write,
+  }), false);
+  assert.equal(writeCount, 0);
+  assert.equal(await executeWorkflowCommand({
+    mode: 'live', user: { role: 'operator' }, write,
+  }), true);
+  assert.equal(writeCount, 1);
+
+  const rejection = new Error('provider rejected command');
+  await assert.rejects(
+    () => executeWorkflowCommand({
+      mode: 'live', user: { role: 'operator' }, write: async () => { throw rejection; },
+    }),
+    rejection,
+  );
+  assert.equal(source.match(/await\s+executeWorkflowCommand\(\{/g)?.length, 2);
+  assert.match(source, /async\s+function\s+handleCancel[\s\S]*?try\s*{[\s\S]*?catch/s);
+  assert.match(source, /async\s+function\s+handleRetry[\s\S]*?try\s*{[\s\S]*?catch/s);
+});
+
+test('workflow detail stored user parsing fails closed', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const readStoredUser = loadFunction(source, 'readStoredUser', { globalThis: {} });
+
+  assert.equal(readStoredUser(), null);
+  assert.equal(readStoredUser({ getItem() { throw new Error('storage unavailable'); } }), null);
+  assert.equal(readStoredUser({ getItem() { return '{broken'; } }), null);
+  assert.deepEqual(
+    readStoredUser({ getItem() { return '{"role":"operator"}'; } }),
+    { role: 'operator' },
+  );
+});
+
+test('workflow pages add only scoped responsive work-surface styles', () => {
+  const source = read('../src/pages/competition/CompetitionPages.css');
+
+  assert.match(source, /\.competition-workflows-page\s*{/);
+  assert.match(source, /\.competition-workflow-detail-page\s*{/);
+  assert.match(source, /\.competition-workflow-filters\s*{[^}]*display:\s*grid/s);
+  assert.match(source, /\.competition-workflow-identity\s*{[^}]*display:\s*grid/s);
+  assert.match(source, /\.competition-workflow-identity[^}]*[\s\S]*?overflow-wrap:\s*anywhere/);
+  assert.match(source, /\.competition-workflow-command-button:not\(:disabled\):hover/);
+  assert.match(source, /\.competition-workflow-command-button:disabled/);
+  assert.match(source, /@media\s*\(max-width:\s*700px\)[\s\S]*?\.competition-workflow-identity\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
   assert.doesNotMatch(source, /font-size:\s*[^;]*vw/);
   assert.doesNotMatch(source, /letter-spacing:\s*-/);
   for (const radius of source.matchAll(/border-radius:\s*(\d+)px/g)) {
