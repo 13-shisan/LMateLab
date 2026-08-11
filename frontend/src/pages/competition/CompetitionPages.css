@@ -582,6 +582,303 @@
   }
 }
 
+.competition-results-page,
+.competition-result-detail-page {
+  min-height: calc(100vh - var(--lm-topbar-height));
+  padding: 24px 28px 36px;
+  color: #172033;
+  background: #f4f6f9;
+  letter-spacing: 0;
+}
+
+.competition-results-header,
+.competition-result-detail-header {
+  min-width: 0;
+  margin-bottom: 20px;
+}
+
+.competition-results-header h1,
+.competition-results-header p,
+.competition-result-detail-header h1,
+.competition-result-detail-header p,
+.competition-results-heading h2,
+.competition-result-section-heading h2,
+.competition-result-science-section h3,
+.competition-result-log-block h3 {
+  margin: 0;
+}
+
+.competition-results-header h1,
+.competition-result-detail-header h1 {
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.competition-results-header p,
+.competition-result-detail-header p {
+  margin-top: 5px;
+  color: #68758a;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.competition-results-surface,
+.competition-result-evidence,
+.competition-result-science,
+.competition-result-failure {
+  min-width: 0;
+  padding: 18px 0 22px;
+  border-top: 1px solid #d7dee9;
+}
+
+.competition-result-filters {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.competition-result-search,
+.competition-result-status {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #566379;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.competition-result-search > div {
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #c6cfdd;
+  border-radius: 6px;
+  color: #68758a;
+  background: #ffffff;
+}
+
+.competition-result-search input,
+.competition-result-status select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  outline: 0;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.competition-result-status select {
+  padding: 0 34px 0 10px;
+  border: 1px solid #c6cfdd;
+  border-radius: 6px;
+}
+
+.competition-result-search > div:focus-within,
+.competition-result-status select:focus-visible {
+  outline: 3px solid rgb(31 95 206 / 24%);
+  outline-offset: 2px;
+}
+
+.competition-results-heading,
+.competition-result-section-heading {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.competition-results-heading h2,
+.competition-result-section-heading h2 {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.competition-results-heading span,
+.competition-result-section-heading span {
+  color: #68758a;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.competition-result-title-line {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.competition-result-demo-label {
+  padding: 3px 7px;
+  border: 1px solid #d6a74e;
+  border-radius: 5px;
+  color: #7a4f06;
+  background: #fff8e8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.competition-result-identity {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 20px;
+  margin: 0;
+}
+
+.competition-result-identity > div {
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid #e1e6ee;
+}
+
+.competition-result-identity dt,
+.competition-result-failure-grid dt {
+  color: #68758a;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.competition-result-identity dd,
+.competition-result-failure-grid dd {
+  min-width: 0;
+  margin: 4px 0 0;
+  color: #172033;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.competition-result-science > .vasp-task-summary {
+  margin-bottom: 20px;
+}
+
+.competition-result-science-section {
+  min-width: 0;
+  padding: 18px 0 4px;
+  border-top: 1px solid #d7dee9;
+}
+
+.competition-result-science-section + .competition-result-science-section {
+  margin-top: 18px;
+}
+
+.competition-result-science-section h3,
+.competition-result-log-block h3 {
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.competition-result-failure {
+  overflow-wrap: anywhere;
+}
+
+.competition-result-failure-warning {
+  margin: 0 0 14px;
+  padding: 9px 10px;
+  border-left: 3px solid #d92d20;
+  color: #8f1d18;
+  background: #fff3f2;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.competition-result-failure-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0;
+}
+
+.competition-result-failure-grid > div {
+  min-width: 0;
+  padding: 11px 0;
+  border-bottom: 1px solid #e1e6ee;
+}
+
+.competition-result-failure-grid ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.competition-result-log-block {
+  min-width: 0;
+  margin-top: 18px;
+}
+
+.competition-result-log {
+  max-height: 280px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #cfd7e4;
+  border-radius: 6px;
+  color: #e7edf7;
+  background: #202733;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .competition-results-page,
+  .competition-result-detail-page {
+    padding: 18px 18px 28px;
+  }
+
+  .competition-result-filters,
+  .competition-result-failure-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .competition-result-identity {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .competition-results-page,
+  .competition-result-detail-page {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .competition-results-heading,
+  .competition-result-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .competition-results-heading span,
+  .competition-result-section-heading span {
+    text-align: left;
+  }
+}
+
 .competition-workflows-page {
   min-height: calc(100vh - var(--lm-topbar-height));
   padding: 24px 28px 36px;

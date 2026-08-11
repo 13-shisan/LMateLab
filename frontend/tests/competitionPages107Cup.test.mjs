@@ -888,3 +888,328 @@ test('workflow pages add only scoped responsive work-surface styles', () => {
     assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
   }
 });
+
+test('result list keeps URL filters executable and opens only completed result identities', () => {
+  const source = read('../src/pages/competition/CompetitionResults.jsx');
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+  const readResultFilters = loadFunction(source, 'readResultFilters');
+  const writeResultFilters = loadFunction(source, 'writeResultFilters', { URLSearchParams });
+  const resultDetailUrl = loadFunction(source, 'resultDetailUrl');
+  const selectCompletedResults = loadFunction(source, 'selectCompletedResults');
+
+  assert.deepEqual(readResultFilters(new URLSearchParams()), { query: '', status: 'all' });
+  assert.deepEqual(readResultFilters(new URLSearchParams('query=MoS2&status=parse-error')), {
+    query: 'MoS2',
+    status: 'parse-error',
+  });
+  assert.deepEqual(readResultFilters(new URLSearchParams('status=running')), {
+    query: '',
+    status: 'all',
+  });
+  assert.equal(
+    writeResultFilters(new URLSearchParams('query=MoS2&status=failed'), {
+      query: '', status: 'all',
+    }).toString(),
+    '',
+  );
+  assert.equal(
+    writeResultFilters(new URLSearchParams(), { query: 'S vacancy', status: 'succeeded' }).toString(),
+    'query=S+vacancy&status=succeeded',
+  );
+
+  assert.equal(resultDetailUrl({ id: 'wf/result 1', workflow_id: 'fallback' }), '/dashboard/results/wf%2Fresult%201');
+  assert.equal(resultDetailUrl({ id: '', workflow_id: 'wf#fallback' }), '/dashboard/results/wf%23fallback');
+  for (const invalid of [null, undefined, {}, [], { id: 7 }, { id: '   ' }, { workflow_id: ' wf-1 ' }]) {
+    assert.equal(resultDetailUrl(invalid), null);
+  }
+
+  const succeeded = { id: 'ok', status: 'succeeded' };
+  const failed = { workflow_id: 'bad', status: 'failed' };
+  const parseError = { id: 'parse', status: 'parse-error' };
+  assert.deepEqual(selectCompletedResults({
+    items: [succeeded, { id: 'active', status: 'running' }, failed, parseError, null, 'bad'],
+  }), [succeeded, failed, parseError]);
+  for (const malformed of [null, undefined, [], {}, { items: null }]) {
+    assert.deepEqual(selectCompletedResults(malformed), []);
+  }
+
+  assert.match(
+    source,
+    /const\s+loadResults\s*=\s*useCallback\(\(\)\s*=>\s*provider\.listResults\(\{\s*query,\s*status\s*\}\),\s*\[provider,\s*query,\s*status\]\);/,
+  );
+  assert.match(source, /useCompetitionResource\(loadResults\)/);
+  assert.match(source, /navigate\(destination\)/);
+  assert.match(source, /<CompetitionTable\s+items=\{items\}\s+kind=['"]result['"]\s+onOpen=\{openResult\}\s*\/>/);
+  assert.match(source, /<CompetitionState\s+status=\{state\.status\}\s+message=\{state\.error\?\.message\}\s*\/>/);
+  assert.match(source, /<CompetitionState\s+status=['"]empty['"]/);
+  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*<DemoDataBanner\s*\/>\s*:\s*null/);
+  assert.doesNotMatch(source, /<option\s+value=['"]running['"]/);
+  assert.doesNotMatch(source, /sbatch|squeue|sacct|scancel|PersonalVaspDatabase|backend\/routers\/vasp_db/i);
+});
+
+test('demo result provider filters all succeeded failed and parse-error without running records', async () => {
+  const provider = createDemoCompetitionDataProvider();
+  const expectations = new Map([
+    ['all', ['succeeded', 'failed']],
+    ['succeeded', ['succeeded']],
+    ['failed', ['failed']],
+    ['parse-error', []],
+  ]);
+
+  for (const [status, expectedStatuses] of expectations) {
+    const response = await provider.listResults({ query: '', status });
+    assert.equal(response.total, expectedStatuses.length);
+    assert.deepEqual(response.items.map((item) => item.status), expectedStatuses);
+    assert.equal(response.items.some((item) => item.status === 'running'), false);
+  }
+
+  const artifact = await provider.downloadArtifact('wf-demo-mos2-success', 'band-data');
+  assert.equal(artifact.filename, 'DEMO-band.dat');
+  assert.match(artifact.filename, /^DEMO-/);
+  assert.ok(artifact.blob instanceof Blob);
+});
+
+test('result detail state classifier fails closed before mounting science', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+  const normalizeResultDetailState = loadFunction(source, 'normalizeResultDetailState');
+  const scientificDetail = {
+    db: { dbname: 'demo' },
+    row: { id: 1, formula: 'MoS2', natoms: 1 },
+    properties: { spacegroup: 'P1' },
+    structure: {
+      symbols: ['Mo'],
+      positions: [[0, 0, 0]],
+      cell: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      pbc: [true, true, true],
+    },
+    crystal: {
+      lattice: { a: 1, b: 1, c: 1 },
+      atomic_positions_frac: [{ element: 'Mo', x: 0, y: 0, z: 0 }],
+    },
+    capabilities: {
+      structure_export: true,
+      band_plot: true,
+      dos_plot: true,
+      band_data: true,
+      dos_data: true,
+    },
+  };
+  const success = {
+    id: 'wf-1', status: 'succeeded', data_kind: 'demo', vasp_detail: scientificDetail,
+  };
+  const failed = { id: 'wf-1', status: 'failed', data_kind: 'live' };
+  const parseError = { id: 'wf-1', status: 'parse-error', data_kind: 'demo' };
+
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'loading', data: null, error: null }, 'wf-1'),
+    { status: 'loading', message: undefined, variant: null, result: null },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'forbidden', data: null, error: { message: 'denied' } }, 'wf-1'),
+    { status: 'forbidden', message: 'denied', variant: null, result: null },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: null, error: null }, undefined),
+    { status: 'empty', message: '缺少工作流 ID', variant: null, result: null },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: null, error: null }, 'wf-1'),
+    { status: 'empty', message: '未找到结果', variant: null, result: null },
+  );
+  for (const malformed of [[], 'wf-1', 0, true, new Date()]) {
+    assert.deepEqual(
+      normalizeResultDetailState({ status: 'ready', data: malformed, error: null }, 'wf-1'),
+      { status: 'empty', message: '未找到结果', variant: null, result: null },
+    );
+  }
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: success, error: null }, 'wf-1'),
+    { status: 'ready', message: undefined, variant: 'success', result: success },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: failed, error: null }, 'wf-1'),
+    { status: 'ready', message: undefined, variant: 'failure', result: failed },
+  );
+  assert.deepEqual(
+    normalizeResultDetailState({ status: 'ready', data: parseError, error: null }, 'wf-1'),
+    { status: 'ready', message: undefined, variant: 'failure', result: parseError },
+  );
+
+  for (const malformedIdentity of [
+    {},
+    { id: '', status: 'failed', data_kind: 'demo' },
+    { id: ' wf-1 ', status: 'failed', data_kind: 'demo' },
+    { id: 'wf-other', status: 'failed', data_kind: 'demo' },
+  ]) {
+    assert.equal(
+      normalizeResultDetailState({ status: 'ready', data: malformedIdentity }, 'wf-1').status,
+      'parse-error',
+    );
+  }
+  for (const dataKind of [undefined, null, '', 'unknown']) {
+    assert.deepEqual(
+      normalizeResultDetailState({
+        status: 'ready', data: { id: 'wf-1', status: 'failed', data_kind: dataKind },
+      }, 'wf-1'),
+      { status: 'parse-error', message: '结果数据来源未验证', variant: null, result: null },
+    );
+  }
+  for (const status of ['running', 'queued', 'unknown', '', undefined]) {
+    assert.deepEqual(
+      normalizeResultDetailState({
+        status: 'ready', data: { id: 'wf-1', status, data_kind: 'demo' },
+      }, 'wf-1'),
+      { status: 'parse-error', message: '结果状态不受支持', variant: null, result: null },
+    );
+  }
+  for (const incompleteDetail of [
+    null,
+    {},
+    { ...scientificDetail, structure: null },
+    { ...scientificDetail, structure: { symbols: [], positions: [], cell: [] } },
+    { ...scientificDetail, capabilities: { ...scientificDetail.capabilities, band_plot: false } },
+  ]) {
+    assert.deepEqual(
+      normalizeResultDetailState({
+        status: 'ready', data: { ...success, vasp_detail: incompleteDetail },
+      }, 'wf-1'),
+      { status: 'parse-error', message: '科学结果合同不完整', variant: null, result: null },
+    );
+  }
+});
+
+test('result detail binds reused scientific components only to the success AST branch', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const scienceNames = [
+    'VaspStructureViewer',
+    'VaspCrystalDetails',
+    'VaspElectronicProperties',
+    'VaspTaskSummary',
+  ];
+  const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
+  for (const name of scienceNames) {
+    const declaration = imports.find((node) => node.specifiers.some((specifier) => specifier.local?.name === name));
+    assert.ok(declaration, `${name} must be imported directly`);
+    assert.match(declaration.source.value, /^\.\.\/db\/vasp-detail\//);
+  }
+  assert.ok(imports.some((node) => node.source.value === '../db/vasp-detail/VaspTaskDetail.css'));
+
+  const successConditional = findNodes(ast, (node) => (
+    node.type === 'ConditionalExpression'
+    && source.slice(node.test.start, node.test.end).includes("detailState.variant === 'success'")
+  ));
+  assert.equal(successConditional.length, 1);
+  const successSource = source.slice(successConditional[0].consequent.start, successConditional[0].consequent.end);
+  const failureSource = source.slice(successConditional[0].alternate.start, successConditional[0].alternate.end);
+  for (const name of scienceNames) {
+    assert.match(successSource, new RegExp(`<${name}\\b`));
+    assert.doesNotMatch(failureSource, new RegExp(`<${name}\\b`));
+  }
+  assert.match(failureSource, /ResultFailureEvidence/);
+  assert.doesNotMatch(source, /PersonalVaspDatabase|backend\/routers\/vasp_db|fetch\s*\(|axios/i);
+});
+
+test('result scientific adapters infer artifacts and keep callback cleanup stable', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
+  const inferArtifactKind = loadFunction(source, 'inferArtifactKind');
+
+  assert.equal(inferArtifactKind('/band-dat'), 'band-data');
+  assert.equal(inferArtifactKind('DOS_DATA.ZIP'), 'dos-data');
+  assert.equal(inferArtifactKind('final.CIF'), 'structure-cif');
+  assert.equal(inferArtifactKind('POSCAR'), 'structure-poscar');
+  assert.equal(inferArtifactKind('relaxed.vasp'), 'structure-poscar');
+  assert.equal(inferArtifactKind('evidence.json'), 'evidence-bundle');
+
+  const callbackNames = ['fetchScientificJson', 'downloadScientificFile'];
+  for (const callbackName of callbackNames) {
+    const declarations = findNodes(ast, (node) => (
+      node.type === 'VariableDeclarator'
+      && node.id?.name === callbackName
+      && node.init?.type === 'CallExpression'
+      && node.init.callee?.name === 'useCallback'
+    ));
+    assert.equal(declarations.length, 1, `${callbackName} must be useCallback-bound`);
+    const callbackSource = source.slice(declarations[0].start, declarations[0].end);
+    assert.match(callbackSource, /\[provider,\s*workflowId\]/);
+  }
+  assert.match(source, /provider\.loadPlot\(workflowId,\s*kind\)/);
+  assert.match(source, /provider\.downloadArtifact\(workflowId,\s*inferArtifactKind\(/);
+  assert.match(source, /anchor\.download\s*=\s*artifact\.filename/);
+  assert.doesNotMatch(source, /anchor\.download\s*=\s*filename/);
+
+  const downloadDeclaration = findNodes(ast, (node) => (
+    node.type === 'VariableDeclarator' && node.id?.name === 'downloadScientificFile'
+  ))[0];
+  const downloadTries = findNodes(downloadDeclaration, (node) => node.type === 'TryStatement');
+  assert.equal(downloadTries.length, 1);
+  assert.ok(downloadTries[0].finalizer, 'download cleanup must use finally');
+  const cleanupSource = source.slice(downloadTries[0].finalizer.start, downloadTries[0].finalizer.end);
+  assert.match(cleanupSource, /URL\.revokeObjectURL\(href\)/);
+});
+
+test('result detail preserves identity timeline ordering and explicit failure evidence', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+
+  for (const label of [
+    '工作流 ID',
+    '创建人',
+    '模板版本',
+    '输入 SHA-256',
+    '发布提交',
+    '数据类型',
+    '失败步骤',
+    'Job ID',
+    'ExitCode',
+    '原因',
+    '预期文件',
+    '缺失文件',
+    '最后日志',
+  ]) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.match(source, /const\s*\{\s*workflowId\s*\}\s*=\s*useParams\(\);/);
+  assert.match(source, /provider\.getResult\(workflowId\)/);
+  assert.match(source, /workflowId\s*\?[^:]+:\s*Promise\.resolve\(null\)/s);
+  assert.match(source, /<WorkflowTimeline\s+steps=\{resultSteps\}\s*\/>/);
+  assert.doesNotMatch(source, /<WorkflowTimeline[^>]*compact/);
+  assert.ok(source.indexOf('competition-result-identity') < source.indexOf('<WorkflowTimeline'));
+  assert.ok(source.indexOf('<WorkflowTimeline') < source.indexOf("detailState.variant === 'success'"));
+  assert.match(source, /failure_evidence/);
+  assert.match(source, /失败证据不完整/);
+  assert.match(source, /Array\.isArray/);
+  assert.match(source, /演示内容/);
+  assert.match(source, /dbKey=['"]107cup-demo['"]/g);
+  assert.match(source, /rowId=\{workflowId\}/g);
+  assert.match(source, /downloadFile=\{downloadScientificFile\}/g);
+  assert.match(source, /fetchJson=\{fetchScientificJson\}/);
+  assert.match(source, /capabilities=\{result\.vasp_detail\.capabilities\}/);
+  assert.match(source, /viewer=\{<VaspStructureViewer\s+structure=\{result\.vasp_detail\.structure\}\s*\/>\}/);
+  assert.match(source, /mode\s*===\s*['"]demo['"]\s*\?\s*<DemoDataBanner\s*\/>\s*:\s*null/g);
+});
+
+test('result page styles stay scoped, compact, overflow-safe, and responsive', () => {
+  const source = read('../src/pages/competition/CompetitionPages.css');
+
+  for (const selector of [
+    '.competition-results-page',
+    '.competition-result-detail-page',
+    '.competition-result-identity',
+    '.competition-result-science',
+    '.competition-result-failure',
+    '.competition-result-log',
+  ]) {
+    assert.match(source, new RegExp(selector.replace('.', '\\.')));
+  }
+  assert.match(source, /\.competition-result-identity\s*{[^}]*display:\s*grid/s);
+  assert.match(source, /\.competition-result-(?:identity|failure|log)[\s\S]*?overflow-wrap:\s*anywhere/);
+  assert.match(source, /\.competition-result-log\s*{[^}]*white-space:\s*pre-wrap/s);
+  assert.match(source, /@media\s*\(max-width:\s*700px\)[\s\S]*?\.competition-result-identity\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  assert.doesNotMatch(source, /font-size:\s*[^;]*vw/);
+  assert.doesNotMatch(source, /letter-spacing:\s*-/);
+  for (const radius of source.matchAll(/border-radius:\s*(\d+)px/g)) {
+    assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
+  }
+});
