@@ -129,6 +129,12 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
         ):
             self.assertIn(required, source)
 
+    def test_preview_runtime_verifier_keeps_scontrol_authoritative_when_sacct_is_unavailable(self):
+        source = self.read_required("verify-preview-runtime.sh")
+        self.assertIn('scontrol show job "$job_id"', source)
+        self.assertIn('if ! sacct -j "$job_id"', source)
+        self.assertIn("sacct unavailable; continuing with scontrol evidence", source)
+
     def test_snapshot_job_compares_stable_state_without_writing_it(self):
         source = self.read_required("preview-snapshot.slurm")
         for required in (
@@ -156,6 +162,16 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
             "scancel",
         ):
             self.assertNotIn(forbidden, source)
+
+    def test_snapshot_preserves_sacct_failure_without_losing_stable_state_evidence(self):
+        source = self.read_required("preview-snapshot.slurm")
+        self.assertIn(
+            'scontrol show job "$stable_job_id" > "$evidence/scontrol.txt"',
+            source,
+        )
+        self.assertIn('if ! sacct -j "$stable_job_id"', source)
+        self.assertIn('2> "$evidence/sacct.stderr.txt"', source)
+        self.assertIn('> "$evidence/sacct-status.txt"', source)
 
     def test_runtime_example_declares_stable_live_identity(self):
         source = self.read_required("runtime.env.example")
