@@ -74,6 +74,30 @@ def poscar_with_symbols(symbols, counts):
 
 
 class StructureParsingTests(unittest.TestCase):
+    def test_rejects_vasp_count_bomb_before_ase_allocates_atoms(self):
+        count_bombs = (
+            b"""count bomb
+1.0
+3.18 0 0
+-1.59 2.753961 0
+0 0 20
+Mo S
+100000000 200000000
+Direct
+""",
+            (
+                "count token bomb\n1.0\n3.18 0 0\n-1.59 2.753961 0\n0 0 20\n"
+                f"Mo S\n{'9' * 10000} 2\nDirect\n"
+            ).encode("ascii"),
+        )
+        with mock.patch("services.competition_inputs.ase_read") as read_structure:
+            for count_bomb in count_bombs:
+                with self.subTest(count_line=count_bomb.splitlines()[6][:40]):
+                    with self.assertRaisesRegex(InputValidationError, "200 atoms"):
+                        parse_structure_bytes(count_bomb, "structure.dat")
+
+        read_structure.assert_not_called()
+
     def test_rejects_empty_oversize_binary_and_path_filenames(self):
         invalid_cases = (
             (b"", "POSCAR"),
@@ -138,6 +162,46 @@ class StructureParsingTests(unittest.TestCase):
         reparsed = parse_structure_bytes(parsed.canonical_poscar, "canonical")
         self.assertEqual(reparsed.source_format, "vasp")
         self.assertEqual(reparsed.summary["counts"], {"Mo": 1, "S": 2})
+
+    def test_rejects_non_finite_cells_and_direct_or_cartesian_positions(self):
+        invalid_structures = (
+            VALID_POSCAR.replace(b"3.180000 0.000000 0.000000", b"nan 0.000000 0.000000"),
+            VALID_POSCAR.replace(b"3.180000 0.000000 0.000000", b"inf 0.000000 0.000000"),
+            VALID_POSCAR.replace(b"0.333333 0.666667 0.578000", b"nan 0.666667 0.578000"),
+            VALID_POSCAR.replace(b"0.333333 0.666667 0.578000", b"inf 0.666667 0.578000"),
+            VALID_POSCAR.replace(
+                b"Direct\n0.000000 0.000000 0.500000",
+                b"Cartesian\ninf 0.000000 0.500000",
+            ),
+        )
+        for content in invalid_structures:
+            with self.subTest(line=next(line for line in content.splitlines() if b"nan" in line or b"inf" in line)):
+                with self.assertRaises(InputValidationError):
+                    parse_structure_bytes(content, "structure")
+
+    def test_rejects_zero_and_singular_periodic_cells(self):
+        invalid_structures = (
+            VALID_POSCAR.replace(
+                b"3.180000 0.000000 0.000000\n-1.590000 2.753961 0.000000\n0.000000 0.000000 20.000000",
+                b"0 0 0\n0 0 0\n0 0 0",
+            ),
+            VALID_POSCAR.replace(
+                b"-1.590000 2.753961 0.000000",
+                b"6.360000 0.000000 0.000000",
+            ),
+        )
+        for content in invalid_structures:
+            with self.subTest(cell=content.splitlines()[2:5]):
+                with self.assertRaises(InputValidationError):
+                    parse_structure_bytes(content, "structure")
+
+    def test_wraps_canonical_poscar_writer_failures_as_validation_errors(self):
+        with mock.patch(
+            "services.competition_inputs.ase_write",
+            side_effect=RuntimeError("writer rejected structure"),
+        ):
+            with self.assertRaisesRegex(InputValidationError, "canonical POSCAR"):
+                parse_structure_bytes(VALID_POSCAR, "POSCAR")
 
 
 class TemplateValidationTests(unittest.TestCase):

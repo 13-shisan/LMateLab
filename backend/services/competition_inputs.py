@@ -7,10 +7,12 @@ import math
 import os
 import shutil
 import uuid
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from ase import Atoms
 from ase.io import read as ase_read
 from ase.io import write as ase_write
@@ -82,14 +84,65 @@ def _vasp_element_order(text: str) -> list[str]:
     return symbols
 
 
-def _read_structure(text: str) -> tuple[Atoms, str]:
-    errors: list[str] = []
+def _preflight_vasp_header(text: str) -> bool:
+    lines = text.splitlines()
+    if len(lines) < 7:
+        return False
     try:
-        atoms = ase_read(io.StringIO(text), format="vasp")
-        _vasp_element_order(text)
-        return atoms, "vasp"
-    except Exception as exc:
-        errors.append(f"vasp: {exc}")
+        scale_tokens = lines[1].split()
+        lattice_tokens = [line.split() for line in lines[2:5]]
+        if len(scale_tokens) not in (1, 3) or any(len(row) != 3 for row in lattice_tokens):
+            return False
+        numeric_header = []
+        for token in scale_tokens:
+            numeric_header.append(float(token))
+        for row in lattice_tokens:
+            for token in row:
+                numeric_header.append(float(token))
+    except ValueError:
+        return False
+    if not all(math.isfinite(value) for value in numeric_header):
+        raise InputValidationError("VASP scale and lattice vectors must be finite")
+
+    symbols = lines[5].split()
+    count_tokens = lines[6].split()
+    if not symbols or len(symbols) != len(count_tokens):
+        return False
+    if any(not symbol.isalpha() or len(symbol) > 3 for symbol in symbols):
+        return False
+    if any(not token.isascii() or not token.isdecimal() for token in count_tokens):
+        return False
+    if any(len(token) > 12 for token in count_tokens):
+        raise InputValidationError(f"VASP structure exceeds {MAX_ATOMS} atoms")
+
+    counts = [int(token) for token in count_tokens]
+    if any(count <= 0 for count in counts):
+        return False
+    if sum(counts) > MAX_ATOMS:
+        raise InputValidationError(f"VASP structure exceeds {MAX_ATOMS} atoms")
+    if symbols != ["Mo", "S"]:
+        raise InputValidationError("POSCAR element order must be exactly 'Mo S'")
+    return True
+
+
+def _read_structure(text: str, try_vasp: bool) -> tuple[Atoms, str]:
+    errors: list[str] = []
+    if try_vasp:
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="invalid value encountered in matmul",
+                    category=RuntimeWarning,
+                    module=r"ase\.cell",
+                )
+                atoms = ase_read(io.StringIO(text), format="vasp")
+            _vasp_element_order(text)
+            return atoms, "vasp"
+        except Exception as exc:
+            errors.append(f"vasp: {exc}")
+    else:
+        errors.append("vasp: header/counts are not safely recognizable")
 
     try:
         atoms = ase_read(io.StringIO(text), format="cif")
@@ -126,17 +179,40 @@ def _validate_and_order_atoms(atoms: Atoms, source_format: str) -> Atoms:
     return atoms[order]
 
 
+def _validate_geometry(atoms: Atoms) -> None:
+    if not bool(np.all(atoms.pbc)):
+        raise InputValidationError("structure must be periodic in all three cell directions")
+    cell = np.asarray(atoms.cell.array, dtype=float)
+    positions = np.asarray(atoms.positions, dtype=float)
+    if cell.shape != (3, 3) or not np.isfinite(cell).all():
+        raise InputValidationError("structure cell must contain finite lattice vectors")
+    if positions.shape != (len(atoms), 3) or not np.isfinite(positions).all():
+        raise InputValidationError("structure positions must be finite")
+    if np.linalg.matrix_rank(cell, tol=1e-10) != 3 or abs(float(np.linalg.det(cell))) <= 1e-8:
+        raise InputValidationError("structure cell must be non-degenerate")
+    try:
+        scaled_positions = np.asarray(atoms.get_scaled_positions(wrap=False), dtype=float)
+    except (ValueError, np.linalg.LinAlgError) as exc:
+        raise InputValidationError("structure scaled positions are invalid") from exc
+    if not np.isfinite(scaled_positions).all():
+        raise InputValidationError("structure scaled positions must be finite")
+
+
 def _write_poscar(atoms: Atoms) -> bytes:
     output = io.StringIO()
-    ase_write(output, atoms, format="vasp", direct=True, vasp5=True, sort=False)
+    try:
+        ase_write(output, atoms, format="vasp", direct=True, vasp5=True, sort=False)
+    except Exception as exc:
+        raise InputValidationError("structure could not be written as canonical POSCAR") from exc
     return output.getvalue().encode("utf-8")
 
 
 def parse_structure_bytes(content: bytes, filename: str) -> ParsedStructure:
     audit_filename = _safe_filename(filename)
     text = _decode_structure(content)
-    atoms, source_format = _read_structure(text)
+    atoms, source_format = _read_structure(text, _preflight_vasp_header(text))
     atoms = _validate_and_order_atoms(atoms, source_format)
+    _validate_geometry(atoms)
     symbols = atoms.get_chemical_symbols()
     mo_count = symbols.count("Mo")
     s_count = symbols.count("S")
