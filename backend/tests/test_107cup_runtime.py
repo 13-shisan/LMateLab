@@ -35,6 +35,8 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             "LMATELAB_GIT_COMMIT": "abc1234",
             "LMATELAB_MANIFEST_SHA256": "def5678",
             "LMATELAB_STARTED_AT": "2026-08-05T12:00:00+08:00",
+            "LMATELAB_RELEASE_KIND": "preview",
+            "LMATELAB_DATA_MODE": "demo",
             "JWT_SECRET": "must-not-leak",
         }
 
@@ -45,9 +47,20 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
                 "commit": "abc1234",
                 "manifest_sha256": "def5678",
                 "started_at": "2026-08-05T12:00:00+08:00",
+                "release_kind": "preview",
+                "data_mode": "demo",
             },
             runtime.deployment_metadata(environ),
         )
+
+    def test_deployment_metadata_defaults_to_stable_live_without_secrets(self):
+        runtime = self.require_runtime()
+        metadata = runtime.deployment_metadata({"JWT_SECRET": "must-not-leak"})
+
+        self.assertEqual("stable", metadata["release_kind"])
+        self.assertEqual("live", metadata["data_mode"])
+        self.assertNotIn("JWT_SECRET", metadata)
+        self.assertNotIn("jwt_secret", metadata)
 
     def test_spa_resolver_serves_assets_and_falls_back_to_index(self):
         runtime = self.require_runtime()

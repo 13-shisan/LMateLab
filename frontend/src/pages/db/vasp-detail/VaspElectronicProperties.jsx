@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download } from 'lucide-react';
+
+function isCurrentPlotRequest(currentGeneration, requestGeneration) {
+  return currentGeneration === requestGeneration;
+}
 
 export default function VaspElectronicProperties({
   rowId,
@@ -15,6 +19,7 @@ export default function VaspElectronicProperties({
   const [loadingTab, setLoadingTab] = useState('');
   const [errors, setErrors] = useState({ band: '', dos: '', download: '' });
   const [downloading, setDownloading] = useState(false);
+  const requestGenerationRef = useRef(0);
 
   useEffect(() => {
     setPlotCache({ band: '', dos: '' });
@@ -27,6 +32,12 @@ export default function VaspElectronicProperties({
     if (!activeAvailable || plotCache[activeTab]) return undefined;
 
     const controller = new AbortController();
+    const requestGeneration = requestGenerationRef.current + 1;
+    requestGenerationRef.current = requestGeneration;
+    const isCurrentRequest = () => isCurrentPlotRequest(
+      requestGenerationRef.current,
+      requestGeneration,
+    );
     const encodedId = encodeURIComponent(rowId);
     const encodedDb = encodeURIComponent(dbKey);
     const path = activeTab === 'band'
@@ -37,16 +48,26 @@ export default function VaspElectronicProperties({
     setErrors((current) => ({ ...current, [activeTab]: '' }));
     fetchJson(path, { signal: controller.signal })
       .then((data) => {
-        setPlotCache((current) => ({ ...current, [activeTab]: data?.image_base64 || '' }));
+        if (!isCurrentRequest()) return;
+        const imageSource = data?.image_url
+          || (data?.image_base64 ? `data:image/png;base64,${data.image_base64}` : '');
+        setPlotCache((current) => ({ ...current, [activeTab]: imageSource }));
       })
       .catch((error) => {
+        if (!isCurrentRequest()) return;
         if (error?.name !== 'AbortError') {
           setErrors((current) => ({ ...current, [activeTab]: String(error?.message || error) }));
         }
       })
-      .finally(() => setLoadingTab((current) => (current === activeTab ? '' : current)));
+      .finally(() => {
+        if (!isCurrentRequest()) return;
+        setLoadingTab((current) => (current === activeTab ? '' : current));
+      });
 
-    return () => controller.abort();
+    return () => {
+      if (isCurrentRequest()) requestGenerationRef.current += 1;
+      controller.abort();
+    };
   }, [activeTab, bandAvailable, dbKey, dosAvailable, fetchJson, plotCache, rowId]);
 
   const activeAvailable = activeTab === 'band' ? bandAvailable : dosAvailable;
@@ -96,7 +117,7 @@ export default function VaspElectronicProperties({
         {!activeAvailable ? <div className="vasp-detail-message">当前数据不可用</div> : null}
         {loadingTab === activeTab ? <div className="vasp-detail-message">正在生成{plotAlt}…</div> : null}
         {activeError ? <div className="vasp-detail-message vasp-detail-error">加载失败：{activeError}</div> : null}
-        {activeImage ? <img src={`data:image/png;base64,${activeImage}`} alt={plotAlt} /> : null}
+        {activeImage ? <img src={activeImage} alt={plotAlt} /> : null}
       </div>
       {errors.download ? <div className="vasp-detail-error" role="alert">导出失败：{errors.download}</div> : null}
     </>

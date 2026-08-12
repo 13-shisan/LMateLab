@@ -4,6 +4,7 @@ import {
   Atom,
   Bell,
   Bot,
+  ChartNoAxesCombined,
   ChevronDown,
   ClipboardList,
   Database,
@@ -22,8 +23,10 @@ import {
   Presentation,
   Rss,
   Server,
+  SquarePlus,
   UserRound,
   UsersRound,
+  Workflow,
   X,
 } from 'lucide-react';
 
@@ -41,6 +44,7 @@ import './AppShell.css';
 const iconMap = {
   Atom,
   Bot,
+  ChartNoAxesCombined,
   ClipboardList,
   Database,
   LayoutDashboard,
@@ -53,8 +57,10 @@ const iconMap = {
   Presentation,
   Rss,
   Server,
+  SquarePlus,
   UserRound,
   UsersRound,
+  Workflow,
 };
 
 function readStoredUser() {
@@ -82,6 +88,8 @@ export default function AppShell() {
 
   const user = readStoredUser();
   const competitionEdition = activeEdition === '107cup';
+  const competitionDemo = activeEdition === '107cup'
+    && import.meta.env.VITE_COMPETITION_DATA_MODE === 'demo';
   const pageMeta = useMemo(() => getPageMeta(location.pathname), [location.pathname]);
 
   useEffect(() => {
@@ -124,7 +132,7 @@ export default function AppShell() {
   };
 
   return (
-    <div className={`lm-app-shell${collapsed ? ' is-collapsed' : ''}`}>
+    <div className={`lm-app-shell${collapsed ? ' is-collapsed' : ''}${competitionEdition ? ' is-competition-edition' : ''}`}>
       <aside className={`lm-sidebar${drawerOpen ? ' is-open' : ''}`} aria-label="主导航">
         <div className="lm-sidebar-brand">
           <Link
@@ -219,6 +227,10 @@ export default function AppShell() {
         </div>
 
         <div className="lm-topbar-actions">
+          {competitionDemo ? (
+            <span className="lm-demo-build-badge" title="此发布只使用版本控制内的演示数据">演示数据</span>
+          ) : null}
+
           {!competitionEdition ? (
             <button
               className="lm-icon-button"

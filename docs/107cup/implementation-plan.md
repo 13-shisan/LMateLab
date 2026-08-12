@@ -85,9 +85,9 @@
 - 初始来源提交：`4d51e5837e62bb8582646f371352eb958af2a9db`。
 - 来源清单 SHA-256：`fe35216bb093894e8d7b2edbac67e4fc11939d67af776325e1045e4ccf4aa3f9`。
 - Gitea：`ssh://git@wugroup.synology.me:32808/107-team/LMateLab.git`。
-- Gitea `main`：`11bac230cb9cd714596c4a460512699db76e0aca`。
-- PR #10 已将 `codex/107cup-main-protection-evidence` 合并到 `main`。
-- 本地 `main`、Gitea `main` 和 107 源码检出均已同步到 PR #10 的合并提交 `11bac230cb9cd714596c4a460512699db76e0aca`；107 工作树干净且为 detached HEAD。
+- Gitea `main`：`f8aee97e4367fa45befab77c3a248d99dd3e36ae`，Windows 于 `2026-08-11` 重新 fetch 后确认。
+- PR #11 已将 `codex/107cup-frontend-preview-design` 合并到 `main`，包含已批准设计和 14 项实施计划。
+- 107 源码检出最后一次已记录同步仍为 PR #10 的合并提交 `11bac230cb9cd714596c4a460512699db76e0aca`；本次本地前端实现尚未合并或部署，下一次远端操作前必须重新现场核验 detached HEAD 和工作树状态。
 - 当前生产仍为 Job `33852`、节点 `anode16` 和发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，本次仓库收尾未重建或重启服务。
 
 ### 4.2 构建与发布
@@ -137,7 +137,7 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | PR #10 已合并，三端 `main`/检出已同步到 `11bac23`；107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份证据；按用户决定暂不阻塞当前前端预览批次 |
+| 1. 竞赛仓库初始化 | PARTIAL | Gitea `main` 已由 PR #11 更新到 `f8aee97`，本地前端功能检查点为 `ab6064d`，107 检出最后记录仍为 `11bac23` 且本批次未刷新；107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份证据；实现 PR 合并后再核验并刷新 107 detached checkout |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
@@ -558,14 +558,14 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 
 专项设计：`docs/superpowers/specs/2026-08-10-107cup-frontend-preview-design.md`。
 
-- [ ] 按 `superpowers:writing-plans` 生成可执行实施计划并经用户复核。
-- [ ] 建立独立功能工作树和分支，不在受保护 `main` 直接修改。
-- [ ] 优先复用现有结构、晶体详情、BAND/DOS、元素颜色和导出组件。
-- [ ] 从原 VASP 数据库提取完整周期表筛选和只读表格核心，保持原页面兼容。
-- [ ] 为工作台、新建计算、工作流、结果和 VASP 数据库增加 107 专用路由。
-- [ ] 实现 demo/live 数据提供器；预览模式的全部 mutation 失败关闭且不伪造成功。
-- [ ] 使用内置 MoS2 演示成功、运行中和人为失败状态；不导入 4090 生产数据。
-- [ ] 在本地完成针对性测试、构建和代码检查，只记录为本地预检。
+- [x] 按 `superpowers:writing-plans` 生成可执行实施计划并经用户复核。
+- [x] 建立独立功能工作树和分支，不在受保护 `main` 直接修改。
+- [x] 优先复用现有结构、晶体详情、BAND/DOS、元素颜色和导出组件。
+- [x] 从原 VASP 数据库提取完整周期表筛选和只读表格核心，保持原页面兼容。
+- [x] 为工作台、新建计算、工作流、结果和 VASP 数据库增加 107 专用路由。
+- [x] 实现 demo/live 数据提供器；预览模式的全部 mutation 失败关闭且不伪造成功。
+- [x] 使用内置 MoS2 演示成功、运行中和人为失败状态；不导入 4090 生产数据。
+- [x] 在本地完成针对性测试、构建和代码检查，只记录为本地预检。
 - [ ] 将功能分支推送 Gitea 并通过 PR 合并；107 只拉取固定合并提交，不直接检出未合并功能分支。
 - [ ] 通过 107 Slurm 构建不晋升的 `previews/<commit>` 发布和独立 manifest。
 - [ ] 启动独立 Slurm 预览 Job，使用独立数据库、runtime 目录和未占用端口；不得切换 `current` 或修改稳定数据库。
@@ -639,3 +639,41 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 预览采用 demo/live 双数据提供器和独立 107 Slurm 预览发布，不切换 `current`、不修改正式数据库或稳定服务。
 - 本次提交只增加设计文档并更新总实施方案；未修改功能源码，未运行 107 构建，未启动预览 Job，也未改变阶段 5 至 8 的 `PENDING` 状态。
 - 已生成专项实施计划 `docs/superpowers/plans/2026-08-10-107cup-frontend-preview.md`，按 TDD 拆分数据提供器、周期表与只读表格提取、五页前端、浏览器验收和独立 Slurm 预览链路；当前仍只是计划文档，尚未实现、构建、合并或部署，相关执行清单保持未勾选。
+
+### 2026-08-11
+
+- 在隔离工作树和分支 `codex/107cup-frontend-preview` 开始执行前端预览计划；该分支将随本次团队指南提交推送到 Gitea，但尚未合并或部署到 107，阶段 5 至 8 继续保持 `PENDING`。
+- Task 1 已在本地实现 demo/live 数据提供器、MoS2 成功/运行/失败 fixture、BAND/DOS 演示数据和预览只读 mutation；规格与质量复审已通过。
+- Task 2 已从旧 VASP 页面提取 118 元素周期表和受控筛选组件，保留旧页面兼容；规格与质量复审已通过。旧数组的视觉顺序与实施计划中的 `Z=1..118` 验收测试冲突，实际采用按 `Z` 机械重排、对象字段完全不变、由 `row/col` 保持视觉布局的澄清。
+- Task 3 曾在源码修改前暂停，先新增 `docs/107cup/team-guide.md` 作为三名成员的统一仓库入口，记录阅读顺序、固定范围、分工建议、个人 Gitea 身份、PR、107/Slurm、安全和证据规则；README 同步增加入口。
+- 根据队友也将使用 AI 的协作方式，新增仓库根目录 `TEAMMATE_AI_START.md` 作为唯一可直接转发文件：AI 先帮助队友检测并复用个人 Gitea key、克隆仓库、只读查看功能分支并提交接手报告，再在负责人明确分配 Task、文件范围和起点提交后进入 TDD 实施；文件同时提供前端、科学计算和发布证据三个方向的只读准备提示词，避免共享文件和 107 登录节点上的并行误操作。
+- Task 3 恢复后已提取无旧收藏/移除 mutation 的 `VaspRecordTable` 只读核心，原 `VaspDataTable` 保持兼容包装、详情路由和操作列；新增移动端横向表格模式、行/卡片选择及可访问键盘行为。代码质量复审发现嵌套详情链接或操作按钮会冒泡触发行选择，已通过可执行回归测试隔离交互目标，并补齐 Enter/Space 与可见焦点；规格和质量复审最终均通过。
+- 当前功能实现检查点为 `7b74a78e4084235bcf2a2263566bc71c89370bee`（不含本次方案状态提交），前端测试 `46/46`、聚焦 ESLint、生产构建和 `git diff --check` 通过；这些仍仅是 Windows 本地事实，不能表述为已合并、107 preview 或真实 VASP 验收。
+- Task 4 已增加独立且深度冻结的 107 杯五入口导航数据，没有污染完整版导航，也没有提前注册 Task 10 才允许接入的页面路由；新增 `CompetitionDataProvider`、`useCompetitionData` 和带卸载/loader 切换保护的 `useCompetitionResource`，并仅包裹现有受保护 Dashboard 壳。规格与质量复审均通过，异步生命周期仍缺少渲染级回归测试，暂以代码审查和后续页面集成验收覆盖。
+- 当前功能实现检查点更新为 `ab961b9b83e4b5ab79d5f2f65e7c4b16dbe2f53f`（不含本次方案状态提交）；导航/Provider/角色聚焦测试 `20/20`、前端全套 `46/46`、聚焦 ESLint、生产构建和 `git diff --check` 通过，仍未合并或部署到 107。
+- Task 5 已新增显式 demo/loading/empty/forbidden/stale/parse-error/render-error/error 状态、固定 `relax -> SCF -> BAND/DOS` 分叉时间线和紧凑横向只读表格；现有 3Dmol 查看器增加视角重置，BAND/DOS 图保持 base64 兼容并支持 provider URL。质量复审发现并已修复数值 `exit_code=0` 丢失、异常步骤集合崩溃、旧绘图请求覆盖新记录、viewer 切换状态和 disabled hover；规格与质量复审最终均通过。绘图竞态已有可执行判定 helper 与三分支 guard 合同，但完整 deferred-Promise 组件生命周期仍留待 Task 11 浏览器/组件验收补强。
+- 当前功能实现检查点更新为 `0bd9eaa482192a55d362788deb50ccfabf3f8a34`（不含本次方案状态提交）；Task 5 聚焦测试 `16/16`、前端全套 `56/56`、定向 ESLint、demo/live/标准三种 Vite 构建和 `git diff --check` 通过。这些仍仅是 Windows 本地实现事实，尚未合并、部署到 107 或执行真实 Slurm/VASP 验收，阶段 5 至 8 继续保持 `PENDING`。
+- Task 6 已将硬编码零值和空工作流占位 Dashboard 替换为 provider 驱动的运营预览，包含持续 demo 标记、四项工作流摘要、最近工作流表、当前四步分叉时间线和最小 Slurm 演示快照。质量复审发现并已修复损坏 ready payload 引发的渲染崩溃、竞赛 grid 污染完整版 Dashboard 以及窄侧栏丢失 `SCF -> BAND/DOS` 分叉；规格与质量复审最终均通过。
+- 当前功能实现检查点更新为 `0f3c6e1b7ab62f2108de9c98622b7ac4a6f80b80`（不含本次方案状态提交）；Task 6 聚焦测试 `11/11`、前端全套 `60/60`、定向 ESLint、demo/live/标准三种 Vite 构建和 `git diff --check` 通过。Browser 插件不可用时使用 Playwright fallback 完成 `1440x900` 与 `390x844` 本地 smoke，未见控制台错误、页面级溢出或重叠；详情链接已产生目标 URL，但 Task 10 前仍由现有 catch-all 返回 Dashboard。该结果不是 Task 11 的正式三视口验收，仍未合并或部署到 107。
+- Task 7 已新增单页新建计算预览工作区：内置 MoS2 与受限上传占位、直接复用的 3D 结构查看器、固定 `relax -> SCF -> BAND/DOS` 双分支、逐步演示参数、Slurm 资源审阅和草稿/提交控制。规格复审发现并已修复只有 SCF 竖线而没有 BAND/DOS 双分支的问题；质量复审发现并已修复上传占位仍显示 MoS2 晶格数值、写门禁缺少可执行回归和来源切换残留错误。上传态现在明确显示待选择、未解析和不可提交；demo、Viewer 与上传占位均在 provider 调用前失败关闭，仅 live Operator 加内置结构允许写调用。规格与质量复审最终均通过。
+- 当前功能实现检查点更新为 `543f5eb47bd48e4ffa8d3ec79252dbfd8f4c3631`（不含本次方案状态提交）；Task 7 页面与 provider 聚焦测试 `34/34`、前端全套 `67/67`、定向 ESLint、demo/live/标准三种 Vite 构建和 `git diff --check` 通过。Task 10 前该页面仍未接入路由，因此三种构建只证明现有入口未回归，页面本身由 Babel JSX 解析、可执行 helper 测试和 ESLint 提供本地语法/行为证据；尚未执行 Task 11 浏览器验收，未合并或部署到 107，阶段 5 至 8 继续保持 `PENDING`。
+- Task 8 已新增 URL 驱动的工作流检索列表和不可变证据详情，包含 query/status 筛选、显式 loading/empty/forbidden/error 状态、六项中文 provenance、完整非紧凑四步时间线及未来 live Operator 的取消/失败步骤重试控制。实施时发现原任务文件清单遗漏了“验收结论”所需的共享时间线改动，因此按最小范围纠偏：复用现有 `WorkflowTimeline` 并只为非紧凑模式增加 `accepted` 证据，不在详情页复制时间线。
+- Task 8 规格复审发现并已修复按 provider mode 而非记录 `data_kind` 标记来源、身份字段使用内部键名以及 missing/error 仅靠字符串测试的问题；质量复审进一步修复 ready 坏对象向 provider 传递 `undefined` ID/step、未知 provenance 误标真实和重复命令窗口。详情现在要求路由与记录 ID 精确一致、`data_kind` 仅为 `demo/live`、失败步骤键仅为固定四步，按钮与可执行命令 helper 双层失败关闭并共享 pending 门禁。规格与质量复审最终均通过。
+- 当前功能实现检查点更新为 `5e85981de92e900270065c7c3eb2355f9f1d30bf`（不含本次方案状态提交）；Task 8 页面与 provider 聚焦测试 `45/45`、前端全套 `78/78`、定向 ESLint、demo/live/标准三种 Vite 构建和 `git diff --check` 通过。Task 10 前两个新页面仍未接入路由，构建结果仍只证明现有入口未回归；尚未执行 Task 11 浏览器验收，未合并或部署到 107，也未实现真实工作流/Slurm 写接口，阶段 5 至 8 继续保持 `PENDING`。
+
+### 2026-08-12
+
+- Task 9 已新增 URL 驱动的结果列表和科学结果详情：列表只接受 `succeeded`、`failed`、`parse-error` 三类完成记录并排除运行中工作流；详情直接复用现有 `VaspTaskSummary`、`VaspStructureViewer`、`VaspCrystalDetails` 和 `VaspElectronicProperties`，通过 competition provider 加载 BAND/DOS 图和下载结构、数据及证据工件。成功科学区与失败证据区在 AST 分支中互斥，demo 结果和全部下载文件持续标记为“演示内容”及 `DEMO-` 文件名。
+- Task 9 规格复审发现并已修复五类演示工件回归不足、空嵌套科学合同误判成功，以及工作流 ID 中 `band`/`dos` 子串干扰工件和绘图类型的问题。质量复审进一步修复无四步验收证据仍挂载成功科学区、合法 live 可空科学字段被误拒、畸形 provenance/时间线触发 React 渲染崩溃、结果行 `id` 覆盖权威 `workflow_id`，以及布尔值或非法数字冒充 Job ID/失败证据的问题；最终规格与质量复审均通过。绘图 `AbortSignal` 仍因现有 demo/live provider 接口只接受 `(id, kind)` 而留待真实接口阶段处理，本 Task 未越界修改 Task 1 provider。
+- 当前功能实现检查点更新为 `38a653bb2575e45e38fb0804fdf282f5ed4e4953`（不含本次方案状态提交）；Task 9 相关聚焦测试 `65/65`、前端全套 `89/89`、定向 ESLint、3 个 JSX Babel 解析、demo/live/标准三种 Vite 构建和 `git diff --check` 均通过。Task 10 前结果页仍未接入路由，因此 107 两种构建仍只证明现有入口未回归；尚未执行 Task 11 三视口浏览器与 Canvas 像素验收，未合并或部署到 107，也未产生真实 Slurm/VASP 结果，阶段 5 至 8 继续保持 `PENDING`。
+- Task 10 已完成周期表驱动的只读 VASP 数据库页和七条受保护竞赛路由接入：筛选、页码与选中记录由 URL 驱动，列表、详情及 provider 响应均严格校验；损坏响应、过期请求和页码归一化期间均失败关闭。数据库仅显示只读记录和结构检查器，竞赛导航保留紧凑“演示数据”标记，没有接入旧数据库写操作或完整旧 VASP router。规格复审与两轮质量复审均通过。
+- 当前功能实现检查点更新为 `c9bcf5ed828866da7fca7978f1abc030e6e6e271`（不含本次方案状态提交）；Task 10 聚焦测试 `99/99`、前端全套 `103/103`、定向 ESLint、数据库页/`App107Cup`/`AppShell` 三项 Babel JSX 解析和 `git diff --check` 均通过。demo 与 live 107 构建各转换 `1857` 个模块，标准完整构建转换 `2201` 个模块；demo `dist/assets` 对 `AgentEntry`、`PersonalVaspDatabase`、`ServerMonitor*`、`AcademicReports` 和 `NotesJournal` 扫描为零命中。
+- 上述结果仍仅是 Windows 本地实现和预检事实；Task 11 三视口浏览器及 3D Canvas 像素验收、Gitea PR 合并和 Task 12/13 的 107 独立 Slurm 预览尚未执行，也没有产生真实工作流、Slurm 控制或 VASP 计算证据。阶段 5 至 8 继续保持 `PENDING`。
+- Task 11 已增加只面向外部目标的 Playwright 验收配置和单流程三视口套件，固定 `1440x900`、`1024x768`、`390x844`，覆盖五个入口、两个详情路由、刷新、禁用写控件、周期表筛选、BAND/DOS 切换、成功/失败互斥、3D Canvas 非空像素和页面级横向溢出；每个视口预定输出五张全页截图及一份像素/控制台/写请求计数 JSON 到外部证据目录。
+- 本地仅完成验收代码预检：`@playwright/test 1.54.2` 与 `pngjs 7.0.0` 已锁定安装，Chromium 实际启动通过，缺少 `LMATELAB_PREVIEW_URL` 时配置按约定失败，提供占位环境后的 `--list` 精确列出三个视口项目；E2E 文件定向 ESLint、前端全套 `103/103`、demo 构建 `1857` 模块和 `git diff --check` 通过。尚未连接 107 预览、使用私有预览账号或生成正式截图/Canvas 像素结果，因此三视口验收清单继续保持未勾选。
+- Task 12 已在本地实现隔离预览部署链路：固定合并提交的 Slurm 构建只生成 `previews/<commit>` 和独立 manifest，不创建或切换 `current`；预览服务把两套稳定 SQLite 通过 backup API 复制到 `preview-runtime/<commit>/<job>` 后仅迁移副本，并使用独立端口、可追溯运行元数据和 `preview/demo` 健康标识；running/stopped 验证器和 Slurm before/after 快照分别检查端口生命周期及稳定发布、数据库、服务元数据不变。稳定构建同时显式固定为 `live` 数据模式。
+- 当前 Task 12 源码检查点为 `2b6e72ac15cc1cb83992f7c6a4b4c3aeae7de3c1`（不含本次方案状态提交）；预览/稳定部署合同、运行时和健康检查 `35/35` 通过，八个相关 Bash/Slurm 文件通过 `bash -n`，预览构建晋升令牌和预览服务稳定库 URL 两项零命中隔离扫描通过。实施计划中“验证器禁止出现 `uvicorn ` 字符串”与“验证器必须用 `pgrep` 检查登录节点 Uvicorn”存在冲突，最终合同按实际安全目标改为禁止可执行的安装、构建、迁移和服务命令，同时允许只读进程检查。
+- 上述仍仅是 Windows 本地源码、合同和语法事实；没有向 107 提交构建、服务或快照 Job，没有创建远端 `previews/<commit>`、预览数据库、端口或运行证据，也没有修改稳定 `current`、数据库或服务。所有 107 Slurm、浏览器和前后快照清单继续保持未勾选，阶段 5 至 8 继续为 `PENDING`。
+- Task 13 Step 1 已完成完整 Windows 本地预检：后端命令 `python -m unittest tests.test_107cup_authz tests.test_107cup_runtime tests.test_107cup_deploy_contract tests.test_107cup_preview_deploy_contract tests.test_health_readiness -v` 通过 `42/42`；前端 `npm test` 通过 `103/103`；`VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=demo npm run build` 成功转换 `1857` 个模块；定向 ESLint 与 `git diff --check` 均通过。
+- 本地预检同时处理两项平台兼容问题：Windows 不提供可依赖的 POSIX 最终权限位，因此迁移测试仅在非 Windows 平台断言目录 `0700` 和备份 `0600`，Linux/107 的严格断言保持不变，跨平台仍检查 `os.open` 使用 `O_CREAT|O_EXCL` 和 `0600`；周期表组件仅为已批准的兼容 helper 重导出增加定向 ESLint 说明，没有扩大豁免范围。
+- 当前五个竞赛入口、demo/live provider、三视口 Playwright 验收代码和隔离预览部署脚本均只完成本地实现与预检。尚未完成 Gitea PR 合并、107 Slurm 预览构建/服务、真实浏览器截图与 3D Canvas 像素验收，也没有生成真实工作流、Slurm 控制或 VASP 计算证据；阶段 5 至 8 继续为 `PENDING`。

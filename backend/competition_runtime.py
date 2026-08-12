@@ -28,6 +28,8 @@ def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, s
         "commit": values.get("LMATELAB_GIT_COMMIT", "unknown"),
         "manifest_sha256": values.get("LMATELAB_MANIFEST_SHA256", "unknown"),
         "started_at": values.get("LMATELAB_STARTED_AT", "unknown"),
+        "release_kind": values.get("LMATELAB_RELEASE_KIND", "stable"),
+        "data_mode": values.get("LMATELAB_DATA_MODE", "live"),
     }
 
 
