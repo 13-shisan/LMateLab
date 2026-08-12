@@ -31,7 +31,10 @@ test "$recorded_commit" = "$commit"
 test "$(cut -d ' ' -f 1 "$release/manifest.sha256")" = "$manifest_sha256"
 
 squeue -j "$job_id" -o '%.18i %.12P %.20j %.10T %.12M %R'
-sacct -j "$job_id" --format=JobID,State,ExitCode,Elapsed,NodeList
+scontrol show job "$job_id"
+if ! sacct -j "$job_id" --format=JobID,State,ExitCode,Elapsed,NodeList; then
+  printf '%s\n' 'sacct unavailable; continuing with scontrol evidence' >&2
+fi
 (cd "$release" && sha256sum -c manifest.sha256 && sha256sum -c manifest.txt)
 
 health_url="http://$node:$port/api/health/live"
