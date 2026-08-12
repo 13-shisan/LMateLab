@@ -12,6 +12,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, event, func, inspect, select, text
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
 from database import Base
@@ -361,6 +362,116 @@ class CompetitionWorkflowModelTests(unittest.TestCase):
             self.assertIsNotNone(persisted)
             self.assertEqual(persisted.created_at.tzinfo, timezone.utc)
             self.assertEqual(persisted.updated_at.tzinfo, timezone.utc)
+
+    def test_json_columns_canonicalize_objects_sequences_and_json_text(self):
+        with Session(self.engine) as session:
+            owner = User(
+                email="json-owner@example.com",
+                password_hash="hash",
+                name="json-owner",
+                alias="",
+                role="user",
+                created_at=datetime.now(timezone.utc),
+            )
+            run = WorkflowRun(
+                owner=owner,
+                template_version="mos2_v1",
+                material="MoS2",
+                source_kind="builtin",
+                metadata_json=' { "z" : 2, "a" : 1 } ',
+            )
+            step = WorkflowStep(
+                workflow=run,
+                step_key="relax",
+                position=0,
+                parameters_json={"sigma": 0.05, "encut": 500},
+            )
+            attempt = WorkflowAttempt(
+                step=step,
+                attempt_number=1,
+                metadata_json={"resources": {"gpu": 1}},
+            )
+            event_row = WorkflowEvent(
+                workflow=run,
+                sequence=1,
+                event_type="draft_created",
+                payload_json=[{"z": 2, "a": 1}],
+            )
+            file_row = WorkflowFile(
+                workflow=run,
+                attempt=attempt,
+                owner=owner,
+                relative_path="attempts/1/OUTCAR",
+                size_bytes=1,
+                sha256="b" * 64,
+                source_kind="generated",
+                metadata_json=' { "kind" : "output" } ',
+            )
+            template = WorkflowTemplate(
+                template_key="mos2",
+                version="mos2_v1",
+                definition_json={"steps": ["relax", "scf", "band", "dos"]},
+            )
+            session.add_all([run, step, attempt, event_row, file_row, template])
+            session.commit()
+
+            expected = {
+                ("workflow_runs", "metadata_json", run.id): '{"a":1,"z":2}',
+                ("workflow_steps", "parameters_json", step.id): '{"encut":500,"sigma":0.05}',
+                ("workflow_attempts", "metadata_json", attempt.id): '{"resources":{"gpu":1}}',
+                ("workflow_events", "payload_json", event_row.id): '[{"a":1,"z":2}]',
+                ("workflow_files", "metadata_json", file_row.id): '{"kind":"output"}',
+                ("workflow_templates", "definition_json", template.id): (
+                    '{"steps":["relax","scf","band","dos"]}'
+                ),
+            }
+
+        with self.engine.connect() as connection:
+            for (table_name, column_name, record_id), encoded in expected.items():
+                with self.subTest(table=table_name):
+                    actual = connection.scalar(
+                        text(
+                            f"SELECT {column_name} FROM {table_name} "
+                            "WHERE id = :record_id"
+                        ),
+                        {"record_id": record_id},
+                    )
+                    self.assertEqual(actual, encoded)
+
+    def test_json_columns_reject_invalid_and_non_finite_values(self):
+        with Session(self.engine) as session:
+            owner = User(
+                email="invalid-json-owner@example.com",
+                password_hash="hash",
+                name="invalid-json-owner",
+                alias="",
+                role="user",
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(owner)
+            session.commit()
+            owner_id = owner.id
+
+        invalid_values = (
+            "not-json",
+            '{"value":NaN}',
+            '{"value":Infinity}',
+            {"value": math.nan},
+            [math.inf],
+        )
+        for value in invalid_values:
+            with self.subTest(value=value), Session(self.engine) as session:
+                session.add(
+                    WorkflowRun(
+                        owner_id=owner_id,
+                        template_version="mos2_v1",
+                        material="MoS2",
+                        source_kind="builtin",
+                        metadata_json=value,
+                    )
+                )
+                with self.assertRaises(StatementError):
+                    session.flush()
 
 
 if __name__ == "__main__":

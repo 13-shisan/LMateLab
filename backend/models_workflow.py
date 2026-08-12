@@ -29,6 +29,28 @@ def canonical_json(value: Any) -> str:
     )
 
 
+def _reject_non_finite_json(constant: str) -> None:
+    raise ValueError(f"non-finite JSON number is not allowed: {constant}")
+
+
+class CanonicalJSONText(TypeDecorator):
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = json.loads(value, parse_constant=_reject_non_finite_json)
+        return canonical_json(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        decoded = json.loads(value, parse_constant=_reject_non_finite_json)
+        return canonical_json(decoded)
+
+
 def _uuid_string() -> str:
     return str(uuid.uuid4())
 
@@ -69,7 +91,7 @@ class WorkflowTemplate(Base):
     id = Column(Integer, primary_key=True)
     template_key = Column(String(100), nullable=False)
     version = Column(String(100), nullable=False)
-    definition_json = Column(Text, nullable=False, default=_empty_json)
+    definition_json = Column(CanonicalJSONText(), nullable=False, default=_empty_json)
     created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
     updated_at = Column(
         UTCDateTime(),
@@ -98,7 +120,7 @@ class WorkflowRun(Base):
     status = Column(String(50), nullable=False, default="draft")
     input_sha256 = Column(String(64), nullable=True)
     release_commit = Column(String(64), nullable=True)
-    metadata_json = Column(Text, nullable=False, default=_empty_json)
+    metadata_json = Column(CanonicalJSONText(), nullable=False, default=_empty_json)
     created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
     updated_at = Column(
         UTCDateTime(),
@@ -146,7 +168,7 @@ class WorkflowStep(Base):
     step_key = Column(String(50), nullable=False)
     position = Column(Integer, nullable=False)
     status = Column(String(50), nullable=False, default="waiting")
-    parameters_json = Column(Text, nullable=False, default=_empty_json)
+    parameters_json = Column(CanonicalJSONText(), nullable=False, default=_empty_json)
     created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
     updated_at = Column(
         UTCDateTime(),
@@ -187,7 +209,7 @@ class WorkflowAttempt(Base):
     status = Column(String(50), nullable=False, default="created")
     slurm_job_id = Column(String(100), nullable=True)
     working_directory = Column(Text, nullable=True)
-    metadata_json = Column(Text, nullable=False, default=_empty_json)
+    metadata_json = Column(CanonicalJSONText(), nullable=False, default=_empty_json)
     started_at = Column(UTCDateTime(), nullable=True)
     finished_at = Column(UTCDateTime(), nullable=True)
     created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
@@ -228,7 +250,7 @@ class WorkflowEvent(Base):
     )
     sequence = Column(Integer, nullable=False)
     event_type = Column(String(100), nullable=False)
-    payload_json = Column(Text, nullable=False, default=_empty_json)
+    payload_json = Column(CanonicalJSONText(), nullable=False, default=_empty_json)
     created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
 
     workflow = relationship("WorkflowRun", back_populates="events")
@@ -263,7 +285,7 @@ class WorkflowFile(Base):
     size_bytes = Column(Integer, nullable=False)
     sha256 = Column(String(64), nullable=False)
     source_kind = Column(String(50), nullable=False)
-    metadata_json = Column(Text, nullable=False, default=_empty_json)
+    metadata_json = Column(CanonicalJSONText(), nullable=False, default=_empty_json)
     created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
 
     workflow = relationship("WorkflowRun", back_populates="files")
