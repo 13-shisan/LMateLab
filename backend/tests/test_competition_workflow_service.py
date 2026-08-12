@@ -24,6 +24,7 @@ from schemas_workflow import DraftCreateRequest
 from services.competition_inputs import InputValidationError
 from services.competition_workflows import (
     WorkflowServiceError,
+    _claim_upload,
     confirm_workflow,
     create_draft,
     stage_structure,
@@ -239,6 +240,94 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
                     payload=upload_payload,
                 )
             self.assertEqual(consumed.exception.code, "upload_unavailable")
+
+    def test_database_claim_allows_only_one_session_to_consume_stale_upload(self):
+        with Session(self.engine) as session:
+            upload = stage_structure(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                content=VALID_POSCAR,
+                filename="POSCAR",
+            )
+            runs = [
+                WorkflowRun(
+                    owner_id=self.owner_id,
+                    template_version="mos2_v1",
+                    material="MoS2",
+                    source_kind="upload",
+                )
+                for _ in range(2)
+            ]
+            session.add_all(runs)
+            session.commit()
+            run_ids = [run.id for run in runs]
+
+        first = Session(self.engine)
+        second = Session(self.engine)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        stale_first = first.get(WorkflowFile, upload.id)
+        stale_second = second.get(WorkflowFile, upload.id)
+        self.assertIsNone(stale_first.workflow_id)
+        self.assertIsNone(stale_second.workflow_id)
+
+        self.assertTrue(_claim_upload(first, stale_first, run_ids[0]))
+        first.commit()
+        self.assertFalse(_claim_upload(second, stale_second, run_ids[1]))
+        second.rollback()
+
+        with Session(self.engine) as session:
+            row = session.get(WorkflowFile, upload.id)
+            self.assertEqual(row.workflow_id, run_ids[0])
+            metadata = json.loads(row.metadata_json)
+            self.assertTrue(metadata["consumed"])
+            self.assertEqual(metadata["consumed_by_workflow_id"], run_ids[0])
+
+    def test_lost_upload_claim_rolls_back_draft_and_cleans_generated_inputs(self):
+        with Session(self.engine) as session:
+            upload = stage_structure(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                content=VALID_POSCAR,
+                filename="POSCAR",
+            )
+        upload_path = self.root / upload.relative_path
+        payload = valid_payload(
+            source_kind="upload",
+            structure_upload_id=upload.id,
+        )
+
+        with Session(self.engine) as session:
+            with mock.patch(
+                "services.competition_workflows._claim_upload",
+                return_value=False,
+            ):
+                with self.assertRaises(WorkflowServiceError) as lost:
+                    create_draft(
+                        session,
+                        self.root,
+                        owner_id=self.owner_id,
+                        payload=payload,
+                    )
+            self.assertEqual(lost.exception.code, "upload_unavailable")
+
+        self.assertEqual(upload_path.read_bytes(), VALID_POSCAR)
+        self.assertEqual(
+            [
+                path
+                for path in self.root.iterdir()
+                if path.is_dir() and path.name != "incoming"
+            ],
+            [],
+        )
+        with Session(self.engine) as session:
+            upload_row = session.get(WorkflowFile, upload.id)
+            self.assertIsNone(upload_row.workflow_id)
+            self.assertFalse(json.loads(upload_row.metadata_json)["consumed"])
+            self.assertEqual(session.scalar(select(func.count()).select_from(WorkflowRun)), 0)
+            self.assertEqual(session.scalar(select(func.count()).select_from(WorkflowStep)), 0)
 
     def test_draft_commit_failure_cleans_generated_inputs_but_preserves_upload_evidence(self):
         with Session(self.engine) as session:

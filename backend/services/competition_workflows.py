@@ -5,12 +5,11 @@ import json
 import os
 import shutil
 import stat
-import threading
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from models_workflow import (
@@ -41,15 +40,6 @@ class WorkflowServiceError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
-
-
-_UPLOAD_LOCKS_GUARD = threading.Lock()
-_UPLOAD_LOCKS: dict[str, threading.Lock] = {}
-
-
-def _upload_lock(upload_id: str) -> threading.Lock:
-    with _UPLOAD_LOCKS_GUARD:
-        return _UPLOAD_LOCKS.setdefault(upload_id, threading.Lock())
 
 
 def _root_path(workflow_root: str | os.PathLike[str]) -> Path:
@@ -258,6 +248,34 @@ def _load_upload(
     return row, metadata, parsed
 
 
+def _claim_upload(
+    session: Session,
+    upload: WorkflowFile,
+    workflow_id: str,
+) -> bool:
+    metadata = _metadata(upload.metadata_json)
+    if metadata.get("consumed") is not False:
+        return False
+    metadata["consumed"] = True
+    metadata["consumed_by_workflow_id"] = workflow_id
+    result = session.execute(
+        update(WorkflowFile)
+        .where(
+            WorkflowFile.id == upload.id,
+            WorkflowFile.owner_id == upload.owner_id,
+            WorkflowFile.workflow_id.is_(None),
+            WorkflowFile.attempt_id.is_(None),
+            WorkflowFile.source_kind == "upload",
+        )
+        .values(
+            workflow_id=workflow_id,
+            metadata_json=metadata,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
 def create_draft(
     session: Session,
     workflow_root: str | os.PathLike[str],
@@ -268,122 +286,119 @@ def create_draft(
     validated = _request_payload(payload)
     root = _root_path(workflow_root)
     upload_id = validated.get("structure_upload_id")
-    lock = _upload_lock(upload_id) if upload_id else threading.Lock()
     generated_directory: Path | None = None
 
-    with lock:
-        try:
-            upload_row = None
-            upload_metadata = None
-            structure = None
-            if upload_id:
-                upload_row, upload_metadata, structure = _load_upload(
-                    session, root, owner_id, upload_id
-                )
-
-            materialized = materialize_inputs(root, structure, validated)
-            generated_directory = Path(materialized["directory"])
-            run = WorkflowRun(
-                id=str(uuid.uuid4()),
-                owner_id=owner_id,
-                template_version=validated["template_version"],
-                material="MoS2",
-                source_kind=validated["source_kind"],
-                status="draft",
+    try:
+        upload_row = None
+        structure = None
+        if upload_id:
+            upload_row, _upload_metadata, structure = _load_upload(
+                session, root, owner_id, upload_id
             )
-            template_definition = load_template(validated["template_version"])
-            template_row = session.scalar(
-                select(WorkflowTemplate).where(
-                    WorkflowTemplate.template_key == "mos2",
-                    WorkflowTemplate.version == validated["template_version"],
-                )
+
+        materialized = materialize_inputs(root, structure, validated)
+        generated_directory = Path(materialized["directory"])
+        run = WorkflowRun(
+            id=str(uuid.uuid4()),
+            owner_id=owner_id,
+            template_version=validated["template_version"],
+            material="MoS2",
+            source_kind=validated["source_kind"],
+            status="draft",
+        )
+        session.add(run)
+        session.flush()
+        if upload_row is not None and not _claim_upload(session, upload_row, run.id):
+            raise WorkflowServiceError(
+                "upload_unavailable", "structure upload is unavailable"
             )
-            if template_row is None:
-                session.add(
-                    WorkflowTemplate(
-                        template_key="mos2",
-                        version=validated["template_version"],
-                        definition_json=template_definition,
-                    )
-                )
-
-            dependencies = {
-                definition["key"]: definition["depends_on"]
-                for definition in template_definition["steps"]
-            }
-            for position, step_key in enumerate(FIXED_STEPS):
-                session.add(
-                    WorkflowStep(
-                        workflow=run,
-                        step_key=step_key,
-                        position=position,
-                        status="waiting",
-                        parameters_json={
-                            "depends_on": dependencies[step_key],
-                            "parameters": validated["parameters"].get(step_key, {}),
-                        },
-                    )
-                )
-
-            generated_rows = []
-            for record in materialized["files"]:
-                relative_parts = PurePosixPath(record["relative_path"]).parts
-                logical_path = "/".join(relative_parts[1:])
-                row = WorkflowFile(
-                    workflow=run,
-                    owner_id=owner_id,
-                    relative_path=record["relative_path"],
-                    size_bytes=record["size_bytes"],
-                    sha256=record["sha256"],
-                    source_kind="generated",
-                    metadata_json={
-                        "logical_path": logical_path,
-                        "step_key": record["step_key"],
-                    },
-                )
-                generated_rows.append(row)
-                session.add(row)
-
-            manifest_entries = [_manifest_entry(row) for row in generated_rows]
-            manifest_hash = _manifest_hash(manifest_entries)
-            run.input_sha256 = manifest_hash
-            run.metadata_json = {
-                "input_manifest": sorted(
-                    manifest_entries, key=lambda item: item["logical_path"]
-                ),
-                "normalized_payload": {
-                    key: value
-                    for key, value in validated.items()
-                    if key != "canonical_json"
-                },
-                "structure_summary": materialized["structure_summary"],
-            }
+        template_definition = load_template(validated["template_version"])
+        template_row = session.scalar(
+            select(WorkflowTemplate).where(
+                WorkflowTemplate.template_key == "mos2",
+                WorkflowTemplate.version == validated["template_version"],
+            )
+        )
+        if template_row is None:
             session.add(
-                WorkflowEvent(
+                WorkflowTemplate(
+                    template_key="mos2",
+                    version=validated["template_version"],
+                    definition_json=template_definition,
+                )
+            )
+
+        dependencies = {
+            definition["key"]: definition["depends_on"]
+            for definition in template_definition["steps"]
+        }
+        for position, step_key in enumerate(FIXED_STEPS):
+            session.add(
+                WorkflowStep(
                     workflow=run,
-                    sequence=1,
-                    event_type="draft_created",
-                    payload_json={
-                        "input_sha256": manifest_hash,
-                        "source_kind": validated["source_kind"],
-                        "template_version": validated["template_version"],
+                    step_key=step_key,
+                    position=position,
+                    status="waiting",
+                    parameters_json={
+                        "depends_on": dependencies[step_key],
+                        "parameters": validated["parameters"].get(step_key, {}),
                     },
                 )
             )
-            if upload_row is not None:
-                upload_metadata["consumed"] = True
-                upload_metadata["consumed_by_workflow_id"] = run.id
-                upload_row.workflow = run
-                upload_row.metadata_json = upload_metadata
 
-            session.add(run)
-            session.commit()
-        except Exception:
-            session.rollback()
-            if generated_directory is not None:
-                shutil.rmtree(generated_directory, ignore_errors=True)
-            raise
-        return _result(run)
+        generated_rows = []
+        for record in materialized["files"]:
+            relative_parts = PurePosixPath(record["relative_path"]).parts
+            logical_path = "/".join(relative_parts[1:])
+            row = WorkflowFile(
+                workflow=run,
+                owner_id=owner_id,
+                relative_path=record["relative_path"],
+                size_bytes=record["size_bytes"],
+                sha256=record["sha256"],
+                source_kind="generated",
+                metadata_json={
+                    "logical_path": logical_path,
+                    "step_key": record["step_key"],
+                },
+            )
+            generated_rows.append(row)
+            session.add(row)
+
+        manifest_entries = [_manifest_entry(row) for row in generated_rows]
+        manifest_hash = _manifest_hash(manifest_entries)
+        run.input_sha256 = manifest_hash
+        run.metadata_json = {
+            "input_manifest": sorted(
+                manifest_entries, key=lambda item: item["logical_path"]
+            ),
+            "normalized_payload": {
+                key: value
+                for key, value in validated.items()
+                if key != "canonical_json"
+            },
+            "structure_summary": materialized["structure_summary"],
+        }
+        session.add(
+            WorkflowEvent(
+                workflow=run,
+                sequence=1,
+                event_type="draft_created",
+                payload_json={
+                    "input_sha256": manifest_hash,
+                    "source_kind": validated["source_kind"],
+                    "template_version": validated["template_version"],
+                },
+            )
+        )
+
+        session.commit()
+    except Exception:
+        session.rollback()
+        if generated_directory is not None:
+            shutil.rmtree(generated_directory, ignore_errors=True)
+        raise
+    return _result(run)
 
 
 def _next_event_sequence(session: Session, workflow_id: str) -> int:
