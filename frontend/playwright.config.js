@@ -19,6 +19,9 @@ export default defineConfig({
   reporter: 'line',
   use: {
     baseURL,
+    launchOptions: {
+      args: ['--enable-unsafe-swiftshader'],
+    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

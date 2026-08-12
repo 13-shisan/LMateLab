@@ -12,7 +12,7 @@ test -d "$release"
 test "$(<"$release/commit.txt")" = "$commit"
 test "$(<"$release/release-kind.txt")" = preview
 test "$(<"$release/data-mode.txt")" = demo
-(cd "$release" && sha256sum -c manifest.sha256 && sha256sum -c manifest.txt)
+(cd "$release" && sha256sum -c manifest.sha256 >/dev/null && sha256sum -c manifest.txt >/dev/null)
 
 mkdir -p "$root/logs" "$root/runtime/previews/$commit"
 job_id=$(sbatch --parsable --export=ALL,LMATELAB_PREVIEW_COMMIT="$commit" \

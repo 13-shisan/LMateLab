@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 
 const sharedStyles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 const dashboardStyles = readFileSync(new URL('../src/pages/Dashboard.css', import.meta.url), 'utf8');
+const competitionComponentStyles = readFileSync(
+  new URL('../src/features/competition/components/competitionComponents.css', import.meta.url),
+  'utf8',
+);
 
 test('mobile authentication layout resets the desktop card offset', () => {
   assert.match(
@@ -26,5 +30,12 @@ test('dashboard columns align on desktop and keep natural height when stacked', 
   assert.match(
     dashboardStyles,
     /@media\s*\(max-width:\s*1120px\)[\s\S]*?\.lm-dashboard-grid\s*\{[^}]*align-items:\s*start;/,
+  );
+});
+
+test('competition table scroller contains its wide mobile table', () => {
+  assert.match(
+    competitionComponentStyles,
+    /\.competition-table-scroll\s*\{[^}]*position:\s*relative;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*overflow-x:\s*auto;/,
   );
 });

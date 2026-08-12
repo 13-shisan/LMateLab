@@ -111,6 +111,7 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
 
         service_submit = self.read_required("submit-preview-service.sh")
         self.assertIn("sha256sum -c manifest.sha256", service_submit)
+        self.assertIn("sha256sum -c manifest.txt >/dev/null", service_submit)
         self.assertIn("last-service-job-id", service_submit)
 
     def test_preview_runtime_verifier_has_running_and_stopped_gates(self):
