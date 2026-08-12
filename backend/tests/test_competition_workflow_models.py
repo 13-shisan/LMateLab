@@ -473,6 +473,74 @@ class CompetitionWorkflowModelTests(unittest.TestCase):
                 with self.assertRaises(StatementError):
                     session.flush()
 
+    def test_attempt_delete_removes_files_with_loaded_or_unloaded_collection(self):
+        for collection_loaded in (False, True):
+            with self.subTest(collection_loaded=collection_loaded):
+                attempt_id, file_id = self._create_attempt_file(
+                    suffix=f"attempt-{int(collection_loaded)}"
+                )
+                with Session(self.engine) as session:
+                    attempt = session.get(WorkflowAttempt, attempt_id)
+                    if collection_loaded:
+                        self.assertEqual([row.id for row in attempt.files], [file_id])
+                    session.delete(attempt)
+                    session.commit()
+
+                with Session(self.engine) as session:
+                    self.assertIsNone(session.get(WorkflowFile, file_id))
+
+    def test_loaded_run_and_step_delete_remove_attempt_files(self):
+        for delete_target in ("run", "step"):
+            with self.subTest(delete_target=delete_target):
+                attempt_id, file_id = self._create_attempt_file(suffix=delete_target)
+                with Session(self.engine) as session:
+                    attempt = session.get(WorkflowAttempt, attempt_id)
+                    step = attempt.step
+                    run = step.workflow
+                    self.assertEqual([row.id for row in run.steps], [step.id])
+                    self.assertEqual([row.id for row in step.attempts], [attempt.id])
+                    self.assertEqual([row.id for row in attempt.files], [file_id])
+                    session.delete(run if delete_target == "run" else step)
+                    session.commit()
+
+                with Session(self.engine) as session:
+                    self.assertIsNone(session.get(WorkflowFile, file_id))
+
+    def _create_attempt_file(self, suffix: str) -> tuple[str, str]:
+        with Session(self.engine) as session:
+            owner = User(
+                email=f"cascade-{suffix}@example.com",
+                password_hash="hash",
+                name=f"cascade-{suffix}",
+                alias="",
+                role="user",
+                created_at=datetime.now(timezone.utc),
+            )
+            run = WorkflowRun(
+                owner=owner,
+                template_version="mos2_v1",
+                material="MoS2",
+                source_kind="builtin",
+            )
+            step = WorkflowStep(
+                workflow=run,
+                step_key="relax",
+                position=0,
+            )
+            attempt = WorkflowAttempt(step=step, attempt_number=1)
+            file_row = WorkflowFile(
+                workflow=run,
+                attempt=attempt,
+                owner=owner,
+                relative_path=f"attempts/{suffix}/OUTCAR",
+                size_bytes=1,
+                sha256="c" * 64,
+                source_kind="generated",
+            )
+            session.add_all([run, step, attempt, file_row])
+            session.commit()
+            return attempt.id, file_row.id
+
 
 if __name__ == "__main__":
     unittest.main()

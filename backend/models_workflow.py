@@ -224,6 +224,7 @@ class WorkflowAttempt(Base):
     files = relationship(
         "WorkflowFile",
         back_populates="attempt",
+        cascade="all, delete-orphan",
         passive_deletes=True,
     )
 
