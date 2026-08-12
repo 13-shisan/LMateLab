@@ -569,8 +569,8 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 将功能分支推送 Gitea 并通过 PR 合并；107 只拉取固定合并提交，不直接检出未合并功能分支。
 - [x] 通过 107 Slurm 构建不晋升的 `previews/<commit>` 发布和独立 manifest。
 - [x] 启动独立 Slurm 预览 Job，使用独立数据库、runtime 目录和未占用端口；不得切换 `current` 或修改稳定数据库。
-- [ ] 从 Windows 浏览器完成 `1440x900`、`1024x768` 和 `390x844` 验收，包括 3D Canvas 非空检查。
-- [ ] 记录预览 Job、节点、提交、端口、manifest、健康检查和结束后端口消失证据。
+- [x] 从 Windows 浏览器完成 `1440x900`、`1024x768` 和 `390x844` 验收，包括 3D Canvas 非空检查。
+- [x] 记录预览 Job、节点、提交、端口、manifest、健康检查和结束后端口消失证据；详见 `docs/107cup/frontend-preview-evidence.md`。
 - [x] 对比预览前后的稳定 `current`、正式数据库和稳定服务 Job，证明未受影响。
 - [ ] 用户确认前端预览后，再为阶段 5 工作流模型与输入校验创建下一份实施计划。
 
@@ -686,3 +686,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 本地分支 `codex/107cup-frontend-preview-qa-fix` 已针对上述问题完成热修复预检：后端 `44/44`、前端 `104/104`、定向 ESLint、demo 构建和 `git diff --check` 通过；连接 Job `36612` 的只读预览 API 后，Playwright 在 `1440x900`、`1024x768`、`390x844` 三个视口通过 `3/3`，控制台问题和业务写请求均为 `0`，三个视口的 3D Canvas 彩色像素分别为 `2248`、`2403`、`3125`。本地证据位于 `D:\Documents\matflow项目\LMateLab-107Cup-evidence\frontend-preview-local-qa-fix-3`；这只是本地热修复预检，不能替代合并后 107 构建和真实浏览器复验。
 - 后快照 Job `36627` 在 `anode17` 以 `COMPLETED/0:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/25b0a8630e8ebf49abe7ec9fc85088f5045c9947/after-36627`。manifest 全量复核通过，且与 `before-36608` 逐项比较确认稳定 `current` 仍为发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69`、稳定 Job `36597` 仍运行于 `anode01:18731`、两套数据库哈希和完整性、稳定服务提交及健康响应均未改变；平台 `sacct` 仍不可用但其 stderr 和降级状态已留证。
 - 当前下一门禁是把热修复通过 PR 合并后，在 107 对新的固定 `main` 提交重新执行“前快照 -> Slurm 预览构建 -> 独立预览服务 -> 三视口 Playwright 与 Canvas 像素检查 -> 停服与端口消失 -> 后快照”。在该闭环通过前，三视口验收和预览运行证据清单保持未勾选，阶段 5 至 8 继续为 `PENDING`。
+
+### 2026-08-12
+
+- PR #14 已合并到受保护的 `main`，合并提交为 `7c9d34eccc9e4efb9a533e215d52a6eb96e2e5d8`。107 针对该固定提交完成前快照 Job `36637`、预览构建 Job `36638`、独立服务 Job `36641` 和后快照 Job `36653`；完整摘要见 `docs/107cup/frontend-preview-evidence.md`。
+- Job `36638` 在 `anode02` 以 `COMPLETED/0:0` 结束，后端 `44/44`、前端 `104/104`、Vite `1857` 模块构建通过，生成不晋升的预览发布；manifest SHA-256 为 `837e85822cb74a24134423356b6d385505e0fb0fe51d1e80cd85adbb5edd789d`。
+- Job `36641` 在 `anode01:20641` 以 `release_kind=preview`、`data_mode=demo` 启动。Windows Playwright 直接验收该 107 服务，三个固定视口通过 `3/3`，3D Canvas 彩色像素分别为 `2248`、`2403`、`3125`，控制台问题和业务写请求均为 `0`；验收后服务受控停止，Uvicorn 完整关闭且端口确认消失。
+- 前后快照比较确认稳定 `current` 仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，稳定 Job `36597` 仍运行于 `anode01:18731`，两套正式 SQLite 完整性为 `ok` 且哈希未变。平台 `sacct` 仍不可用，短作业 `scontrol` 记录已被集群清理，原始日志、前后快照和 SHA-256 证据均保留。
+- 至此“前端完整形态预览”的三视口和隔离运行证据门禁已完成，但全部业务数据仍为演示数据。阶段 5 至 8 保持 `PENDING`；只有用户明确确认预览后，才为阶段 5 工作流模型与输入校验生成下一份实施计划。
