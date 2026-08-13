@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Save, Send } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Save, Send, X } from 'lucide-react';
 
 import { canWriteCompetitionData } from '../../config/competitionAccess';
 import {
@@ -41,6 +41,23 @@ const STEP_PARAMETERS = {
   },
 };
 
+const DEFAULT_PARAMETERS = {
+  relax: { ENCUT: 520, EDIFF: 0.000001, EDIFFG: -0.01, NSW: 120, SIGMA: 0.05 },
+  scf: { ENCUT: 520, EDIFF: 0.0000001, NELM: 120, SIGMA: 0.05 },
+  band: { ENCUT: 520, EDIFF: 0.0000001, NELM: 120, SIGMA: 0.05 },
+  dos: { ENCUT: 520, EDIFF: 0.0000001, NELM: 120, SIGMA: 0.05, NEDOS: 3000 },
+};
+
+const PARAMETER_LIMITS = {
+  ENCUT: { min: 400, max: 700, step: 1 },
+  EDIFF: { min: 0.00000001, max: 0.0001, step: 0.00000001 },
+  EDIFFG: { min: -0.1, max: -0.001, step: 0.001 },
+  NSW: { min: 1, max: 300, step: 1 },
+  NELM: { min: 20, max: 300, step: 1 },
+  SIGMA: { min: 0.01, max: 0.2, step: 0.01 },
+  NEDOS: { min: 100, max: 10000, step: 100 },
+};
+
 function readStoredUser(storage) {
   try {
     const selectedStorage = storage === undefined ? globalThis.localStorage : storage;
@@ -50,65 +67,192 @@ function readStoredUser(storage) {
   }
 }
 
-async function executeCompetitionWrite({ mode, user, sourceKind, write }) {
-  if (mode !== 'live' || !canWriteCompetitionData(user) || sourceKind !== 'builtin') {
-    return false;
+function isBusinessWriteAllowed(mode, user) {
+  return mode === 'live' && canWriteCompetitionData(user);
+}
+
+async function runLockedWrite(lock, allowed, write) {
+  if (!allowed || lock.current) return null;
+  lock.current = true;
+  try {
+    return await write();
+  } finally {
+    lock.current = false;
   }
-  await write();
-  return true;
+}
+
+function buildDraftPayload({ sourceKind, structureUpload, parameters }) {
+  if (sourceKind === 'upload' && !structureUpload?.id) {
+    throw new Error('请先上传并通过服务端解析结构文件。');
+  }
+  const payload = {
+    template_version: 'mos2_v1',
+    source_kind: sourceKind,
+    steps: ['relax', 'scf', 'band', 'dos'],
+    parameters,
+  };
+  if (sourceKind === 'upload') payload.structure_upload_id = structureUpload.id;
+  return payload;
+}
+
+function invalidateServerState(current = {}, { clearUpload = false } = {}) {
+  return {
+    structureUpload: clearUpload ? null : current.structureUpload || null,
+    workflow: null,
+    confirmation: null,
+    error: '',
+  };
 }
 
 export default function CompetitionNewCalculation() {
   const { provider, mode } = useCompetitionData();
   const [sourceKind, setSourceKind] = useState('builtin');
   const [selectedStep, setSelectedStep] = useState('relax');
-  const [commandError, setCommandError] = useState('');
+  const [parameters, setParameters] = useState(() => structuredClone(DEFAULT_PARAMETERS));
+  const [originalFileName, setOriginalFileName] = useState('');
+  const [fileInputKey, setFileInputKey] = useState(0);
+  const [serverState, setServerState] = useState(() => invalidateServerState());
+  const [uploadPending, setUploadPending] = useState(false);
+  const [savePending, setSavePending] = useState(false);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const uploadLock = useRef(false);
+  const saveLock = useRef(false);
+  const confirmLock = useRef(false);
+  const inputVersion = useRef(0);
   const user = readStoredUser();
   const readOnly = mode === 'demo' || !canWriteCompetitionData(user);
+  const canWrite = isBusinessWriteAllowed(mode, user);
   const activeStep = WORKFLOW_STEPS.find(({ key }) => key === selectedStep) || WORKFLOW_STEPS[0];
-  const draft = {
-    id: 'preview-draft',
-    source_kind: sourceKind,
-    template_version: 'mos2-v1',
-    steps: WORKFLOW_STEPS.map((step) => step.key),
-  };
+  const uploadReady = sourceKind === 'builtin' || Boolean(serverState.structureUpload?.id);
+  const canSave = canWrite && uploadReady && !uploadPending && !serverState.workflow?.id;
+  const canConfirm = canWrite
+    && Boolean(serverState.workflow?.id)
+    && !serverState.confirmation;
+
+  function clearPersistedState({ clearUpload }) {
+    inputVersion.current += 1;
+    setServerState((current) => invalidateServerState(current, { clearUpload }));
+  }
 
   function handleSourceKindChange(nextSourceKind) {
+    if (nextSourceKind === sourceKind) return;
     setSourceKind(nextSourceKind);
-    setCommandError('');
+    setOriginalFileName('');
+    setFileInputKey((current) => current + 1);
+    clearPersistedState({ clearUpload: true });
+  }
+
+  async function handleStructureFileChange(event) {
+    if (!canWrite || uploadLock.current) return;
+    const file = event.target.files?.[0] || null;
+    const requestVersion = inputVersion.current + 1;
+    inputVersion.current = requestVersion;
+    setOriginalFileName(file?.name || '');
+    setServerState((current) => invalidateServerState(current, { clearUpload: true }));
+    if (!file) return;
+
+    setUploadPending(true);
+    try {
+      const result = await runLockedWrite(
+        uploadLock,
+        canWrite,
+        () => provider.uploadStructure(file),
+      );
+      if (result && inputVersion.current === requestVersion) {
+        setServerState((current) => ({ ...current, structureUpload: result, error: '' }));
+      }
+    } catch (error) {
+      if (inputVersion.current === requestVersion) {
+        setServerState((current) => ({
+          ...invalidateServerState(current, { clearUpload: true }),
+          error: error?.message || '结构上传失败',
+        }));
+      }
+    } finally {
+      setUploadPending(false);
+    }
+  }
+
+  function handleClearStructureFile() {
+    if (uploadPending) return;
+    setOriginalFileName('');
+    setFileInputKey((current) => current + 1);
+    clearPersistedState({ clearUpload: true });
+  }
+
+  function handleParameterChange(stepKey, parameterKey, rawValue) {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    setParameters((current) => ({
+      ...current,
+      [stepKey]: { ...current[stepKey], [parameterKey]: value },
+    }));
+    clearPersistedState({ clearUpload: false });
   }
 
   async function handleSaveDraft() {
-    setCommandError('');
+    if (!canSave || saveLock.current) return;
+    const requestVersion = inputVersion.current;
+    setServerState((current) => ({ ...current, error: '' }));
+    setSavePending(true);
     try {
-      const executed = await executeCompetitionWrite({
-        mode,
-        user,
+      const payload = buildDraftPayload({
         sourceKind,
-        write: () => provider.saveDraft(draft),
+        structureUpload: serverState.structureUpload,
+        parameters,
       });
-      if (!executed && sourceKind === 'upload') {
-        setCommandError('上传结构待选择且未解析，不可保存。');
+      const result = await runLockedWrite(saveLock, canSave, () => provider.saveDraft(payload));
+      if (result && inputVersion.current === requestVersion) {
+        setServerState((current) => ({
+          ...current,
+          workflow: result,
+          confirmation: null,
+          error: '',
+        }));
       }
     } catch (error) {
-      setCommandError(error?.message || '草稿保存失败');
+      if (inputVersion.current === requestVersion) {
+        setServerState((current) => ({
+          ...current,
+          workflow: null,
+          confirmation: null,
+          error: error?.message || '草稿保存失败',
+        }));
+      }
+    } finally {
+      setSavePending(false);
     }
   }
 
   async function handleSubmitWorkflow() {
-    setCommandError('');
+    if (!canConfirm || confirmLock.current) return;
+    const requestVersion = inputVersion.current;
+    setServerState((current) => ({ ...current, error: '' }));
+    setConfirmPending(true);
     try {
-      const executed = await executeCompetitionWrite({
-        mode,
-        user,
-        sourceKind,
-        write: () => provider.submitWorkflow(draft.id),
-      });
-      if (!executed && sourceKind === 'upload') {
-        setCommandError('上传结构待选择且未解析，不可提交。');
+      const result = await runLockedWrite(
+        confirmLock,
+        canConfirm,
+        () => provider.submitWorkflow(serverState.workflow.id),
+      );
+      if (result && inputVersion.current === requestVersion) {
+        setServerState((current) => ({
+          ...current,
+          workflow: result,
+          confirmation: result,
+          error: '',
+        }));
       }
     } catch (error) {
-      setCommandError(error?.message || '工作流提交失败');
+      if (inputVersion.current === requestVersion) {
+        setServerState((current) => ({
+          ...current,
+          confirmation: null,
+          error: error?.message || '工作流确认失败',
+        }));
+      }
+    } finally {
+      setConfirmPending(false);
     }
   }
 
@@ -128,7 +272,7 @@ export default function CompetitionNewCalculation() {
             <span>01</span>
             <h2 id="competition-source-title">来源与结构</h2>
           </div>
-          <p>演示参数 · 模板 mos2-v1 · 输入 SHA-256：提交前生成</p>
+          <p>模板 mos2_v1 · 输入 SHA-256：保存草稿后由服务端生成</p>
         </div>
 
         <div className="competition-source-segment" role="group" aria-label="结构来源">
@@ -136,6 +280,7 @@ export default function CompetitionNewCalculation() {
             className={sourceKind === 'builtin' ? 'is-active' : ''}
             type="button"
             aria-pressed={sourceKind === 'builtin'}
+            disabled={readOnly}
             onClick={() => handleSourceKindChange('builtin')}
           >
             内置 MoS2
@@ -144,6 +289,7 @@ export default function CompetitionNewCalculation() {
             className={sourceKind === 'upload' ? 'is-active' : ''}
             type="button"
             aria-pressed={sourceKind === 'upload'}
+            disabled={readOnly}
             onClick={() => handleSourceKindChange('upload')}
           >
             上传结构
@@ -158,14 +304,28 @@ export default function CompetitionNewCalculation() {
               <div className="competition-upload-placeholder">
                 <label htmlFor="competition-structure-file">结构文件</label>
                 <input
+                  key={fileInputKey}
                   id="competition-structure-file"
                   type="file"
                   accept=".vasp,.poscar,.cif"
-                  disabled
+                  disabled={readOnly || uploadPending}
+                  onChange={handleStructureFileChange}
                 />
-                <strong>未选择文件</strong>
+                <strong>{uploadPending ? '服务端解析中' : (originalFileName || '未选择文件')}</strong>
                 <span>POSCAR/CIF 文本，最大 1 MiB，最多 200 个原子</span>
-                <small>本预览仅展示受限上传占位，不解析或上传文件</small>
+                <small>结构内容仅由服务端解析；文件名仅用于审计显示</small>
+                {originalFileName && !uploadPending ? (
+                  <button
+                    className="competition-upload-clear"
+                    type="button"
+                    disabled={readOnly}
+                    onClick={handleClearStructureFile}
+                    title="清除结构文件"
+                  >
+                    <X size={15} aria-hidden="true" />
+                    清除
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -187,11 +347,37 @@ export default function CompetitionNewCalculation() {
             <aside className="competition-structure-summary" aria-label="上传结构状态">
               <h3>结构状态</h3>
               <dl>
-                <div><dt>文件</dt><dd>待选择</dd></div>
-                <div><dt>解析</dt><dd>未解析</dd></div>
-                <div><dt>提交</dt><dd>不可提交</dd></div>
+                <div><dt>文件</dt><dd>{originalFileName || '待选择'}</dd></div>
+                <div>
+                  <dt>解析</dt>
+                  <dd>
+                    {uploadPending
+                      ? '服务端解析中'
+                      : (serverState.structureUpload?.summary?.formula || '未解析')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>原子数</dt>
+                  <dd>{serverState.structureUpload?.summary?.atom_count ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt>格式</dt>
+                  <dd>{serverState.structureUpload?.source_format?.toUpperCase() || '—'}</dd>
+                </div>
+                <div>
+                  <dt>元素</dt>
+                  <dd>{serverState.structureUpload?.summary?.elements?.join(' / ') || '—'}</dd>
+                </div>
+                <div>
+                  <dt>提交</dt>
+                  <dd>{serverState.structureUpload?.id ? '可保存草稿' : '不可提交'}</dd>
+                </div>
               </dl>
-              <p>上传来源 · 未选择结构</p>
+              <p>
+                {serverState.structureUpload?.id
+                  ? `服务端上传 ID · ${serverState.structureUpload.id}`
+                  : '上传来源 · 等待服务端解析'}
+              </p>
             </aside>
           )}
         </div>
@@ -239,28 +425,41 @@ export default function CompetitionNewCalculation() {
             <span>03</span>
             <h2 id="competition-review-title">参数与资源审阅</h2>
           </div>
-          <p>只读审阅，不代表生产校验</p>
+          <p>参数在服务端按模板白名单和值域再次校验</p>
         </div>
 
         <div className="competition-review-grid">
           <div className="competition-parameter-review">
-            <h3>{activeStep.label} · 演示参数</h3>
-            <dl>
-              {Object.entries(STEP_PARAMETERS[activeStep.key]).map(([label, value]) => (
-                <div key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value}<small>演示参数</small></dd>
-                </div>
+            <h3>{activeStep.label} · 参数</h3>
+            <div className="competition-parameter-fields">
+              {Object.entries(parameters[activeStep.key]).map(([key, value]) => (
+                <label key={key}>
+                  <span>{key}</span>
+                  <input
+                    type="number"
+                    value={value}
+                    min={PARAMETER_LIMITS[key]?.min}
+                    max={PARAMETER_LIMITS[key]?.max}
+                    step={PARAMETER_LIMITS[key]?.step}
+                    disabled={readOnly}
+                    onChange={(event) => (
+                      handleParameterChange(activeStep.key, key, event.target.value)
+                    )}
+                  />
+                </label>
               ))}
-            </dl>
+            </div>
+            <p className="competition-parameter-note">
+              固定 k-point：{STEP_PARAMETERS[activeStep.key]['k-point']} · {STEP_PARAMETERS[activeStep.key].convergence}
+            </p>
           </div>
 
           <div className="competition-resource-review">
-            <h3>Slurm 资源 · 演示参数</h3>
+            <h3>Slurm 资源 · 计划参数</h3>
             <dl>
-              <div><dt>Partition</dt><dd>P107-RTX5090<small>演示参数</small></dd></div>
-              <div><dt>资源上限</dt><dd>最大 4 GPU / 16 CPU<small>演示参数</small></dd></div>
-              <div><dt>证据单位</dt><dd>每步独立一个 Job / attempt 证据记录<small>演示参数</small></dd></div>
+              <div><dt>Partition</dt><dd>P107-RTX5090<small>阶段 6 接入</small></dd></div>
+              <div><dt>资源上限</dt><dd>最大 4 GPU / 16 CPU<small>阶段 6 接入</small></dd></div>
+              <div><dt>证据单位</dt><dd>每步独立一个 Job / attempt 证据记录<small>阶段 6 接入</small></dd></div>
             </dl>
           </div>
         </div>
@@ -268,32 +467,42 @@ export default function CompetitionNewCalculation() {
 
       <footer className="competition-command-bar">
         <div>
-          <strong>预览草稿</strong>
-          <span>
-            {sourceKind === 'builtin'
-              ? 'preview-draft · mos2-v1 · 4 步'
-              : 'preview-draft · 上传结构待选择 · 未解析 · 不可提交'}
+          <strong>{serverState.confirmation ? '工作流已确认' : '工作流草稿'}</strong>
+          <span aria-live="polite">
+            {serverState.confirmation
+              ? `已校验，等待 Slurm 适配器 · ${serverState.confirmation.id}`
+              : serverState.workflow
+                ? `${serverState.workflow.id} · ${serverState.workflow.status} · SHA-256 ${serverState.workflow.input_sha256}`
+                : uploadPending
+                  ? '正在上传并等待服务端解析结构'
+                  : serverState.structureUpload
+                    ? `结构已由服务端解析 · 上传 ID ${serverState.structureUpload.id}`
+                  : savePending
+                    ? '正在保存草稿'
+                    : confirmPending
+                      ? '正在执行提交前校验'
+                      : `未保存 · mos2_v1 · ${sourceKind === 'builtin' ? '内置 MoS2' : '上传结构'}`}
           </span>
-          {commandError ? <p role="alert">{commandError}</p> : null}
+          {serverState.error ? <p role="alert">{serverState.error}</p> : null}
         </div>
         <div className="competition-command-actions">
           <button
             className="competition-command-button is-secondary"
             type="button"
-            disabled={readOnly}
+            disabled={!canSave || savePending}
             onClick={handleSaveDraft}
           >
             <Save size={16} aria-hidden="true" />
-            保存草稿
+            {savePending ? '保存中' : '保存草稿'}
           </button>
           <button
             className="competition-command-button is-primary"
             type="button"
-            disabled={readOnly}
+            disabled={!canConfirm || confirmPending}
             onClick={handleSubmitWorkflow}
           >
             <Send size={16} aria-hidden="true" />
-            提交四步工作流
+            {confirmPending ? '校验中' : '确认并校验'}
           </button>
         </div>
       </footer>

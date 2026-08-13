@@ -870,15 +870,14 @@ test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', 
     'band',
     'dos',
     'POSCAR/CIF 文本，最大 1 MiB，最多 200 个原子',
-    'mos2-v1',
-    '提交前生成',
+    'mos2_v1',
     'ENCUT',
     'k-point',
     'convergence',
     'P107-RTX5090',
     '最大 4 GPU / 16 CPU',
     '每步独立一个 Job / attempt 证据记录',
-    '演示参数',
+    '参数',
   ]) {
     assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
@@ -896,27 +895,28 @@ test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', 
   );
   assert.match(source, /function\s+readStoredUser\(storage\)/);
   assert.match(source, /globalThis\.localStorage/);
-  assert.match(source, /id:\s*['"]preview-draft['"]/);
   assert.match(source, /source_kind:\s*sourceKind/);
-  assert.match(source, /template_version:\s*['"]mos2-v1['"]/);
-  assert.match(source, /steps:\s*WORKFLOW_STEPS\.map\(\(step\)\s*=>\s*step\.key\)/);
-  assert.match(source, /演示参数 · 模板 mos2-v1 · 输入 SHA-256：提交前生成/);
+  assert.match(source, /template_version:\s*['"]mos2_v1['"]/);
+  assert.match(source, /steps:\s*\[['"]relax['"],\s*['"]scf['"],\s*['"]band['"],\s*['"]dos['"]\]/);
+  assert.match(source, /模板 mos2_v1 · 输入 SHA-256：保存草稿后由服务端生成/);
   assert.match(source, /<VaspStructureViewer\s+structure=\{DEMO_STRUCTURE\}\s*\/>/);
-  assert.match(source, /<input[^>]*type=['"]file['"][^>]*disabled[^>]*>/s);
-  assert.doesNotMatch(source, /<input[^>]*onChange=/s);
-  assert.doesNotMatch(source, /uploadStructure|FileReader|FormData/);
-  assert.equal(source.match(/provider\.saveDraft\(draft\)/g)?.length, 1);
-  assert.equal(source.match(/provider\.submitWorkflow\(draft\.id\)/g)?.length, 1);
-  assert.ok((source.match(/disabled=\{readOnly\}/g) || []).length >= 2);
-  assert.match(source, /async\s+function\s+handleSaveDraft[\s\S]*?try\s*{[\s\S]*?await\s+executeCompetitionWrite\([\s\S]*?catch/s);
-  assert.match(source, /async\s+function\s+handleSubmitWorkflow[\s\S]*?try\s*{[\s\S]*?await\s+executeCompetitionWrite\([\s\S]*?catch/s);
+  assert.match(source, /<label\s+htmlFor=['"]competition-structure-file['"]/);
+  assert.match(source, /<input[^>]*id=['"]competition-structure-file['"][^>]*type=['"]file['"][^>]*onChange=/s);
+  assert.doesNotMatch(source, /FileReader|file\.type|FormData/);
+  assert.equal(source.match(/provider\.uploadStructure\(/g)?.length, 1);
+  assert.equal(source.match(/provider\.saveDraft\(/g)?.length, 1);
+  assert.equal(source.match(/provider\.submitWorkflow\(/g)?.length, 1);
+  assert.match(source, /aria-live=['"]polite['"]/);
+  assert.match(source, /结构已由服务端解析 · 上传 ID/);
+  assert.match(source, /已校验，等待 Slurm 适配器/);
+  assert.doesNotMatch(source, /已排队|运行中|Job ID/);
   assert.doesNotMatch(source, /alert\s*\([^)]*成功|toast\s*\([^)]*成功/i);
   assert.doesNotMatch(source, /\b(?:add|delete|drag|reorder)(?:Step)?\b|添加|删除|拖拽|重排/i);
   assert.doesNotMatch(source, /Agent|Machine Learning|\bML\b|Quantum ESPRESSO|\bQE\b/);
   assert.doesNotMatch(source, /card/i);
 });
 
-test('new calculation upload source hides builtin structure and draft claims', () => {
+test('new calculation upload source shows only server-derived structure summary', () => {
   const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
   const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
   const sourceConditionals = findNodes(ast, (node) => (
@@ -935,50 +935,110 @@ test('new calculation upload source hides builtin structure and draft claims', (
   for (const token of ['MoS2', 'DEMO_STRUCTURE.symbols.length', '3.158', '20.000']) {
     assert.match(builtinSummary, new RegExp(token.replaceAll('.', '\\.')));
   }
-  for (const token of ['待选择', '未解析', '不可提交']) assert.match(uploadSummary, new RegExp(token));
+  for (const token of ['structureUpload', 'summary', 'originalFileName']) {
+    assert.match(uploadSummary, new RegExp(token));
+  }
   assert.doesNotMatch(uploadSummary, /MoS2|DEMO_STRUCTURE|3\.158|20\.000|内置结构/);
-
-  const draftConditional = sourceConditionals.find((node) => (
-    branchSource(node, 'consequent').includes('preview-draft')
-    && branchSource(node, 'alternate').includes('preview-draft')
-  ));
-  assert.ok(draftConditional, 'draft summary must branch on builtin versus upload');
-  assert.match(branchSource(draftConditional, 'consequent'), /mos2-v1.*4 步/s);
-  assert.match(branchSource(draftConditional, 'alternate'), /上传结构待选择.*未解析.*不可提交/s);
-  assert.doesNotMatch(branchSource(draftConditional, 'alternate'), /mos2-v1/);
 });
 
-test('new calculation executes writes only for live builtin operators', async () => {
+test('new calculation live upload and writes are single-flight and fail closed', async () => {
   const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
-  const executeCompetitionWrite = loadFunction(source, 'executeCompetitionWrite', {
+  const { isBusinessWriteAllowed, runLockedWrite } = loadFunctions(source, [
+    'isBusinessWriteAllowed',
+    'runLockedWrite',
+  ], {
     canWriteCompetitionData,
   });
+
+  assert.equal(isBusinessWriteAllowed('live', { role: 'operator' }), true);
+  assert.equal(isBusinessWriteAllowed('demo', { role: 'operator' }), false);
+  assert.equal(isBusinessWriteAllowed('live', { role: 'viewer' }), false);
+
+  let release;
   let writeCount = 0;
-  const write = async () => {
+  const pending = new Promise((resolve) => { release = resolve; });
+  const lock = { current: false };
+  const first = runLockedWrite(lock, true, async () => {
     writeCount += 1;
+    await pending;
+    return { id: 'server-id' };
+  });
+  const duplicate = await runLockedWrite(lock, true, async () => {
+    writeCount += 1;
+  });
+  assert.equal(duplicate, null);
+  assert.equal(writeCount, 1);
+  release();
+  assert.deepEqual(await first, { id: 'server-id' });
+  assert.equal(lock.current, false);
+  assert.equal(await runLockedWrite(lock, false, async () => { writeCount += 1; }), null);
+  assert.equal(writeCount, 1);
+});
+
+test('new calculation draft payload uses the fixed template and server upload id', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const buildDraftPayload = loadFunction(source, 'buildDraftPayload');
+  const parameters = { relax: { ENCUT: 520 }, dos: { NEDOS: 3000 } };
+
+  assert.deepEqual(buildDraftPayload({ sourceKind: 'builtin', parameters }), {
+    template_version: 'mos2_v1',
+    source_kind: 'builtin',
+    steps: ['relax', 'scf', 'band', 'dos'],
+    parameters,
+  });
+  assert.deepEqual(buildDraftPayload({
+    sourceKind: 'upload',
+    structureUpload: { id: 'upload-from-server', summary: { formula: 'MoS2' } },
+    parameters,
+  }), {
+    template_version: 'mos2_v1',
+    source_kind: 'upload',
+    steps: ['relax', 'scf', 'band', 'dos'],
+    parameters,
+    structure_upload_id: 'upload-from-server',
+  });
+  assert.throws(
+    () => buildDraftPayload({ sourceKind: 'upload', structureUpload: null, parameters }),
+    /先上传并通过服务端解析/,
+  );
+});
+
+test('new calculation source file and parameter changes invalidate stale server state', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const invalidateServerState = loadFunction(source, 'invalidateServerState');
+  const prior = {
+    structureUpload: { id: 'upload-old' },
+    workflow: { id: 'workflow-old', input_sha256: 'old-sha' },
+    confirmation: { id: 'workflow-old', status: 'validated' },
+    error: 'old error',
   };
 
-  assert.equal(await executeCompetitionWrite({
-    mode: 'demo', user: { role: 'operator' }, sourceKind: 'builtin', write,
-  }), false);
-  assert.equal(await executeCompetitionWrite({
-    mode: 'standard', user: { role: 'operator' }, sourceKind: 'builtin', write,
-  }), false);
-  assert.equal(await executeCompetitionWrite({
-    mode: 'live', user: { role: 'viewer' }, sourceKind: 'builtin', write,
-  }), false);
-  assert.equal(await executeCompetitionWrite({
-    mode: 'live', user: { role: 'operator' }, sourceKind: 'upload', write,
-  }), false);
-  assert.equal(writeCount, 0);
-  assert.equal(await executeCompetitionWrite({
-    mode: 'live', user: { role: 'operator' }, sourceKind: 'builtin', write,
-  }), true);
-  assert.equal(writeCount, 1);
+  assert.deepEqual(invalidateServerState(prior, { clearUpload: true }), {
+    structureUpload: null,
+    workflow: null,
+    confirmation: null,
+    error: '',
+  });
+  assert.deepEqual(invalidateServerState(prior, { clearUpload: false }), {
+    structureUpload: prior.structureUpload,
+    workflow: null,
+    confirmation: null,
+    error: '',
+  });
+  assert.match(source, /handleSourceKindChange[\s\S]*?clearUpload:\s*true/);
+  assert.match(source, /handleStructureFileChange[\s\S]*?clearUpload:\s*true/);
+  assert.match(source, /handleParameterChange[\s\S]*?clearUpload:\s*false/);
+});
 
-  assert.equal(source.match(/await\s+executeCompetitionWrite\(\{/g)?.length, 2);
-  assert.match(source, /write:\s*\(\)\s*=>\s*provider\.saveDraft\(draft\)/);
-  assert.match(source, /write:\s*\(\)\s*=>\s*provider\.submitWorkflow\(draft\.id\)/);
+test('new calculation confirms only the latest saved workflow id', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+
+  assert.match(source, /const\s+canSave\s*=/);
+  assert.match(source, /const\s+canConfirm\s*=\s*canWrite[\s\S]*?Boolean\(serverState\.workflow\?\.id\)[\s\S]*?!serverState\.confirmation;/);
+  assert.match(source, /provider\.submitWorkflow\(serverState\.workflow\.id\)/);
+  assert.match(source, /setServerState\(\(current\)\s*=>\s*\(\{[\s\S]*?workflow:\s*result/s);
+  assert.match(source, /disabled=\{!canSave\s*\|\|\s*savePending\}/);
+  assert.match(source, /disabled=\{!canConfirm\s*\|\|\s*confirmPending\}/);
 });
 
 test('new calculation stored user parsing fails closed and accepts valid JSON', () => {
@@ -999,7 +1059,7 @@ test('new calculation source selection clears stale command failures', () => {
 
   assert.match(
     source,
-    /function\s+handleSourceKindChange\(nextSourceKind\)\s*{[^}]*setSourceKind\(nextSourceKind\);[^}]*setCommandError\(['"]['"]\);[^}]*}/s,
+    /function\s+handleSourceKindChange\(nextSourceKind\)[\s\S]*?setSourceKind\(nextSourceKind\);[\s\S]*?invalidateServerState/s,
   );
   assert.match(source, /onClick=\{\(\)\s*=>\s*handleSourceKindChange\(['"]builtin['"]\)\}/);
   assert.match(source, /onClick=\{\(\)\s*=>\s*handleSourceKindChange\(['"]upload['"]\)\}/);
@@ -1038,6 +1098,7 @@ test('new calculation styles keep stable responsive geometry without nested card
   assert.match(source, /\.competition-workflow-graph\s*{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*gap:\s*12px/s);
   assert.match(source, /\.competition-workflow-step\.is-relax\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(source, /\.competition-workflow-step\.is-scf\s*{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  assert.match(source, /@media\s*\(max-width:\s*520px\)[\s\S]*?\.competition-parameter-fields\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
   assert.match(
     source,
     /\.competition-workflow-step\.is-scf::after\s*{[^}]*width:\s*2px[^}]*height:\s*6px[^}]*right:\s*50%[^}]*bottom:\s*-6px[^}]*content:\s*''[^}]*background:\s*#98a2b3/s,
