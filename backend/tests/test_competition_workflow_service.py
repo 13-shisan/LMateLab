@@ -28,7 +28,7 @@ from services.competition_workflows import (
     WorkflowServiceError,
     _claim_upload,
     confirm_workflow,
-    create_draft,
+    create_draft as _create_draft,
     stage_structure,
 )
 
@@ -45,6 +45,13 @@ Direct
 0.333333 0.666667 0.578000
 0.333333 0.666667 0.422000
 """
+
+TEST_RELEASE_COMMIT = "a" * 40
+
+
+def create_draft(*args, **kwargs):
+    kwargs.setdefault("release_commit", TEST_RELEASE_COMMIT)
+    return _create_draft(*args, **kwargs)
 
 
 def valid_payload(**overrides):
@@ -166,6 +173,7 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
                     self.root,
                     owner_id=self.owner_id,
                     payload=valid_payload(),
+                    release_commit=TEST_RELEASE_COMMIT,
                 )
                 hashes.append(result.input_sha256)
                 run_ids.append(result.id)
@@ -175,6 +183,7 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
             run = session.get(WorkflowRun, run_ids[0])
             self.assertEqual(run.status, "draft")
             self.assertEqual(run.input_sha256, hashes[0])
+            self.assertEqual(run.release_commit, TEST_RELEASE_COMMIT)
             steps = session.scalars(
                 select(WorkflowStep)
                 .where(WorkflowStep.workflow_id == run.id)
@@ -193,11 +202,32 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
                 .order_by(WorkflowEvent.sequence)
             ).all()
             self.assertEqual([(event.sequence, event.event_type) for event in events], [(1, "draft_created")])
+            self.assertEqual(
+                json.loads(events[0].payload_json)["release_commit"],
+                TEST_RELEASE_COMMIT,
+            )
             self.assertEqual(session.scalar(select(func.count()).select_from(WorkflowAttempt)), 0)
             self.assertEqual(
                 session.scalar(select(func.count()).select_from(WorkflowTemplate)),
                 1,
             )
+
+    def test_create_draft_rejects_invalid_release_commit_before_writing(self):
+        for invalid_commit in ("", "unknown", "A" * 40, "a" * 39, "a" * 41):
+            with self.subTest(release_commit=invalid_commit):
+                with Session(self.engine) as session:
+                    with self.assertRaises(WorkflowServiceError) as rejected:
+                        _create_draft(
+                            session,
+                            self.root,
+                            owner_id=self.owner_id,
+                            payload=valid_payload(),
+                            release_commit=invalid_commit,
+                        )
+                    self.assertEqual(rejected.exception.code, "invalid_release_commit")
+        with Session(self.engine) as session:
+            self.assertEqual(session.scalar(select(func.count()).select_from(WorkflowRun)), 0)
+        self.assertFalse(self.root.exists())
 
     def test_uploaded_structure_is_owner_only_and_consumed_once(self):
         with Session(self.engine) as session:

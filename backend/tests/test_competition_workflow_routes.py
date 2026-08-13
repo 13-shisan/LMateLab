@@ -30,6 +30,8 @@ Direct
 0.333333 0.666667 0.422000
 """
 
+TEST_RELEASE_COMMIT = "b" * 40
+
 
 def valid_payload(**overrides):
     payload = {
@@ -49,7 +51,11 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         temp_path = Path(self.temp_dir.name)
         self.workflow_root = temp_path / "workflow-root"
         environment = mock.patch.dict(
-            "os.environ", {"LMATELAB_WORKFLOW_ROOT": str(self.workflow_root)}
+            "os.environ",
+            {
+                "LMATELAB_WORKFLOW_ROOT": str(self.workflow_root),
+                "LMATELAB_GIT_COMMIT": TEST_RELEASE_COMMIT,
+            },
         )
         environment.start()
         self.addCleanup(environment.stop)
@@ -247,6 +253,7 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(200, response.status_code, response.text)
         body = response.json()
         self.assertEqual("live", body["data_kind"])
+        self.assertEqual(TEST_RELEASE_COMMIT, body["release_commit"])
         self.assertEqual(["relax", "scf", "band", "dos"], [step["key"] for step in body["steps"]])
         for step in body["steps"]:
             self.assertIsNone(step["job_id"])

@@ -141,7 +141,7 @@
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
-| 5. 工作流模型与输入校验 | PARTIAL | 功能 PR #16 已合并到 `main` 提交 `619b911`；六张工作流表、`mos2_v1`、结构上传、草稿、确认校验和 live 前端已进入主线，确认只进入 `validated`；尚未在 107 运行验收 | 先合并专用 live-preview 部署补丁，再在 107 完成数据库副本迁移、真实 API/浏览器验收和前后快照 |
+| 5. 工作流模型与输入校验 | PARTIAL | 功能 PR #16、live-preview PR #17 和依赖修复 PR #18 已进入主线；107 隔离库迁移、Operator/Viewer API 与输入拒绝门禁已通过，但浏览器验收发现两个真实 `validated` 工作流的 `release_commit` 为 `null` | 合并发布提交追溯修复后，对新的固定 `main` 重新执行预览构建、API、三视口浏览器和前后快照 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
@@ -714,3 +714,6 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - PR #17 已将上述隔离链路合并为 `644cb38282de24710e9eebda6754e07b8dac190b`。107 只读检出已固定到该提交；前快照 Job `37390` 在 `anode16` 以 `COMPLETED/0:0` 结束，两套正式 SQLite 的 `PRAGMA integrity_check` 均为 `ok`，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/644cb38282de24710e9eebda6754e07b8dac190b/before-37390`，manifest 全量校验通过。
 - 首次 workflow preview 构建 Job `37391` 在 `anode01` 以 `FAILED/1:0` 结束。失败发生于后端测试收集：`requirements-107cup.txt` 未包含 Starlette `TestClient` 必需的 `httpx`，因而抛出 `ModuleNotFoundError`；尚未运行阶段 5 后端测试、前端测试或构建，也未创建正式 preview 发布、数据库副本、端口或服务。失败日志和 `.644cb38282de24710e9eebda6754e07b8dac190b.37391` 暂存目录保留，稳定 `current`、正式数据库和 Job `36597` 未被该构建修改。
 - 当前修复门禁仅为在 107 专用依赖中固定兼容的 `httpx` 并增加依赖合同测试。该修复经独立 PR 合并前不得清理失败现场、重提构建或启动 workflow preview；合并后需对新的固定 `main` 重新执行前快照和完整 Task 7 闭环，阶段 5 继续保持 `PARTIAL`。
+- PR #18 已合并为 `main` 提交 `a90745baef7c7e8bff27c9be85a6bc79e0e8885f`。前快照 Job `37394`、workflow preview 构建 Job `37395` 和隔离服务 Job `37397` 均运行于 107 Slurm 计算节点；构建通过后端 `124/124`、前端 `111/111` 和 live Vite 构建，API 验收确认 Operator/Viewer 角色、Viewer 写拒绝、四类恶意输入拒绝、两条 `validated` 工作流、六张表和 SQLite 完整性，且没有 attempt 或 Slurm Job ID。稳定 `current`、正式数据库和 Job `36597` 未被修改。
+- 三视口浏览器验收没有通过：Desktop 在第一个真实工作流详情发现 `release_commit` 为空；随后直接读取两个 live API 对象，均确认 `data_kind=live`、`status=validated`、`template_version=mos2_v1`、四步为 `waiting` 且 Job ID 为空，但 `release_commit=null`。该结果违反工作流可追溯到固定发布提交的阶段 5 门禁，不能用构建或 API 其他成功项替代。Job `37397` 和本次失败截图/日志暂时保留用于诊断，不记为浏览器通过。
+- 发布提交追溯修复在分支 `codex/107cup-stage5-release-provenance` 按 TDD 完成本地实现：RED 证明服务不接受提交参数、详情返回 `null` 且运行时无严格 SHA 读取；聚焦 GREEN `4/4` 证明合法 40 位小写 SHA 可持久化，非法值在文件生成前失败，详情 API 原样返回固定提交。完整本地门禁通过后端 `126/126`（另有 1 个 Windows 符号链接权限预期 skip）、前端 `111/111`、live Vite 构建 `1857` 个模块、定向 ESLint、19 个 Bash/Slurm 文件语法和 `git diff --check`；保留既有 Browserslist、3Dmol `eval` 和大 chunk 警告。上述仍仅为 Windows 本地事实；合并、107 新预览、API、三视口浏览器、停服和后快照全部重跑前，阶段 5 继续保持 `PARTIAL`，阶段 6 至 8 保持 `PENDING`。

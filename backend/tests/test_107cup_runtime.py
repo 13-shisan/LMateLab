@@ -137,6 +137,15 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             default,
         )
 
+    def test_release_commit_requires_full_lowercase_git_sha(self):
+        runtime = self.require_runtime()
+
+        self.assertEqual("a" * 40, runtime.release_commit({"LMATELAB_GIT_COMMIT": "a" * 40}))
+        for values in ({}, {"LMATELAB_GIT_COMMIT": "unknown"}, {"LMATELAB_GIT_COMMIT": "A" * 40}):
+            with self.subTest(values=values):
+                with self.assertRaises(ValueError):
+                    runtime.release_commit(values)
+
     def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):
         entrypoint = BACKEND_ROOT / "main_107cup.py"
         self.assertTrue(entrypoint.is_file(), str(entrypoint))

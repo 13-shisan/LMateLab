@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Mapping
 
@@ -30,6 +31,14 @@ def workflow_root(environ: Mapping[str, str] | None = None) -> Path:
             "/home/scc/pb23030683/lmatelab-107cup/data/workflows",
         )
     )
+
+
+def release_commit(environ: Mapping[str, str] | None = None) -> str:
+    values = os.environ if environ is None else environ
+    commit = values.get("LMATELAB_GIT_COMMIT", "")
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise ValueError("LMATELAB_GIT_COMMIT must be a full lowercase Git SHA")
+    return commit
 
 
 def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, str]:
