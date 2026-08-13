@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, event, func, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from database import Base
@@ -22,6 +23,7 @@ from models_workflow import (
 )
 from schemas_workflow import DraftCreateRequest
 from services.competition_inputs import InputValidationError
+from services import competition_workflows as workflow_service
 from services.competition_workflows import (
     WorkflowServiceError,
     _claim_upload,
@@ -557,6 +559,175 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
                 .order_by(WorkflowEvent.sequence)
             ).all()
             self.assertEqual(event_types, ["draft_created", "workflow_validated"])
+
+    def test_confirmation_revalidates_files_after_discarding_a_stale_read_transaction(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+            file_row = session.scalar(
+                select(WorkflowFile)
+                .where(WorkflowFile.workflow_id == draft.id)
+                .where(WorkflowFile.source_kind == "generated")
+            )
+            input_path = self.root / file_row.relative_path
+
+        with Session(self.engine) as session:
+            self.assertEqual(session.get(WorkflowRun, draft.id).status, "draft")
+            original_rollback = session.rollback
+            rollback_count = 0
+
+            def rollback_and_tamper():
+                nonlocal rollback_count
+                original_rollback()
+                rollback_count += 1
+                if rollback_count == 1:
+                    input_path.write_bytes(input_path.read_bytes() + b"tamper")
+
+            with mock.patch.object(session, "rollback", side_effect=rollback_and_tamper):
+                with self.assertRaises(WorkflowServiceError) as failed:
+                    confirm_workflow(
+                        session,
+                        self.root,
+                        owner_id=self.owner_id,
+                        workflow_id=draft.id,
+                    )
+
+            self.assertEqual(failed.exception.code, "validation_failed")
+            self.assertEqual(rollback_count, 1)
+
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, draft.id)
+            self.assertEqual(run.status, "validation_failed")
+            self.assertEqual(
+                session.scalars(
+                    select(WorkflowEvent.event_type)
+                    .where(WorkflowEvent.workflow_id == draft.id)
+                    .order_by(WorkflowEvent.sequence)
+                ).all(),
+                ["draft_created", "validation_failed"],
+            )
+
+    def test_confirmation_claims_before_validation_without_releasing_the_transaction(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+
+        with Session(self.engine) as session:
+            self.assertEqual(session.get(WorkflowRun, draft.id).status, "draft")
+            original_validate = workflow_service._validate_workflow
+            observed = []
+
+            def assert_claimed(active_session, root, run):
+                observed.append((run.status, active_session.in_transaction()))
+                self.assertEqual(run.status, "validating")
+                self.assertTrue(active_session.in_transaction())
+                original_validate(active_session, root, run)
+
+            with mock.patch.object(session, "rollback", wraps=session.rollback) as rollback:
+                with mock.patch.object(
+                    workflow_service,
+                    "_validate_workflow",
+                    side_effect=assert_claimed,
+                ):
+                    result = confirm_workflow(
+                        session,
+                        self.root,
+                        owner_id=self.owner_id,
+                        workflow_id=draft.id,
+                    )
+
+            self.assertEqual(result.status, "validated")
+            self.assertEqual(observed, [("validating", True)])
+            self.assertEqual(rollback.call_count, 1)
+
+    def test_confirmation_write_lock_covers_step_and_template_validation(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+
+        original_validate = workflow_service._validate_workflow
+
+        def assert_competing_writes_are_locked(active_session, root, run):
+            statements = (
+                update(WorkflowStep)
+                .where(WorkflowStep.workflow_id == run.id)
+                .values(status="contender"),
+                update(WorkflowTemplate)
+                .where(
+                    WorkflowTemplate.template_key == "mos2",
+                    WorkflowTemplate.version == run.template_version,
+                )
+                .values(definition_json={"tampered": True}),
+            )
+            for statement in statements:
+                with self.engine.connect() as connection:
+                    connection.exec_driver_sql("PRAGMA busy_timeout=0")
+                    with self.assertRaises(OperationalError):
+                        connection.execute(statement)
+                    connection.rollback()
+            original_validate(active_session, root, run)
+
+        with Session(self.engine) as session:
+            with mock.patch.object(
+                workflow_service,
+                "_validate_workflow",
+                side_effect=assert_competing_writes_are_locked,
+            ):
+                result = confirm_workflow(
+                    session,
+                    self.root,
+                    owner_id=self.owner_id,
+                    workflow_id=draft.id,
+                )
+
+        self.assertEqual(result.status, "validated")
+
+    def test_internal_confirmation_error_rolls_back_claim_for_retry(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+
+        with Session(self.engine) as session:
+            with mock.patch.object(
+                workflow_service,
+                "_validate_workflow",
+                side_effect=RuntimeError("internal failure"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "internal failure"):
+                    confirm_workflow(
+                        session,
+                        self.root,
+                        owner_id=self.owner_id,
+                        workflow_id=draft.id,
+                    )
+
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, draft.id)
+            self.assertEqual(run.status, "draft")
+            self.assertEqual(
+                session.scalars(
+                    select(WorkflowEvent.event_type)
+                    .where(WorkflowEvent.workflow_id == draft.id)
+                    .order_by(WorkflowEvent.sequence)
+                ).all(),
+                ["draft_created"],
+            )
 
     def test_confirmation_records_failure_for_tampered_or_missing_input(self):
         for failure_kind in ("tampered", "missing"):

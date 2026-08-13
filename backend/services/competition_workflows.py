@@ -437,6 +437,23 @@ def _transition_workflow_status(
     return result.rowcount == 1
 
 
+def _claim_workflow_validation(
+    session: Session,
+    *,
+    owner_id: int,
+    workflow_id: str,
+    input_sha256: str,
+) -> bool:
+    return _transition_workflow_status(
+        session,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
+        expected_status="draft",
+        target_status="validating",
+        input_sha256=input_sha256,
+    )
+
+
 def _reload_owned_workflow(
     session: Session,
     *,
@@ -542,11 +559,11 @@ def confirm_workflow(
     owner_id: int,
     workflow_id: str,
 ) -> WorkflowMutationResult:
-    run = session.scalar(
-        select(WorkflowRun).where(
-            WorkflowRun.id == workflow_id,
-            WorkflowRun.owner_id == owner_id,
-        )
+    session.rollback()
+    run = _reload_owned_workflow(
+        session,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
     if run is None:
         raise WorkflowServiceError("workflow_not_found", "workflow was not found")
@@ -556,33 +573,13 @@ def confirm_workflow(
         raise WorkflowServiceError("workflow_not_confirmable", "workflow cannot be confirmed")
 
     input_sha256 = run.input_sha256 or ""
-    try:
-        _validate_workflow(session, _root_path(workflow_root), run)
-    except Exception as exc:
-        reason_code = getattr(exc, "code", "invalid_workflow")
-        session.rollback()
-        claimed_failure = _transition_workflow_status(
-            session,
-            owner_id=owner_id,
-            workflow_id=workflow_id,
-            expected_status="draft",
-            target_status="validation_failed",
-            input_sha256=input_sha256,
-        )
-        if claimed_failure:
-            session.add(
-                WorkflowEvent(
-                    workflow_id=workflow_id,
-                    sequence=_next_event_sequence(session, workflow_id),
-                    event_type="validation_failed",
-                    payload_json={"reason_code": reason_code},
-                )
-            )
-            session.commit()
-            raise WorkflowServiceError(
-                "validation_failed", "workflow validation failed"
-            ) from exc
-
+    claimed = _claim_workflow_validation(
+        session,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
+        input_sha256=input_sha256,
+    )
+    if not claimed:
         session.rollback()
         current = _reload_owned_workflow(
             session,
@@ -596,21 +593,63 @@ def confirm_workflow(
         if current.status == "validation_failed":
             raise WorkflowServiceError(
                 "validation_failed", "workflow validation failed"
-            ) from exc
+            )
         raise WorkflowServiceError(
             "workflow_not_confirmable", "workflow cannot be confirmed"
-        ) from exc
+        )
 
-    session.rollback()
-    claimed_success = _transition_workflow_status(
-        session,
-        owner_id=owner_id,
-        workflow_id=workflow_id,
-        expected_status="draft",
-        target_status="validated",
-        input_sha256=input_sha256,
-    )
-    if claimed_success:
+    try:
+        run = _reload_owned_workflow(
+            session,
+            owner_id=owner_id,
+            workflow_id=workflow_id,
+        )
+        if run is None or run.status != "validating":
+            raise RuntimeError("workflow validation claim was lost")
+        _validate_workflow(session, _root_path(workflow_root), run)
+    except (InputValidationError, WorkflowServiceError) as exc:
+        reason_code = getattr(exc, "code", "invalid_workflow")
+        try:
+            transitioned = _transition_workflow_status(
+                session,
+                owner_id=owner_id,
+                workflow_id=workflow_id,
+                expected_status="validating",
+                target_status="validation_failed",
+                input_sha256=input_sha256,
+            )
+            if not transitioned:
+                raise RuntimeError("workflow validation claim was lost")
+            session.add(
+                WorkflowEvent(
+                    workflow_id=workflow_id,
+                    sequence=_next_event_sequence(session, workflow_id),
+                    event_type="validation_failed",
+                    payload_json={"reason_code": reason_code},
+                )
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        raise WorkflowServiceError(
+            "validation_failed", "workflow validation failed"
+        ) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+    try:
+        transitioned = _transition_workflow_status(
+            session,
+            owner_id=owner_id,
+            workflow_id=workflow_id,
+            expected_status="validating",
+            target_status="validated",
+            input_sha256=input_sha256,
+        )
+        if not transitioned:
+            raise RuntimeError("workflow validation claim was lost")
         session.add(
             WorkflowEvent(
                 workflow_id=workflow_id,
@@ -620,23 +659,15 @@ def confirm_workflow(
             )
         )
         session.commit()
-        current = _reload_owned_workflow(
-            session,
-            owner_id=owner_id,
-            workflow_id=workflow_id,
-        )
-        return _result(current)
+    except Exception:
+        session.rollback()
+        raise
 
-    session.rollback()
     current = _reload_owned_workflow(
         session,
         owner_id=owner_id,
         workflow_id=workflow_id,
     )
     if current is None:
-        raise WorkflowServiceError("workflow_not_found", "workflow was not found")
-    if current.status == "validated":
-        return _result(current)
-    raise WorkflowServiceError(
-        "workflow_not_confirmable", "workflow cannot be confirmed"
-    )
+        raise RuntimeError("validated workflow disappeared after commit")
+    return _result(current)
