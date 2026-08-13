@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "record_id": "dudarev1998_nio_dftu",
+      "status": "verified_key_parameters",
+      "doi": "10.1103/PhysRevB.57.1505",
+      "title": "Electron-energy-loss spectra and the structural stability of nickel oxide: An LSDA+U study",
+      "chemical_system": "rocksalt NiO in correlated magnetic states",
+      "dimensionality": "3d",
+      "task_stage": "LSDA+U electronic structure and structural stability",
+      "vasp_version": null,
+      "sources": [
+        {"kind":"publisher_record","url":"https://doi.org/10.1103/PhysRevB.57.1505","accessed":"2026-08-13","institutional_access":false}
+      ],
+      "explicit_parameters": {
+        "LDAUTYPE": {"value":2,"units":null,"scope":"Dudarev rotationally invariant effective-U convention represented by the local template","evidence_location":"method definition in article","evidence_kind":"unambiguous_mapping"}
+      },
+      "missing_parameters": ["complete INCAR", "VASP version", "PAW/POTCAR release mapping", "transferable Ni U value", "calculation-specific k mesh and cutoff"],
+      "compatible_templates": ["dftu_relax"],
+      "notes": ["This method paper does not justify treating the local NiO example INCAR as verbatim source input.", "U is system-, functional-, PAW-, and target-dependent."]
+    }
+  ]
+}

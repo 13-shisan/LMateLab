@@ -1,0 +1,27 @@
+SYSTEM = {{SYSTEM}} 2D material relaxation
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-6
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+ADDGRID = .TRUE.
+
+ISPIN  = {{ISPIN}}
+# MAGMOM = {{CHEMICALLY_JUSTIFIED_MAGMOM}}
+ISMEAR = {{ISMEAR}}
+SIGMA  = {{SIGMA_EV}}
+
+IBRION = 2
+NSW    = 160
+EDIFFG = -0.01
+ISIF   = 2
+ISYM   = {{0_IF_DISTORTION_OR_MAGNETISM_ELSE_2}}
+
+# For asymmetric out-of-plane charge only:
+# LDIPOL = .TRUE.
+# IDIPOL = 3
+# DIPOL  = 0.5 0.5 {{LAYER_CENTER_C}}
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

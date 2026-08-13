@@ -1,0 +1,21 @@
+SYSTEM = {{SYSTEM}} non-SCF band structure
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-7
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+
+ISTART = 1
+ICHARG = 11
+ISPIN  = {{ISPIN}}
+ISMEAR = 0
+SIGMA  = 0.05
+
+IBRION = -1
+NSW    = 0
+LORBIT = 11
+NBANDS = {{NBANDS_WITH_UNOCCUPIED_MARGIN}}
+
+LWAVE  = .FALSE.
+LCHARG = .FALSE.

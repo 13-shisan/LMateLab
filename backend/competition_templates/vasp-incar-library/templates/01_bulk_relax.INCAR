@@ -1,0 +1,22 @@
+SYSTEM = {{SYSTEM}} bulk relaxation
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-6
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+ADDGRID = .TRUE.
+
+ISPIN  = {{ISPIN}}
+# MAGMOM = {{CHEMICALLY_JUSTIFIED_MAGMOM}}
+ISMEAR = {{ISMEAR}}
+SIGMA  = {{SIGMA_EV}}
+
+IBRION = 2
+NSW    = 120
+EDIFFG = -0.02
+ISIF   = 3
+POTIM  = 0.5
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

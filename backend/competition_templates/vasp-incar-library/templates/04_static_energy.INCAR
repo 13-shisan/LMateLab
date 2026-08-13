@@ -1,0 +1,21 @@
+SYSTEM = {{SYSTEM}} accurate static energy
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-7
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+ADDGRID = .TRUE.
+
+ISTART = 1
+ICHARG = 1
+ISPIN  = {{ISPIN}}
+ISMEAR = {{FINAL_ISMEAR}}
+SIGMA  = {{FINAL_SIGMA_EV}}
+
+IBRION = -1
+NSW    = 0
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.
+LAECHG = .TRUE.

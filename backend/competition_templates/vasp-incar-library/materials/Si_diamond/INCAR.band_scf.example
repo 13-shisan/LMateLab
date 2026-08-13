@@ -1,0 +1,17 @@
+SYSTEM = Si diamond PBE band prerequisite SCF
+PREC = Accurate
+ENCUT = 520
+EDIFF = 1E-7
+ALGO = Normal
+LREAL = .FALSE.
+LASPH = .TRUE.
+ISTART = 1
+ICHARG = 1
+ISPIN = 1
+ISMEAR = -5
+SIGMA = 0.05
+IBRION = -1
+NSW = 0
+LORBIT = 11
+LWAVE = .TRUE.
+LCHARG = .TRUE.

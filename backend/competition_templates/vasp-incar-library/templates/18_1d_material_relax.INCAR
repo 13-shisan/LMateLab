@@ -1,0 +1,21 @@
+SYSTEM = {{SYSTEM}} 1D material relaxation
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-6
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+
+ISPIN  = {{ISPIN}}
+# MAGMOM = {{CHEMICALLY_JUSTIFIED_MAGMOM}}
+ISMEAR = {{ISMEAR}}
+SIGMA  = {{SIGMA_EV}}
+
+IBRION = 2
+NSW    = 160
+EDIFFG = -0.01
+ISIF   = 2
+ISYM   = 0
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

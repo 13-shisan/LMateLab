@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "generation_allowed": false,
+  "candidates": [
+    {
+      "record_id": "wang2026_m2bs2_monolayers",
+      "status": "candidate_pending_fulltext",
+      "doi": "10.1371/journal.pone.0339290",
+      "title": "Thermoelectric properties of M2BS2 (M = Ti, Zr, Hf) monolayers: An Ab initio study",
+      "chemical_system": "Ti2BS2, Zr2BS2, and Hf2BS2 monolayers",
+      "dimensionality": "2d",
+      "task_stages_expected": ["geometry optimization", "band structure", "phonons", "transport"],
+      "bibliographic_source": "https://europepmc.org/article/MED/41564089",
+      "accessed": "2026-08-13",
+      "reason_pending": "DOI, title, systems, and broad tasks verified; publisher/PMC full computational-details page timed out in the current browser session, so no numerical settings are admitted."
+    },
+    {
+      "record_id": "kamal2026_catechol_zno_vacancy",
+      "status": "candidate_pending_fulltext",
+      "doi": "10.1039/d5ra09496h",
+      "title": "Investigating catechol adsorption to the ZnO (10-10) surface with and without an oxygen vacancies using the DFT-D2 method",
+      "chemical_system": "half- and fully protonated catechol adsorbed on pristine and oxygen-vacancy ZnO(10-10) surfaces",
+      "dimensionality": "surface",
+      "task_stages_expected": ["slab relaxation", "adsorption energy", "Bader charge", "electronic structure"],
+      "bibliographic_source": "https://europepmc.org/article/MED/41584121",
+      "accessed": "2026-08-13",
+      "reason_pending": "DOI, systems, DFT-D2 method label, and broad tasks verified from the bibliographic page/abstract; full computational details and SI tags not yet inspected."
+    },
+    {
+      "record_id": "adjovi2025_zno_water_oxygen_ros",
+      "status": "candidate_pending_fulltext",
+      "doi": "10.3390/nano15171328",
+      "title": "Computational Study of ZnO Surface Catalysis: Adsorption of H2O or/and O2 as a Pathway to ROS Formation",
+      "chemical_system": "H2O and O2 isolated/co-adsorption on pristine and oxygen-vacancy ZnO (001), (100), and (110) surfaces at multiple coverages",
+      "dimensionality": "surface",
+      "task_stages_expected": ["surface relaxation", "adsorption energy", "co-adsorption", "defect chemistry"],
+      "bibliographic_source": "https://europepmc.org/article/MED/40938008",
+      "accessed": "2026-08-13",
+      "reason_pending": "DOI, systems, tasks, and PBE-D3 method label verified from the abstract; D3 variant and all numerical settings require full-text/SI inspection before use."
+    },
+    {
+      "record_id": "sweeney2025_nitrate_metals_saa_grandcanonical",
+      "status": "candidate_pending_fulltext",
+      "doi": "10.1038/s42004-025-01579-y",
+      "title": "A grand canonical study of the potential dependence of nitrate adsorption and dissociation across metals and dilute alloys",
+      "chemical_system": "nitrate adsorption and N-O dissociation on pure metals and Cu-based single-atom alloys under applied potential",
+      "dimensionality": "surface",
+      "task_stages_expected": ["grand-canonical adsorption", "potential-dependent reaction barrier", "surface dipole analysis"],
+      "bibliographic_source": "https://europepmc.org/article/MED/40500309",
+      "accessed": "2026-08-13",
+      "reason_pending": "DOI, systems, and eGC-DFT/aGC-DFT tasks verified from the abstract; implementation and VASP input controls require main-text/SI inspection."
+    }
+  ]
+}
