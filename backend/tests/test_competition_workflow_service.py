@@ -465,6 +465,99 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
             self.assertEqual(session.scalar(select(func.count()).select_from(WorkflowAttempt)), 0)
         self.assertFalse((self.root / "attempts").exists())
 
+    def test_stale_sessions_cannot_both_confirm_the_same_draft(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+
+        first = Session(self.engine, expire_on_commit=False)
+        second = Session(self.engine, expire_on_commit=False)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        first_run = first.get(WorkflowRun, draft.id)
+        second_run = second.get(WorkflowRun, draft.id)
+        self.assertEqual(first_run.status, "draft")
+        self.assertEqual(second_run.status, "draft")
+        first.commit()
+        second.commit()
+
+        first_result = confirm_workflow(
+            first,
+            self.root,
+            owner_id=self.owner_id,
+            workflow_id=draft.id,
+        )
+        second_result = confirm_workflow(
+            second,
+            self.root,
+            owner_id=self.owner_id,
+            workflow_id=draft.id,
+        )
+        self.assertEqual(first_result.status, "validated")
+        self.assertEqual(second_result.status, "validated")
+
+        with Session(self.engine) as session:
+            validated_events = session.scalars(
+                select(WorkflowEvent)
+                .where(WorkflowEvent.workflow_id == draft.id)
+                .where(WorkflowEvent.event_type == "workflow_validated")
+            ).all()
+            self.assertEqual(len(validated_events), 1)
+
+    def test_stale_validation_failure_cannot_overwrite_validated_winner(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+            file_row = session.scalar(
+                select(WorkflowFile)
+                .where(WorkflowFile.workflow_id == draft.id)
+                .where(WorkflowFile.source_kind == "generated")
+            )
+            input_path = self.root / file_row.relative_path
+
+        winner = Session(self.engine, expire_on_commit=False)
+        loser = Session(self.engine, expire_on_commit=False)
+        self.addCleanup(winner.close)
+        self.addCleanup(loser.close)
+        self.assertEqual(winner.get(WorkflowRun, draft.id).status, "draft")
+        self.assertEqual(loser.get(WorkflowRun, draft.id).status, "draft")
+        winner.commit()
+        loser.commit()
+
+        winner_result = confirm_workflow(
+            winner,
+            self.root,
+            owner_id=self.owner_id,
+            workflow_id=draft.id,
+        )
+        input_path.write_bytes(input_path.read_bytes() + b"tamper")
+        loser_result = confirm_workflow(
+            loser,
+            self.root,
+            owner_id=self.owner_id,
+            workflow_id=draft.id,
+        )
+        self.assertEqual(winner_result.status, "validated")
+        self.assertEqual(loser_result.status, "validated")
+
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, draft.id)
+            self.assertEqual(run.status, "validated")
+            event_types = session.scalars(
+                select(WorkflowEvent.event_type)
+                .where(WorkflowEvent.workflow_id == draft.id)
+                .order_by(WorkflowEvent.sequence)
+            ).all()
+            self.assertEqual(event_types, ["draft_created", "workflow_validated"])
+
     def test_confirmation_records_failure_for_tampered_or_missing_input(self):
         for failure_kind in ("tampered", "missing"):
             with self.subTest(failure_kind=failure_kind):

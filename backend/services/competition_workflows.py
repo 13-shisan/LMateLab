@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -410,6 +411,48 @@ def _next_event_sequence(session: Session, workflow_id: str) -> int:
     return int(current or 0) + 1
 
 
+def _transition_workflow_status(
+    session: Session,
+    *,
+    owner_id: int,
+    workflow_id: str,
+    expected_status: str,
+    target_status: str,
+    input_sha256: str,
+) -> bool:
+    result = session.execute(
+        update(WorkflowRun)
+        .where(
+            WorkflowRun.id == workflow_id,
+            WorkflowRun.owner_id == owner_id,
+            WorkflowRun.status == expected_status,
+            WorkflowRun.input_sha256 == input_sha256,
+        )
+        .values(
+            status=target_status,
+            updated_at=datetime.now(timezone.utc),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
+def _reload_owned_workflow(
+    session: Session,
+    *,
+    owner_id: int,
+    workflow_id: str,
+) -> WorkflowRun | None:
+    return session.scalar(
+        select(WorkflowRun)
+        .where(
+            WorkflowRun.id == workflow_id,
+            WorkflowRun.owner_id == owner_id,
+        )
+        .execution_options(populate_existing=True)
+    )
+
+
 def _validate_workflow(session: Session, root: Path, run: WorkflowRun) -> None:
     template = load_template(run.template_version)
     template_row = session.scalar(
@@ -512,38 +555,88 @@ def confirm_workflow(
     if run.status != "draft":
         raise WorkflowServiceError("workflow_not_confirmable", "workflow cannot be confirmed")
 
+    input_sha256 = run.input_sha256 or ""
     try:
         _validate_workflow(session, _root_path(workflow_root), run)
     except Exception as exc:
+        reason_code = getattr(exc, "code", "invalid_workflow")
         session.rollback()
-        run = session.scalar(
-            select(WorkflowRun).where(
-                WorkflowRun.id == workflow_id,
-                WorkflowRun.owner_id == owner_id,
-            )
+        claimed_failure = _transition_workflow_status(
+            session,
+            owner_id=owner_id,
+            workflow_id=workflow_id,
+            expected_status="draft",
+            target_status="validation_failed",
+            input_sha256=input_sha256,
         )
-        run.status = "validation_failed"
+        if claimed_failure:
+            session.add(
+                WorkflowEvent(
+                    workflow_id=workflow_id,
+                    sequence=_next_event_sequence(session, workflow_id),
+                    event_type="validation_failed",
+                    payload_json={"reason_code": reason_code},
+                )
+            )
+            session.commit()
+            raise WorkflowServiceError(
+                "validation_failed", "workflow validation failed"
+            ) from exc
+
+        session.rollback()
+        current = _reload_owned_workflow(
+            session,
+            owner_id=owner_id,
+            workflow_id=workflow_id,
+        )
+        if current is None:
+            raise WorkflowServiceError("workflow_not_found", "workflow was not found")
+        if current.status == "validated":
+            return _result(current)
+        if current.status == "validation_failed":
+            raise WorkflowServiceError(
+                "validation_failed", "workflow validation failed"
+            ) from exc
+        raise WorkflowServiceError(
+            "workflow_not_confirmable", "workflow cannot be confirmed"
+        ) from exc
+
+    session.rollback()
+    claimed_success = _transition_workflow_status(
+        session,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
+        expected_status="draft",
+        target_status="validated",
+        input_sha256=input_sha256,
+    )
+    if claimed_success:
         session.add(
             WorkflowEvent(
-                workflow=run,
+                workflow_id=workflow_id,
                 sequence=_next_event_sequence(session, workflow_id),
-                event_type="validation_failed",
-                payload_json={"reason_code": getattr(exc, "code", "invalid_workflow")},
+                event_type="workflow_validated",
+                payload_json={"input_sha256": input_sha256},
             )
         )
         session.commit()
-        raise WorkflowServiceError(
-            "validation_failed", "workflow validation failed"
-        ) from exc
-
-    run.status = "validated"
-    session.add(
-        WorkflowEvent(
-            workflow=run,
-            sequence=_next_event_sequence(session, workflow_id),
-            event_type="workflow_validated",
-            payload_json={"input_sha256": run.input_sha256},
+        current = _reload_owned_workflow(
+            session,
+            owner_id=owner_id,
+            workflow_id=workflow_id,
         )
+        return _result(current)
+
+    session.rollback()
+    current = _reload_owned_workflow(
+        session,
+        owner_id=owner_id,
+        workflow_id=workflow_id,
     )
-    session.commit()
-    return _result(run)
+    if current is None:
+        raise WorkflowServiceError("workflow_not_found", "workflow was not found")
+    if current.status == "validated":
+        return _result(current)
+    raise WorkflowServiceError(
+        "workflow_not_confirmable", "workflow cannot be confirmed"
+    )
