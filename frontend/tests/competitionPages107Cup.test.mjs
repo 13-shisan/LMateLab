@@ -1116,6 +1116,57 @@ test('new calculation locks every input mutation for pending and same-tick write
   assert.match(source, /disabled=\{readOnly\s*\|\|\s*inputMutationLocked\s*\|\|\s*uploadPending\}/);
 });
 
+test('new calculation fails closed after uncertain save and confirmation results', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const { failClosedAfterUncertainWrite } = loadFunctions(source, [
+    'invalidateServerState',
+    'failClosedAfterUncertainWrite',
+  ]);
+  const uploaded = {
+    structureUpload: { id: 'upload-consumed-or-unknown' },
+    workflow: { id: 'workflow-old', status: 'draft' },
+    confirmation: { id: 'workflow-old', status: 'validated' },
+    error: '',
+  };
+
+  assert.deepEqual(
+    failClosedAfterUncertainWrite('upload', uploaded, '服务端结果未知'),
+    {
+      serverState: {
+        structureUpload: null,
+        workflow: null,
+        confirmation: null,
+        error: '服务端结果未知',
+      },
+      clearFile: true,
+    },
+  );
+  assert.deepEqual(
+    failClosedAfterUncertainWrite('builtin', uploaded, '保存失败'),
+    {
+      serverState: {
+        structureUpload: uploaded.structureUpload,
+        workflow: null,
+        confirmation: null,
+        error: '保存失败',
+      },
+      clearFile: false,
+    },
+  );
+
+  for (const handler of ['handleSaveDraft', 'handleSubmitWorkflow']) {
+    const declaration = parse(source, { sourceType: 'module', plugins: ['jsx'] }).program.body
+      .find((node) => node.type === 'ExportDefaultDeclaration')
+      .declaration.body.body
+      .find((node) => node.type === 'FunctionDeclaration' && node.id.name === handler);
+    const handlerSource = source.slice(declaration.start, declaration.end);
+    assert.match(handlerSource, /catch\s*\(error\)[\s\S]*?failClosedAfterUncertainWrite\(/);
+    assert.match(handlerSource, /failure\.clearFile[\s\S]*?setOriginalFileName\(['"]['"]\)[\s\S]*?setFileInputKey/);
+    assert.match(handlerSource, /setServerState\(failure\.serverState\)/);
+    assert.doesNotMatch(handlerSource, /confirmation:\s*null[\s\S]*?\.\.\.current/);
+  }
+});
+
 test('new calculation confirms only the latest saved workflow id', () => {
   const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
 

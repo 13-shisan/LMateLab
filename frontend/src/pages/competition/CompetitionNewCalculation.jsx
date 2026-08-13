@@ -148,6 +148,17 @@ function isInputMutationLocked({
   );
 }
 
+function failClosedAfterUncertainWrite(sourceKind, serverState, errorMessage) {
+  const clearFile = sourceKind === 'upload';
+  return {
+    serverState: {
+      ...invalidateServerState(serverState, { clearUpload: clearFile }),
+      error: errorMessage,
+    },
+    clearFile,
+  };
+}
+
 export default function CompetitionNewCalculation() {
   const { provider, mode } = useCompetitionData();
   const [sourceKind, setSourceKind] = useState('builtin');
@@ -282,12 +293,17 @@ export default function CompetitionNewCalculation() {
       }
     } catch (error) {
       if (inputVersion.current === requestVersion) {
-        setServerState((current) => ({
-          ...current,
-          workflow: null,
-          confirmation: null,
-          error: error?.message || '草稿保存失败',
-        }));
+        const failure = failClosedAfterUncertainWrite(
+          sourceKind,
+          serverState,
+          error?.message || '草稿保存失败',
+        );
+        inputVersion.current += 1;
+        if (failure.clearFile) {
+          setOriginalFileName('');
+          setFileInputKey((current) => current + 1);
+        }
+        setServerState(failure.serverState);
       }
     } finally {
       setSavePending(false);
@@ -315,11 +331,17 @@ export default function CompetitionNewCalculation() {
       }
     } catch (error) {
       if (inputVersion.current === requestVersion) {
-        setServerState((current) => ({
-          ...current,
-          confirmation: null,
-          error: error?.message || '工作流确认失败',
-        }));
+        const failure = failClosedAfterUncertainWrite(
+          sourceKind,
+          serverState,
+          error?.message || '工作流确认失败',
+        );
+        inputVersion.current += 1;
+        if (failure.clearFile) {
+          setOriginalFileName('');
+          setFileInputKey((current) => current + 1);
+        }
+        setServerState(failure.serverState);
       }
     } finally {
       setConfirmPending(false);
