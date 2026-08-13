@@ -3,6 +3,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -40,6 +41,31 @@ class HealthReadinessTests(unittest.TestCase):
         missing_primary = create_engine("sqlite://")
         with self.assertRaises(SQLAlchemyError):
             health.database_readiness(missing_primary, digest)
+
+    def test_competition_readiness_requires_workflow_migration(self):
+        primary = self.engine_with_table("users")
+        digest = self.engine_with_table("daily_digests")
+
+        with mock.patch.dict(os.environ, {"LMATELAB_EDITION": "107cup"}):
+            with self.assertRaises(SQLAlchemyError):
+                health.database_readiness(primary, digest)
+
+            with primary.begin() as connection:
+                connection.exec_driver_sql("CREATE TABLE workflow_runs (id TEXT)")
+            self.assertEqual(
+                {"status": "ready"},
+                health.database_readiness(primary, digest),
+            )
+
+    def test_standard_readiness_does_not_require_competition_tables(self):
+        primary = self.engine_with_table("users")
+        digest = self.engine_with_table("daily_digests")
+
+        with mock.patch.dict(os.environ, {"LMATELAB_EDITION": "standard"}):
+            self.assertEqual(
+                {"status": "ready"},
+                health.database_readiness(primary, digest),
+            )
 
 
 class HealthcheckScriptTests(unittest.TestCase):
