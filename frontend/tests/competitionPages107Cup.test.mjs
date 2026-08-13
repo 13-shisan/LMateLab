@@ -1076,6 +1076,46 @@ test('new calculation live status announces pending writes before saved objects'
   assert.match(source, /<span\s+aria-live=['"]polite['"]>\s*\{describeCommandStatus\(/s);
 });
 
+test('new calculation locks every input mutation for pending and same-tick writes', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const isInputMutationLocked = loadFunction(source, 'isInputMutationLocked');
+
+  assert.equal(isInputMutationLocked({}), false);
+  for (const key of [
+    'uploadPending',
+    'savePending',
+    'confirmPending',
+    'uploadLocked',
+    'saveLocked',
+    'confirmLocked',
+  ]) {
+    assert.equal(
+      isInputMutationLocked({ [key]: true }),
+      true,
+      `${key} must lock source, file, and parameter changes`,
+    );
+  }
+
+  assert.match(source, /const\s+inputMutationLocked\s*=\s*isInputMutationLocked\(/);
+  assert.match(source, /function\s+inputMutationLockedNow\(\)[\s\S]*?uploadLocked:\s*uploadLock\.current[\s\S]*?saveLocked:\s*saveLock\.current[\s\S]*?confirmLocked:\s*confirmLock\.current/s);
+  for (const handler of [
+    'handleSourceKindChange',
+    'handleStructureFileChange',
+    'handleClearStructureFile',
+    'handleParameterChange',
+  ]) {
+    assert.match(
+      source,
+      new RegExp(`function\\s+${handler}[\\s\\S]*?inputMutationLockedNow\\(\\)[\\s\\S]*?return;`),
+    );
+  }
+  assert.ok(
+    (source.match(/disabled=\{readOnly\s*\|\|\s*inputMutationLocked\}/g) || []).length >= 4,
+    'source buttons, clear control, and parameter inputs must share the lock',
+  );
+  assert.match(source, /disabled=\{readOnly\s*\|\|\s*inputMutationLocked\s*\|\|\s*uploadPending\}/);
+});
+
 test('new calculation confirms only the latest saved workflow id', () => {
   const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
 

@@ -130,6 +130,24 @@ function describeCommandStatus({
   return `未保存 · mos2_v1 · ${sourceKind === 'builtin' ? '内置 MoS2' : '上传结构'}`;
 }
 
+function isInputMutationLocked({
+  uploadPending = false,
+  savePending = false,
+  confirmPending = false,
+  uploadLocked = false,
+  saveLocked = false,
+  confirmLocked = false,
+} = {}) {
+  return Boolean(
+    uploadPending
+    || savePending
+    || confirmPending
+    || uploadLocked
+    || saveLocked
+    || confirmLocked
+  );
+}
+
 export default function CompetitionNewCalculation() {
   const { provider, mode } = useCompetitionData();
   const [sourceKind, setSourceKind] = useState('builtin');
@@ -154,6 +172,25 @@ export default function CompetitionNewCalculation() {
   const canConfirm = canWrite
     && Boolean(serverState.workflow?.id)
     && !serverState.confirmation;
+  const inputMutationLocked = isInputMutationLocked({
+    uploadPending,
+    savePending,
+    confirmPending,
+    uploadLocked: uploadLock.current,
+    saveLocked: saveLock.current,
+    confirmLocked: confirmLock.current,
+  });
+
+  function inputMutationLockedNow() {
+    return isInputMutationLocked({
+      uploadPending,
+      savePending,
+      confirmPending,
+      uploadLocked: uploadLock.current,
+      saveLocked: saveLock.current,
+      confirmLocked: confirmLock.current,
+    });
+  }
 
   function clearPersistedState({ clearUpload }) {
     inputVersion.current += 1;
@@ -161,6 +198,7 @@ export default function CompetitionNewCalculation() {
   }
 
   function handleSourceKindChange(nextSourceKind) {
+    if (inputMutationLockedNow()) return;
     if (nextSourceKind === sourceKind) return;
     setSourceKind(nextSourceKind);
     setOriginalFileName('');
@@ -169,7 +207,7 @@ export default function CompetitionNewCalculation() {
   }
 
   async function handleStructureFileChange(event) {
-    if (!canWrite || uploadLock.current) return;
+    if (!canWrite || inputMutationLockedNow()) return;
     const file = event.target.files?.[0] || null;
     const requestVersion = inputVersion.current + 1;
     inputVersion.current = requestVersion;
@@ -200,13 +238,14 @@ export default function CompetitionNewCalculation() {
   }
 
   function handleClearStructureFile() {
-    if (uploadPending) return;
+    if (inputMutationLockedNow()) return;
     setOriginalFileName('');
     setFileInputKey((current) => current + 1);
     clearPersistedState({ clearUpload: true });
   }
 
   function handleParameterChange(stepKey, parameterKey, rawValue) {
+    if (inputMutationLockedNow()) return;
     const value = Number(rawValue);
     if (!Number.isFinite(value)) return;
     setParameters((current) => ({
@@ -311,7 +350,7 @@ export default function CompetitionNewCalculation() {
             className={sourceKind === 'builtin' ? 'is-active' : ''}
             type="button"
             aria-pressed={sourceKind === 'builtin'}
-            disabled={readOnly}
+            disabled={readOnly || inputMutationLocked}
             onClick={() => handleSourceKindChange('builtin')}
           >
             内置 MoS2
@@ -320,7 +359,7 @@ export default function CompetitionNewCalculation() {
             className={sourceKind === 'upload' ? 'is-active' : ''}
             type="button"
             aria-pressed={sourceKind === 'upload'}
-            disabled={readOnly}
+            disabled={readOnly || inputMutationLocked}
             onClick={() => handleSourceKindChange('upload')}
           >
             上传结构
@@ -339,7 +378,7 @@ export default function CompetitionNewCalculation() {
                   id="competition-structure-file"
                   type="file"
                   accept=".vasp,.poscar,.cif"
-                  disabled={readOnly || uploadPending}
+                  disabled={readOnly || inputMutationLocked || uploadPending}
                   onChange={handleStructureFileChange}
                 />
                 <strong>{uploadPending ? '服务端解析中' : (originalFileName || '未选择文件')}</strong>
@@ -349,7 +388,7 @@ export default function CompetitionNewCalculation() {
                   <button
                     className="competition-upload-clear"
                     type="button"
-                    disabled={readOnly}
+                    disabled={readOnly || inputMutationLocked}
                     onClick={handleClearStructureFile}
                     title="清除结构文件"
                   >
@@ -472,7 +511,7 @@ export default function CompetitionNewCalculation() {
                     min={PARAMETER_LIMITS[key]?.min}
                     max={PARAMETER_LIMITS[key]?.max}
                     step={PARAMETER_LIMITS[key]?.step}
-                    disabled={readOnly}
+                    disabled={readOnly || inputMutationLocked}
                     onChange={(event) => (
                       handleParameterChange(activeStep.key, key, event.target.value)
                     )}
