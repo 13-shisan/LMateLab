@@ -1,0 +1,27 @@
+SYSTEM = {{SYSTEM}} isolated molecule relaxation
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-7
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+ADDGRID = .TRUE.
+
+ISPIN  = {{ISPIN}}
+# MAGMOM = {{CHEMICALLY_JUSTIFIED_MAGMOM}}
+ISMEAR = 0
+SIGMA  = 0.05
+
+IBRION = 2
+NSW    = 160
+EDIFFG = -0.01
+ISIF   = 2
+POTIM  = 0.2
+ISYM   = 0
+
+LDIPOL = .TRUE.
+IDIPOL = 4
+DIPOL  = 0.5 0.5 0.5
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

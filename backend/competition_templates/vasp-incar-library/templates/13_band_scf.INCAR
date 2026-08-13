@@ -1,0 +1,22 @@
+SYSTEM = {{SYSTEM}} SCF charge density for bands
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-7
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+ADDGRID = .TRUE.
+
+ISTART = 1
+ICHARG = 1
+ISPIN  = {{ISPIN}}
+ISMEAR = {{SCF_ISMEAR}}
+SIGMA  = {{SCF_SIGMA_EV}}
+
+IBRION = -1
+NSW    = 0
+LORBIT = 11
+NBANDS = {{NBANDS_WITH_UNOCCUPIED_MARGIN}}
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

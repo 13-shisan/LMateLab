@@ -1,0 +1,28 @@
+SYSTEM = {{SYSTEM}} slab adsorption relaxation
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-6
+ALGO   = Normal
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+ADDGRID = .TRUE.
+
+ISPIN  = {{ISPIN}}
+# MAGMOM = {{CHEMICALLY_JUSTIFIED_MAGMOM}}
+ISMEAR = {{ISMEAR}}
+SIGMA  = {{SIGMA_EV}}
+
+IBRION = 2
+NSW    = 160
+EDIFFG = -0.02
+ISIF   = 2
+POTIM  = 0.3
+ISYM   = 0
+
+# Enable together for an asymmetric slab; direction 3 assumes vacuum along c.
+# LDIPOL = .TRUE.
+# IDIPOL = 3
+# DIPOL  = 0.5 0.5 {{SLAB_CENTER_FRACTIONAL_C}}
+
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "library_version": "0.3.0",
+  "templates": [
+    {"id":"bulk_relax","file":"templates/01_bulk_relax.INCAR","dimensions":["3d"],"tasks":["relax"],"magnetism":["nonmagnetic","collinear"]},
+    {"id":"slab_adsorption_relax","file":"templates/02_slab_adsorption_relax.INCAR","dimensions":["2d-slab"],"tasks":["relax","adsorption"],"magnetism":["nonmagnetic","collinear"]},
+    {"id":"molecule_relax","file":"templates/03_molecule_relax.INCAR","dimensions":["0d"],"tasks":["relax"],"magnetism":["nonmagnetic","collinear"]},
+    {"id":"static_energy","file":"templates/04_static_energy.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["static","energy"]},
+    {"id":"dos","file":"templates/05_dos.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["dos"]},
+    {"id":"band_nscf","file":"templates/06_band_nscf.INCAR","dimensions":["1d","2d","3d"],"tasks":["bands"],"requires":["compatible CHGCAR","line-mode KPOINTS"]},
+    {"id":"dftu_relax","file":"templates/07_dftu_relax.INCAR","dimensions":["1d","2d","3d"],"tasks":["relax"],"methods":["dft+u"],"magnetism":["collinear"]},
+    {"id":"hse06_static","file":"templates/08_hse06_static.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["static"],"methods":["hse06"]},
+    {"id":"cineb","file":"templates/09_cineb.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["barrier","neb"],"requires":["VTST-compatible build","relaxed endpoints"]},
+    {"id":"vibrations","file":"templates/10_vibrations_finite_difference.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["vibrations","transition-state-check"]},
+    {"id":"aimd_nvt","file":"templates/11_aimd_nvt.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["aimd"],"ensemble":"nvt"},
+    {"id":"r2scan_static","file":"templates/12_r2scan_static.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["static"],"methods":["r2scan"]},
+    {"id":"band_scf","file":"templates/13_band_scf.INCAR","dimensions":["1d","2d","3d"],"tasks":["bands","scf"],"produces":["CHGCAR","WAVECAR"]},
+    {"id":"soc_static","file":"templates/14_soc_static.INCAR","dimensions":["0d","1d","2d","3d"],"tasks":["soc","magnetic-anisotropy"],"magnetism":["noncollinear","soc"]},
+    {"id":"noncollinear_relax","file":"templates/15_noncollinear_relax.INCAR","dimensions":["1d","2d","3d"],"tasks":["relax"],"magnetism":["noncollinear"]},
+    {"id":"defect_relax","file":"templates/16_defect_relax.INCAR","dimensions":["1d","2d","3d"],"tasks":["defect","relax"],"magnetism":["collinear"]},
+    {"id":"2d_relax","file":"templates/17_2d_material_relax.INCAR","dimensions":["2d"],"tasks":["relax"]},
+    {"id":"1d_relax","file":"templates/18_1d_material_relax.INCAR","dimensions":["1d"],"tasks":["relax"]}
+  ],
+  "materials": [
+    {"id":"Si_diamond","chemical_system":"elemental Si, diamond structure","path":"materials/Si_diamond/PROFILE.md","incar_files":["materials/Si_diamond/INCAR.relax.example","materials/Si_diamond/INCAR.band_scf.example","materials/Si_diamond/INCAR.band_nscf.example"],"dimensions":["3d"],"tasks":["relax","bands"],"system_dois":[],"provenance":"reconstructed_example"},
+    {"id":"Fe_bcc_FM","chemical_system":"elemental Fe, bcc ferromagnetic structure","path":"materials/Fe_bcc_FM/PROFILE.md","incar_files":["materials/Fe_bcc_FM/INCAR.relax.example"],"dimensions":["3d"],"tasks":["relax","metal"],"magnetism":"fm","system_dois":[],"provenance":"reconstructed_example"},
+    {"id":"NiO_rocksalt_AFMII","chemical_system":"rocksalt NiO, type-II antiferromagnetic order","path":"materials/NiO_rocksalt_AFMII/PROFILE.md","incar_files":["materials/NiO_rocksalt_AFMII/INCAR.relax.example"],"dimensions":["3d"],"tasks":["relax","bands"],"magnetism":"afm","methods":["dft+u"],"system_dois":["10.1103/PhysRevB.57.1505"],"provenance":"system_method_paper_plus_reconstructed_incar"},
+    {"id":"MoS2_monolayer","chemical_system":"isolated monolayer 2H-MoS2","path":"materials/MoS2_monolayer/PROFILE.md","incar_files":["materials/MoS2_monolayer/INCAR.relax.example"],"dimensions":["2d"],"tasks":["relax","bands","soc"],"system_dois":[],"provenance":"reconstructed_example"},
+    {"id":"graphene","chemical_system":"pristine monolayer graphene","path":"materials/graphene/PROFILE.md","incar_files":["materials/graphene/INCAR.relax.example"],"dimensions":["2d"],"tasks":["relax","bands"],"system_dois":[],"provenance":"reconstructed_example"},
+    {"id":"TiO2_anatase","chemical_system":"stoichiometric anatase TiO2 bulk, with profile branches for surfaces and oxygen vacancies","path":"materials/TiO2_anatase/PROFILE.md","incar_files":["materials/TiO2_anatase/INCAR.relax_pbe.example"],"dimensions":["3d","2d-slab"],"tasks":["relax","defect","surface"],"methods":["pbe","optional-dft+u"],"system_dois":[],"provenance":"reconstructed_example"}
+  ]
+}

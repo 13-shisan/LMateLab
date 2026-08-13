@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VASP literature system-stage record",
+  "type": "object",
+  "required": ["record_id", "status", "doi", "chemical_system", "task_stage", "sources", "explicit_parameters", "missing_parameters"],
+  "properties": {
+    "record_id": {"type": "string"},
+    "status": {"enum": ["full_incar", "verified_key_parameters", "candidate_pending_fulltext", "rejected"]},
+    "doi": {"type": "string"},
+    "title": {"type": "string"},
+    "chemical_system": {"type": "string"},
+    "dimensionality": {"enum": ["0d", "1d", "2d", "3d", "surface", "interface", "mixed"]},
+    "task_stage": {"type": "string"},
+    "vasp_version": {"type": ["string", "null"]},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "url", "accessed"],
+        "properties": {
+          "kind": {"enum": ["main_text", "supporting_information", "input_repository", "publisher_record", "bibliographic_record"]},
+          "url": {"type": "string"},
+          "accessed": {"type": "string"},
+          "institutional_access": {"type": "boolean"}
+        }
+      }
+    },
+    "explicit_parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["value", "scope", "evidence_location", "evidence_kind"],
+        "properties": {
+          "value": {},
+          "units": {"type": ["string", "null"]},
+          "scope": {"type": "string"},
+          "evidence_location": {"type": "string"},
+          "evidence_kind": {"enum": ["verbatim_input", "explicit_statement", "unambiguous_mapping"]}
+        }
+      }
+    },
+    "structure_model": {"type": "object"},
+    "kpoints": {"type": "object"},
+    "potcar": {"type": "object"},
+    "missing_parameters": {"type": "array", "items": {"type": "string"}},
+    "compatible_templates": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  }
+}

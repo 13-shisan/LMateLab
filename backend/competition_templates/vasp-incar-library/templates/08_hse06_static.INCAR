@@ -1,0 +1,24 @@
+SYSTEM = {{SYSTEM}} HSE06 static
+PREC   = Accurate
+ENCUT  = {{ENCUT_EV}}
+EDIFF  = 1E-6
+LREAL  = .FALSE.
+LASPH  = .TRUE.
+
+ISTART = 1
+ICHARG = 1
+ISPIN  = {{ISPIN}}
+ISMEAR = {{ISMEAR}}
+SIGMA  = {{SIGMA_EV}}
+
+LHFCALC  = .TRUE.
+AEXX     = 0.25
+HFSCREEN = 0.2
+ALGO     = Damped
+TIME     = 0.4
+PRECFOCK = Fast
+
+IBRION = -1
+NSW    = 0
+LWAVE  = .TRUE.
+LCHARG = .TRUE.

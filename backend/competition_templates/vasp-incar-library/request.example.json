@@ -1,0 +1,44 @@
+{
+  "system": {
+    "name": "monolayer 2H-MoS2",
+    "composition": "MoS2",
+    "phase_or_structure": "isolated 2H monolayer",
+    "dimensionality": "2d",
+    "periodic_axes": ["a", "b"],
+    "elements_in_poscar_order": ["Mo", "S"],
+    "charge_state": 0,
+    "electronic_character": "semiconductor",
+    "magnetism": "nonmagnetic",
+    "oxidation_states_or_spin_hint": "Mo(IV), S(-II); no initial moments requested"
+  },
+  "task": {
+    "type": "bands",
+    "observable": "PBE band dispersion without SOC",
+    "accuracy_target": "production",
+    "workflow_stage": "new"
+  },
+  "method": {
+    "vasp_version": "6.x",
+    "xc_functional": "PBE",
+    "potcar_family": "PBE PAW, exact release unknown",
+    "potcar_enmax_ev": {},
+    "dft_u": null,
+    "dispersion": null,
+    "soc": false,
+    "solvation": null
+  },
+  "model": {
+    "cell_description": "primitive monolayer cell with 20 Angstrom vacuum",
+    "vacuum_axis": "c",
+    "fixed_atoms": "none",
+    "kpoints_known": null
+  },
+  "restart_files": {
+    "wavecar": false,
+    "chgcar": false
+  },
+  "resources": {
+    "cores": null,
+    "memory_gb": null
+  }
+}

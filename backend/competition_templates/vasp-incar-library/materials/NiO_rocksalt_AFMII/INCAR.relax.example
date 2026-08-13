@@ -1,0 +1,27 @@
+SYSTEM = rocksalt NiO AFM-II PBE Dudarev Ueff 5.3 eV example
+PREC = Accurate
+ENCUT = 520
+EDIFF = 1E-6
+ALGO = Normal
+LREAL = .FALSE.
+LASPH = .TRUE.
+ADDGRID = .TRUE.
+LMAXMIX = 4
+ISPIN = 2
+# Example assumes POSCAR order: 2 Ni(up), 2 Ni(down), 4 O
+MAGMOM = 2*2.0 2*-2.0 4*0.0
+ISMEAR = 0
+SIGMA = 0.05
+LDAU = .TRUE.
+LDAUTYPE = 2
+LDAUL = 2 -1
+LDAUU = 5.3 0
+LDAUJ = 0 0
+LDAUPRINT = 1
+IBRION = 2
+NSW = 160
+EDIFFG = -0.01
+ISIF = 3
+ISYM = 0
+LWAVE = .TRUE.
+LCHARG = .TRUE.
