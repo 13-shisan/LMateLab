@@ -25,6 +25,7 @@ if config.config_file_name is not None:
 # 导入 Base，并确保 models 被导入从而注册到 Base.metadata
 from database import Base
 import models  # noqa: F401
+import models_workflow  # noqa: F401
 
 target_metadata = Base.metadata
 

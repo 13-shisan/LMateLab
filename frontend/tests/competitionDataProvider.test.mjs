@@ -284,6 +284,73 @@ test('live structure upload leaves multipart content type to FormData', async ()
   assert.equal(Object.keys(headers).some((name) => name.toLowerCase() === 'content-type'), false);
 });
 
+test('live structure draft and confirmation preserve server contracts exactly', async () => {
+  const requests = [];
+  const responses = [
+    {
+      id: 'upload-server-id',
+      size_bytes: 321,
+      sha256: 'a'.repeat(64),
+      source_format: 'vasp',
+      summary: { formula: 'MoS2', atom_count: 3 },
+    },
+    {
+      id: 'workflow-server-id',
+      status: 'draft',
+      input_sha256: 'b'.repeat(64),
+      template_version: 'mos2_v1',
+      source_kind: 'upload',
+      structure_summary: { formula: 'MoS2', atom_count: 3 },
+    },
+    {
+      id: 'workflow-server-id',
+      status: 'validated',
+      input_sha256: 'b'.repeat(64),
+      template_version: 'mos2_v1',
+      source_kind: 'upload',
+      structure_summary: { formula: 'MoS2', atom_count: 3 },
+    },
+  ];
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: (contentType) => contentType ? { 'Content-Type': contentType } : {},
+    fetchImpl: async (path, init) => {
+      requests.push({ path, init });
+      return new Response(JSON.stringify(responses[requests.length - 1]), {
+        status: requests.length < 3 ? 201 : 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  const file = new Blob(['MoS2 POSCAR']);
+  const draftPayload = {
+    template_version: 'mos2_v1',
+    source_kind: 'upload',
+    steps: ['relax', 'scf', 'band', 'dos'],
+    parameters: { relax: { ENCUT: 520 } },
+    structure_upload_id: 'upload-server-id',
+  };
+
+  const upload = await provider.uploadStructure(file);
+  const draft = await provider.saveDraft(draftPayload);
+  const confirmation = await provider.submitWorkflow(draft.id);
+
+  assert.equal(upload.id, 'upload-server-id');
+  assert.equal(draft.id, 'workflow-server-id');
+  assert.equal(confirmation.status, 'validated');
+  assert.deepEqual(requests.map(({ path }) => path), [
+    '/api/competition/structures',
+    '/api/competition/drafts',
+    '/api/competition/workflows/workflow-server-id/submit',
+  ]);
+  assert.equal(requests[0].init.body instanceof FormData, true);
+  const uploadedPart = requests[0].init.body.get('file');
+  assert.equal(uploadedPart.size, file.size);
+  assert.equal(await uploadedPart.text(), await file.text());
+  assert.deepEqual(JSON.parse(requests[1].init.body), draftPayload);
+  assert.equal(Object.hasOwn(JSON.parse(requests[1].init.body), 'owner'), false);
+  assert.equal(requests[2].init.body, '{}');
+});
+
 test('live workflow retry accepts an object and encodes id and step', async () => {
   let request;
   const provider = createApiCompetitionDataProvider({

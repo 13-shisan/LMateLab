@@ -10,7 +10,9 @@ CORE_ROUTER_IMPORTS = (
     ("routers.health", "router"),
 )
 
-BUSINESS_ROUTER_IMPORTS = ()
+BUSINESS_ROUTER_IMPORTS = (
+    ("routers.competition_workflows", "router"),
+)
 
 SQLITE_CONNECTION_PRAGMAS = (
     "PRAGMA foreign_keys=ON;",
@@ -18,6 +20,16 @@ SQLITE_CONNECTION_PRAGMAS = (
     "PRAGMA synchronous=NORMAL;",
     "PRAGMA busy_timeout=5000;",
 )
+
+
+def workflow_root(environ: Mapping[str, str] | None = None) -> Path:
+    values = os.environ if environ is None else environ
+    return Path(
+        values.get(
+            "LMATELAB_WORKFLOW_ROOT",
+            "/home/scc/pb23030683/lmatelab-107cup/data/workflows",
+        )
+    )
 
 
 def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, str]:

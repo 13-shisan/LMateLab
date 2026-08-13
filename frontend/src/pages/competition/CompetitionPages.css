@@ -114,6 +114,11 @@
   color: #174fae;
 }
 
+.competition-source-segment button:disabled {
+  color: #8994a6;
+  cursor: not-allowed;
+}
+
 .competition-source-segment button:focus-visible,
 .competition-workflow-step button:focus-visible,
 .competition-command-button:focus-visible,
@@ -177,6 +182,25 @@
 
 .competition-upload-placeholder small {
   color: #7b8799;
+}
+
+.competition-upload-clear {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 4px auto 0;
+  padding: 0 12px;
+  border: 1px solid #cfd7e4;
+  border-radius: 6px;
+  color: #344054;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  cursor: pointer;
 }
 
 .competition-structure-summary {
@@ -398,6 +422,48 @@
   font-weight: 700;
 }
 
+.competition-parameter-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+
+.competition-parameter-fields label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: #68758a;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.competition-parameter-fields input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid #cfd7e4;
+  border-radius: 6px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.competition-parameter-fields input:disabled {
+  color: #8994a6;
+  background: #e8ebf0;
+}
+
+.competition-parameter-note {
+  margin: 14px 0 0;
+  color: #68758a;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .competition-command-bar {
   min-width: 0;
   display: flex;
@@ -571,6 +637,10 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .competition-parameter-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .competition-command-actions {

@@ -21,8 +21,10 @@ def live():
 
 
 def database_readiness(primary_engine=engine, digest_database_engine=digest_engine):
-    checks = (
-        (primary_engine, "users"),
+    primary_tables = ["users"]
+    if os.getenv("LMATELAB_EDITION", "").strip().lower() == "107cup":
+        primary_tables.append("workflow_runs")
+    checks = tuple((primary_engine, table_name) for table_name in primary_tables) + (
         (digest_database_engine, "daily_digests"),
     )
     for database_engine, table_name in checks:
