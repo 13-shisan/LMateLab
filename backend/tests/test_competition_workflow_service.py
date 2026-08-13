@@ -611,6 +611,115 @@ class CompetitionWorkflowServiceTests(unittest.TestCase):
                 ["draft_created", "validation_failed"],
             )
 
+    def test_confirmation_rechecks_files_changed_after_full_validation(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+            file_row = session.scalar(
+                select(WorkflowFile)
+                .where(WorkflowFile.workflow_id == draft.id)
+                .where(WorkflowFile.source_kind == "generated")
+            )
+            input_path = self.root / file_row.relative_path
+
+        original_validate = workflow_service._validate_workflow
+
+        def validate_then_tamper(active_session, root, run):
+            original_validate(active_session, root, run)
+            input_path.write_bytes(input_path.read_bytes() + b"tamper")
+
+        with Session(self.engine) as session:
+            with mock.patch.object(
+                workflow_service,
+                "_validate_workflow",
+                side_effect=validate_then_tamper,
+            ):
+                with self.assertRaises(WorkflowServiceError) as failed:
+                    confirm_workflow(
+                        session,
+                        self.root,
+                        owner_id=self.owner_id,
+                        workflow_id=draft.id,
+                    )
+            self.assertEqual(failed.exception.code, "validation_failed")
+
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, draft.id)
+            self.assertEqual(run.status, "validation_failed")
+            self.assertEqual(
+                session.scalars(
+                    select(WorkflowEvent.event_type)
+                    .where(WorkflowEvent.workflow_id == draft.id)
+                    .order_by(WorkflowEvent.sequence)
+                ).all(),
+                ["draft_created", "validation_failed"],
+            )
+            self.assertEqual(
+                session.scalar(select(func.count()).select_from(WorkflowAttempt)), 0
+            )
+
+    def test_confirmation_rechecks_file_integrity_once_immediately_before_success(self):
+        with Session(self.engine) as session:
+            draft = create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=valid_payload(),
+            )
+
+        calls = []
+        original_validate = workflow_service._validate_workflow
+        original_revalidate = workflow_service._revalidate_file_integrity
+        original_transition = workflow_service._transition_workflow_status
+
+        def record_validate(*args, **kwargs):
+            calls.append("validate")
+            return original_validate(*args, **kwargs)
+
+        def record_revalidate(*args, **kwargs):
+            calls.append("revalidate")
+            return original_revalidate(*args, **kwargs)
+
+        def record_transition(*args, **kwargs):
+            calls.append(f"transition:{kwargs['target_status']}")
+            return original_transition(*args, **kwargs)
+
+        with Session(self.engine) as session:
+            with mock.patch.object(
+                workflow_service,
+                "_validate_workflow",
+                side_effect=record_validate,
+            ), mock.patch.object(
+                workflow_service,
+                "_revalidate_file_integrity",
+                side_effect=record_revalidate,
+            ), mock.patch.object(
+                workflow_service,
+                "_transition_workflow_status",
+                side_effect=record_transition,
+            ):
+                result = confirm_workflow(
+                    session,
+                    self.root,
+                    owner_id=self.owner_id,
+                    workflow_id=draft.id,
+                )
+
+        self.assertEqual(result.status, "validated")
+        self.assertEqual(
+            calls,
+            [
+                "transition:validating",
+                "validate",
+                "revalidate",
+                "transition:validated",
+            ],
+        )
+
     def test_confirmation_claims_before_validation_without_releasing_the_transaction(self):
         with Session(self.engine) as session:
             draft = create_draft(
