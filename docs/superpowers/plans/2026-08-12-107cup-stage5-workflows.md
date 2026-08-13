@@ -97,13 +97,15 @@
 - [x] 在全新临时 SQLite 与当前 schema 副本上分别执行 `alembic upgrade head`，检查六张表和 `PRAGMA integrity_check=ok`。
 - [x] 运行 `npm test`、定向 ESLint、`VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=live npm run build` 和 `git diff --check`。
 - [x] 更新总方案：阶段 5 只有本地实现和门禁通过时仍保持 `PARTIAL`；不得把阶段 6 至 8 标成完成。
-- [ ] 提交并推送 `codex/107cup-stage5-workflows`，通过 PR 合并后再在 107 用 Slurm 构建独立预览进行 migration、API 和浏览器验收。
+- [x] 提交并推送 `codex/107cup-stage5-workflows`；PR #16 已合并为 `619b9116aee4f6cd4129debca87c1d4a35e12c5c`。107 运行验收仍属于 Task 7，不由源码合并替代。
 
 ### Task 7: 合并后 107 隔离验收
 
 **Files:**
 - Maintain: `docs/107cup/implementation-plan.md`
 - Create after runtime acceptance: `docs/107cup/stage5-workflow-evidence.md`
+
+**前置补丁：** `codex/107cup-stage5-live-preview` 仅提供 Task 7 的隔离 Slurm 构建、服务和验证链路。补丁合并前不得部署；本地合同通过不能替代下列 107 门禁。
 
 - [ ] 107 只读检出固定 `main` 合并提交；先运行稳定状态快照，不修改 `current` 和正式 SQLite。
 - [ ] 通过 Slurm 构建不晋升 preview，后端/前端测试及 manifest 全部通过。
