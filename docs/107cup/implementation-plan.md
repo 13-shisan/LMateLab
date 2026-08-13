@@ -141,7 +141,7 @@
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
-| 5. 工作流模型与输入校验 | PARTIAL | 六张工作流表、`mos2_v1`、结构上传、草稿、确认校验和 live 前端已在 Windows 本地实现并通过门禁；确认只进入 `validated`，尚未合并或在 107 运行验收 | 通过 PR 合并后，在 107 的隔离 Slurm preview 中完成数据库副本迁移、真实 API/浏览器验收和前后快照 |
+| 5. 工作流模型与输入校验 | PARTIAL | 功能 PR #16 已合并到 `main` 提交 `619b911`；六张工作流表、`mos2_v1`、结构上传、草稿、确认校验和 live 前端已进入主线，确认只进入 `validated`；尚未在 107 运行验收 | 先合并专用 live-preview 部署补丁，再在 107 完成数据库副本迁移、真实 API/浏览器验收和前后快照 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
@@ -403,7 +403,8 @@ workflow_templates
 - [x] KPOINTS 由固定模板或受控生成器产生。
 - [x] 阶段 5 不调用 Slurm，不创建 Job ID、attempt 或执行目录，全部输入校验均在未来 `sbatch` 边界之前完成。
 - [x] 校验失败写入事件表，但不得产生 Job ID 或 attempt 执行目录。
-- [ ] 合并后在 107 的隔离 preview 中迁移正式数据库副本，完成真实 Operator/Viewer API、浏览器和稳定环境不变验收；通过前阶段 5 保持 `PARTIAL`。
+- [x] 功能 PR #16 已合并到受保护 `main`，合并提交为 `619b9116aee4f6cd4129debca87c1d4a35e12c5c`，包含阶段 5 状态提交 `aaee9a19b8d448d674c6b05abf86be430ab7168a`。
+- [ ] 合并专用 live-preview 部署补丁后，在 107 的隔离 preview 中迁移正式数据库副本，完成真实 Operator/Viewer API、浏览器和稳定环境不变验收；通过前阶段 5 保持 `PARTIAL`。
 
 ## 11. 阶段 6：Slurm 适配器
 
@@ -708,4 +709,5 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Task 5 规格与质量复审均通过。前端对上传、保存和确认使用同步 lock 与 pending 双门禁；参数变化不会复用已消费 upload；写响应不确定时失败关闭，upload 来源要求重新上传，确认失败不再保留权威状态未知的旧草稿。
 - 本地主流程门禁通过：阶段 5 与既有 107 后端专项 `114/114`、前端全套 `111/111`、定向 ESLint、`VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=live npm run build` 和 `git diff --check` 均为零失败。live 构建转换 `1857` 个模块；保留已有 Browserslist、3Dmol `eval` 和大 chunk 警告，不将其误报为本阶段失败。
 - Alembic 显式验收同时覆盖 fresh SQLite 和停在 `2f694f47e108` 的上一 schema 副本：两条路径均升级到 `107c0ffee001`，六张工作流表无缺失且 `PRAGMA integrity_check=ok`；未迁移 source 保持原 revision。临时本地证据位于 `%TEMP%\lmatelab-stage5-migration-631a0b4072c245889f7cad59dfca907f`，不进入 Git 或运行环境。
-- 当前分支尚未推送或合并，107 尚未执行数据库副本迁移、真实 API/浏览器和前后快照验收，因此阶段 5 仅从 `PENDING` 更新为 `PARTIAL`。阶段 6 至 8 继续保持 `PENDING`；下一门禁是 PR 合并后执行专项计划 Task 7 的隔离 Slurm preview 闭环。
+- 功能分支已通过 PR #16 合并到受保护 `main`，合并提交为 `619b9116aee4f6cd4129debca87c1d4a35e12c5c`，并包含阶段 5 状态提交 `aaee9a19b8d448d674c6b05abf86be430ab7168a`。这只完成源码主线合并，107 尚未执行数据库副本迁移、真实 API/浏览器和前后快照验收，因此阶段 5 保持 `PARTIAL`，阶段 6 至 8 继续为 `PENDING`。
+- 隔离分支 `codex/107cup-stage5-live-preview` 正在补齐 Task 7 专用链路：Slurm 构建固定 `live` 前端并生成不晋升发布；服务只迁移正式 SQLite 的私有副本，重定向全部写路径，使用 Job 专用随机 JWT 和私有 Operator/Viewer 凭据；登录节点辅助脚本仅执行 fetch、`sbatch`、调度状态和健康检查。该补丁当前尚未推送、合并或在 107 运行，不得记作远端验收证据。

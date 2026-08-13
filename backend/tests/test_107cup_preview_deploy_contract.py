@@ -179,6 +179,176 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
         self.assertIn("LMATELAB_RELEASE_KIND=stable", source)
         self.assertIn("LMATELAB_DATA_MODE=live", source)
 
+    def test_workflow_preview_build_is_live_and_never_promotes_current(self):
+        source = self.read_required("workflow-preview-build.slurm")
+        for required in (
+            "SLURM_JOB_ID",
+            "LMATELAB_WORKFLOW_PREVIEW_COMMIT",
+            "origin/main",
+            "workflow-previews",
+            "workflow-preview-envs",
+            "VITE_COMPETITION_DATA_MODE=live",
+            "tests.test_competition_workflow_models",
+            "tests.test_competition_inputs",
+            "tests.test_competition_workflow_service",
+            "tests.test_competition_workflow_routes",
+            "manifest.sha256",
+            "npm ci",
+            "npm test",
+            'exec 9>"$root/runtime/workflow-preview-build.lock"',
+            "flock -n 9",
+        ):
+            self.assertIn(required, source)
+        for forbidden in (
+            "current.next",
+            'mv -Tf "$root/current.next"',
+            'printf \'%s\\n\' "$commit" > "$root/runtime/build-commit"',
+            "VITE_COMPETITION_DATA_MODE=demo",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    def test_workflow_preview_service_isolates_every_writable_path(self):
+        source = self.read_required("workflow-preview-service.slurm")
+        for required in (
+            "workflow-previews",
+            "workflow-preview-envs",
+            "workflow-preview-runtime",
+            "sqlite3",
+            ".backup",
+            "LMATELAB_RELEASE_KIND=preview",
+            "LMATELAB_DATA_MODE=live",
+            "LMATELAB_WORKFLOW_ROOT",
+            "workflow-preview-service-port",
+            "alembic -c alembic.ini upgrade head",
+            "107c0ffee001",
+            "workflow_runs",
+            "workflow_steps",
+            "workflow_attempts",
+            "workflow_events",
+            "workflow_files",
+            "workflow_templates",
+            'for role in ("operator", "viewer")',
+            'email = f"stage5-{role}-{job_id}@matflow.top"',
+            "uvicorn main_107cup:app",
+            "--workers 1",
+        ):
+            self.assertIn(required, source)
+        self.assertNotIn("#SBATCH --gres", source)
+        self.assertNotIn('readlink -f "$root/current"', source)
+        self.assertNotIn(
+            "DATABASE_URL=sqlite:////home/scc/pb23030683/lmatelab-107cup/data/db/eln.db",
+            source,
+        )
+        for required in (
+            'runtime_parent="$root/workflow-preview-runtime/$commit"',
+            'runtime="$runtime_parent/$SLURM_JOB_ID"',
+            'mkdir -p "$runtime_parent"',
+            'chmod 700 "$root/workflow-preview-runtime" "$runtime_parent"',
+        ):
+            self.assertIn(required, source)
+
+        runtime_source = source.index('source "$runtime_env"')
+        for variable in (
+            "DATABASE_URL",
+            "DIGEST_DATABASE_URL",
+            "LMATELAB_DATA_DIR",
+            "LMATELAB_WORKFLOW_ROOT",
+            "UPLOADS_ROOT",
+            "VASP_UPLOADS_ROOT",
+            "VASP_CUSTOM_DB_ROOT",
+            "QE_EPW_CUSTOM_DB_ROOT",
+            "VASP_ELEMENTS_CACHE_DIR",
+            "ISSUES_DIR",
+            "CHANGELOG_PATH",
+            "ACADEMIC_REPORTS_FILE",
+            "MPLCONFIGDIR",
+        ):
+            assignment = f"export {variable}="
+            self.assertIn(assignment, source)
+            self.assertGreater(source.index(assignment), runtime_source)
+
+        jwt_assignment = (
+            'export JWT_SECRET="$("$python_env/bin/python" -c '
+            "'import secrets; print(secrets.token_urlsafe(48))'"
+            ')"'
+        )
+        self.assertIn(jwt_assignment, source)
+        self.assertGreater(source.index(jwt_assignment), runtime_source)
+        self.assertNotIn(': "${JWT_SECRET:?JWT_SECRET must be configured}"', source)
+
+    def test_workflow_preview_login_helpers_only_fetch_submit_and_verify(self):
+        for name in (
+            "submit-workflow-preview-build.sh",
+            "submit-workflow-preview-service.sh",
+            "verify-workflow-preview-runtime.sh",
+        ):
+            source = self.read_required(name)
+            for line in source.splitlines():
+                command = line.strip()
+                for forbidden_prefix in (
+                    "npm ci",
+                    "npm run build",
+                    "pip install",
+                    "python -m pip install",
+                    "uvicorn ",
+                    "exec uvicorn ",
+                    "alembic ",
+                ):
+                    self.assertFalse(command.startswith(forbidden_prefix), line)
+
+        build_submit = self.read_required("submit-workflow-preview-build.sh")
+        self.assertIn('git -C "$project" fetch --quiet origin main', build_submit)
+        self.assertIn('test "$(git -C "$project" rev-parse HEAD)" = "$commit"', build_submit)
+        self.assertIn(
+            'test -z "$(git -C "$project" status --porcelain --untracked-files=normal)"',
+            build_submit,
+        )
+        self.assertIn("sbatch --parsable", build_submit)
+        self.assertIn("build-job-id", build_submit)
+
+        service_submit = self.read_required("submit-workflow-preview-service.sh")
+        self.assertIn('git -C "$project" fetch --quiet origin main', service_submit)
+        self.assertIn('test "$(git -C "$project" rev-parse HEAD)" = "$commit"', service_submit)
+        self.assertIn(
+            'test -z "$(git -C "$project" status --porcelain --untracked-files=normal)"',
+            service_submit,
+        )
+        self.assertIn("sha256sum -c manifest.sha256", service_submit)
+        self.assertIn("sha256sum -c manifest.txt >/dev/null", service_submit)
+        self.assertIn("last-service-job-id", service_submit)
+
+    def test_workflow_preview_runtime_verifier_requires_live_schema(self):
+        source = self.read_required("verify-workflow-preview-runtime.sh")
+        for required in (
+            "running|stopped",
+            "squeue",
+            "scontrol",
+            "sacct",
+            "sha256sum -c manifest.sha256",
+            "/api/health/live",
+            "/api/health/ready",
+            '"release_kind": "preview"',
+            '"data_mode": "live"',
+            "107c0ffee001",
+            "workflow_runs",
+            "workflow_templates",
+            "curl --connect-timeout 3",
+            "unexpected LMateLab process found on the login node",
+        ):
+            self.assertIn(required, source)
+
+    def test_workflow_preview_stopped_gate_survives_expired_scontrol_records(self):
+        source = self.read_required("verify-workflow-preview-runtime.sh")
+        self.assertIn('squeue_output=$(squeue -h -j "$job_id"', source)
+        self.assertIn('test -z "$squeue_output"', source)
+        self.assertIn('test -n "$squeue_output"', source)
+        self.assertIn('if ! scontrol_output=$(scontrol show job "$job_id"); then', source)
+        self.assertIn('if test "$mode" = running; then', source)
+        self.assertIn("workflow preview has non-terminal scontrol state after stop", source)
+        self.assertIn("workflow preview has missing or non-terminal sacct state after stop", source)
+        self.assertIn("scontrol record unavailable after preview stop", source)
+        self.assertIn("sacct unavailable; continuing with runtime evidence", source)
+
 
 if __name__ == "__main__":
     unittest.main()
