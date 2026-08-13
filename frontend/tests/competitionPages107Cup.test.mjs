@@ -1005,7 +1005,16 @@ test('new calculation draft payload uses the fixed template and server upload id
 
 test('new calculation source file and parameter changes invalidate stale server state', () => {
   const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
-  const invalidateServerState = loadFunction(source, 'invalidateServerState');
+  const { invalidateServerState, shouldClearConsumedUpload } = loadFunctions(source, [
+    'invalidateServerState',
+    'shouldClearConsumedUpload',
+  ]);
+  const stagedUpload = {
+    structureUpload: { id: 'upload-staged' },
+    workflow: null,
+    confirmation: null,
+    error: '',
+  };
   const prior = {
     structureUpload: { id: 'upload-old' },
     workflow: { id: 'workflow-old', input_sha256: 'old-sha' },
@@ -1025,9 +1034,46 @@ test('new calculation source file and parameter changes invalidate stale server 
     confirmation: null,
     error: '',
   });
+  assert.equal(shouldClearConsumedUpload('upload', stagedUpload), false);
+  assert.equal(shouldClearConsumedUpload('upload', prior), true);
+  assert.equal(shouldClearConsumedUpload('builtin', prior), false);
+  assert.deepEqual(invalidateServerState(stagedUpload, {
+    clearUpload: shouldClearConsumedUpload('upload', stagedUpload),
+  }), stagedUpload);
+  assert.deepEqual(invalidateServerState(prior, {
+    clearUpload: shouldClearConsumedUpload('upload', prior),
+  }), {
+    structureUpload: null,
+    workflow: null,
+    confirmation: null,
+    error: '',
+  });
   assert.match(source, /handleSourceKindChange[\s\S]*?clearUpload:\s*true/);
   assert.match(source, /handleStructureFileChange[\s\S]*?clearUpload:\s*true/);
-  assert.match(source, /handleParameterChange[\s\S]*?clearUpload:\s*false/);
+  assert.match(source, /handleParameterChange[\s\S]*?shouldClearConsumedUpload\(sourceKind,\s*serverState\)/);
+  assert.match(source, /handleParameterChange[\s\S]*?setOriginalFileName\(['"]['"]\)/);
+  assert.match(source, /handleParameterChange[\s\S]*?setFileInputKey/);
+});
+
+test('new calculation live status announces pending writes before saved objects', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const describeCommandStatus = loadFunction(source, 'describeCommandStatus');
+  const serverState = {
+    structureUpload: { id: 'upload-server' },
+    workflow: { id: 'workflow-server', status: 'draft', input_sha256: 'abc123' },
+    confirmation: { id: 'workflow-server', status: 'validated' },
+    error: '',
+  };
+  const common = { sourceKind: 'upload', serverState };
+
+  assert.equal(describeCommandStatus({ ...common, uploadPending: true }), '正在上传并等待服务端解析结构');
+  assert.equal(describeCommandStatus({ ...common, savePending: true }), '正在保存草稿');
+  assert.equal(describeCommandStatus({ ...common, confirmPending: true }), '正在执行提交前校验');
+  assert.equal(
+    describeCommandStatus(common),
+    '已校验，等待 Slurm 适配器 · workflow-server',
+  );
+  assert.match(source, /<span\s+aria-live=['"]polite['"]>\s*\{describeCommandStatus\(/s);
 });
 
 test('new calculation confirms only the latest saved workflow id', () => {

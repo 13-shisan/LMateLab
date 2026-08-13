@@ -104,6 +104,32 @@ function invalidateServerState(current = {}, { clearUpload = false } = {}) {
   };
 }
 
+function shouldClearConsumedUpload(sourceKind, serverState = {}) {
+  return sourceKind === 'upload' && Boolean(serverState.workflow?.id);
+}
+
+function describeCommandStatus({
+  sourceKind,
+  serverState = {},
+  uploadPending = false,
+  savePending = false,
+  confirmPending = false,
+}) {
+  if (uploadPending) return '正在上传并等待服务端解析结构';
+  if (savePending) return '正在保存草稿';
+  if (confirmPending) return '正在执行提交前校验';
+  if (serverState.confirmation) {
+    return `已校验，等待 Slurm 适配器 · ${serverState.confirmation.id}`;
+  }
+  if (serverState.workflow) {
+    return `${serverState.workflow.id} · ${serverState.workflow.status} · SHA-256 ${serverState.workflow.input_sha256}`;
+  }
+  if (serverState.structureUpload) {
+    return `结构已由服务端解析 · 上传 ID ${serverState.structureUpload.id}`;
+  }
+  return `未保存 · mos2_v1 · ${sourceKind === 'builtin' ? '内置 MoS2' : '上传结构'}`;
+}
+
 export default function CompetitionNewCalculation() {
   const { provider, mode } = useCompetitionData();
   const [sourceKind, setSourceKind] = useState('builtin');
@@ -187,7 +213,12 @@ export default function CompetitionNewCalculation() {
       ...current,
       [stepKey]: { ...current[stepKey], [parameterKey]: value },
     }));
-    clearPersistedState({ clearUpload: false });
+    const clearUpload = shouldClearConsumedUpload(sourceKind, serverState);
+    if (clearUpload) {
+      setOriginalFileName('');
+      setFileInputKey((current) => current + 1);
+    }
+    clearPersistedState({ clearUpload });
   }
 
   async function handleSaveDraft() {
@@ -469,19 +500,13 @@ export default function CompetitionNewCalculation() {
         <div>
           <strong>{serverState.confirmation ? '工作流已确认' : '工作流草稿'}</strong>
           <span aria-live="polite">
-            {serverState.confirmation
-              ? `已校验，等待 Slurm 适配器 · ${serverState.confirmation.id}`
-              : serverState.workflow
-                ? `${serverState.workflow.id} · ${serverState.workflow.status} · SHA-256 ${serverState.workflow.input_sha256}`
-                : uploadPending
-                  ? '正在上传并等待服务端解析结构'
-                  : serverState.structureUpload
-                    ? `结构已由服务端解析 · 上传 ID ${serverState.structureUpload.id}`
-                  : savePending
-                    ? '正在保存草稿'
-                    : confirmPending
-                      ? '正在执行提交前校验'
-                      : `未保存 · mos2_v1 · ${sourceKind === 'builtin' ? '内置 MoS2' : '上传结构'}`}
+            {describeCommandStatus({
+              sourceKind,
+              serverState,
+              uploadPending,
+              savePending,
+              confirmPending,
+            })}
           </span>
           {serverState.error ? <p role="alert">{serverState.error}</p> : null}
         </div>
