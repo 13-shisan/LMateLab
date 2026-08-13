@@ -9,7 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from competition_authz import require_operator, require_viewer_or_operator
-from competition_runtime import workflow_root
+from competition_runtime import release_commit, workflow_root
 from database import get_db
 from models import User
 from models_workflow import WorkflowRun, WorkflowStep
@@ -161,6 +161,7 @@ def save_draft(
             workflow_root(),
             owner_id=current_user.id,
             payload=payload,
+            release_commit=release_commit(),
         )
     except InputValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import uuid
@@ -283,7 +284,12 @@ def create_draft(
     *,
     owner_id: int,
     payload: DraftCreateRequest | dict[str, Any],
+    release_commit: str,
 ) -> WorkflowMutationResult:
+    if re.fullmatch(r"[0-9a-f]{40}", release_commit) is None:
+        raise WorkflowServiceError(
+            "invalid_release_commit", "workflow release commit is invalid"
+        )
     validated = _request_payload(payload)
     root = _root_path(workflow_root)
     upload_id = validated.get("structure_upload_id")
@@ -306,6 +312,7 @@ def create_draft(
             material="MoS2",
             source_kind=validated["source_kind"],
             status="draft",
+            release_commit=release_commit,
         )
         session.add(run)
         session.flush()
@@ -389,6 +396,7 @@ def create_draft(
                     "input_sha256": manifest_hash,
                     "source_kind": validated["source_kind"],
                     "template_version": validated["template_version"],
+                    "release_commit": release_commit,
                 },
             )
         )
