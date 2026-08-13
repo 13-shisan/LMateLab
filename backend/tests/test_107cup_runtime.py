@@ -200,7 +200,14 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             "flagembedding",
         ):
             self.assertNotIn(excluded, packages)
-        for required in ("fastapi", "uvicorn", "sqlalchemy", "alembic", "ase"):
+        for required in (
+            "fastapi",
+            "uvicorn",
+            "sqlalchemy",
+            "alembic",
+            "ase",
+            "httpx",
+        ):
             self.assertIn(required, packages)
 
 
