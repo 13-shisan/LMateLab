@@ -117,14 +117,16 @@ test('competition preview passes the complete read-only browser acceptance', asy
     }
 
     if (route.path === '/dashboard/calculations/new') {
+      await page.getByRole('button', { name: '上传结构', exact: true }).click();
       await expect(page.locator('input[type="file"]')).toBeDisabled();
       await expect(page.getByRole('button', { name: '保存草稿' })).toBeDisabled();
       await expect(page.getByRole('button', { name: '提交四步工作流' })).toBeDisabled();
+      await page.getByRole('button', { name: '内置 MoS2', exact: true }).click();
     }
   }
 
   await page.goto('/dashboard/workflows/wf-demo-mos2-success');
-  await expect(page.getByText('完整 relax → SCF → BAND / DOS', { exact: false })).toBeVisible();
+  await expect(page.getByText('固定 relax → SCF → BAND / DOS', { exact: false })).toBeVisible();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: '步骤与调度证据', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '取消工作流' })).toBeDisabled();

@@ -266,6 +266,9 @@
 }
 
 .competition-table-scroll {
+  position: relative;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid #dfe5ee;

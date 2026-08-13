@@ -74,7 +74,13 @@ curl --fail --silent --show-error \
   "http://$stable_node:$stable_port/api/health/live" \
   > "$evidence/stable-health-live.json"
 squeue -j "$stable_job_id" -o '%.18i %.12P %.20j %.10T %.12M %R' > "$evidence/squeue.txt"
-sacct -j "$stable_job_id" --format=JobID,State,ExitCode,Elapsed,NodeList > "$evidence/sacct.txt"
+scontrol show job "$stable_job_id" > "$evidence/scontrol.txt"
+if ! sacct -j "$stable_job_id" --format=JobID,State,ExitCode,Elapsed,NodeList \
+  > "$evidence/sacct.txt" 2> "$evidence/sacct.stderr.txt"; then
+  printf '%s\n' unavailable > "$evidence/sacct-status.txt"
+else
+  printf '%s\n' available > "$evidence/sacct-status.txt"
+fi
 
 if test "$phase" = after; then
   : "${LMATELAB_PREVIEW_BEFORE_DIR:?after snapshot requires the before evidence directory}"

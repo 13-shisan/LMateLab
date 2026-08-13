@@ -141,7 +141,7 @@
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | Job 33852 在 anode16 运行；Job 34005 完成旧发布启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer 已通过公开入口验收；Operator 已通过独立隧道完成认证、身份和桌面/移动界面验收；当前尚无业务写接口 | 配置三名成员独立应用身份；阶段 5/6 提供写接口后验收资源归属边界 |
-| 5. 工作流模型与输入校验 | PENDING | 前端交互和草稿输入范围已确认，尚无工作流领域模型 | 所有危险输入在 `sbatch` 前失败 |
+| 5. 工作流模型与输入校验 | PARTIAL | 功能 PR #16 已合并到 `main` 提交 `619b911`；六张工作流表、`mos2_v1`、结构上传、草稿、确认校验和 live 前端已进入主线，确认只进入 `validated`；尚未在 107 运行验收 | 先合并专用 live-preview 部署补丁，再在 107 完成数据库副本迁移、真实 API/浏览器验收和前后快照 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
@@ -372,8 +372,12 @@ Operator 浏览器验收证据（`2026-08-08`）：
 - Create: `backend/alembic/versions/107c0ffee001_add_competition_workflows.py`
 - Create: `backend/tests/test_competition_inputs.py`
 - Create: `backend/tests/test_competition_workflow_models.py`
-- Create: `frontend/src/pages/competition/NewCalculation.jsx`
-- Create: `frontend/tests/competitionNewCalculation.test.mjs`
+- Modify: `frontend/src/pages/competition/CompetitionNewCalculation.jsx`
+- Modify: `frontend/src/features/competition/data/apiCompetitionDataProvider.js`
+- Modify: `frontend/tests/competitionPages107Cup.test.mjs`
+- Modify: `frontend/tests/competitionDataProvider.test.mjs`
+- Create: `backend/tests/test_competition_workflow_service.py`
+- Create: `backend/tests/test_competition_workflow_routes.py`
 
 数据库实体固定为：
 
@@ -388,17 +392,19 @@ workflow_templates
 
 每个文件记录相对路径、大小、SHA-256、生成来源和所属 attempt。POTCAR 不进入 Git；只记录元素顺序、赝势标识和运行时文件哈希。
 
-- [ ] 先写失败测试覆盖缺文件、路径穿越、命令注入、错误元素顺序和参数越界。
-- [ ] 创建 Alembic migration，并在全新数据库和升级数据库各运行一次。
-- [ ] 固定 MoS2 模板版本为 `mos2_v1`，不接受任意模板上传。
-- [ ] Operator 可以上传一个最大 `1 MiB`、最多 `200` 原子的文本 POSCAR/CIF；Viewer 和预览模式不能上传。
-- [ ] 上传文件先使用结构解析器读取并记录 SHA-256，不依赖扩展名、MIME 字符串或用户提供的路径决定可信格式。
-- [ ] 合法输入先保存为可追溯草稿；只有 Operator 明确确认后才进入 Slurm 提交路径。
-- [ ] 使用结构解析器核对 POSCAR 元素顺序，不使用字符串猜测。
-- [ ] INCAR 只允许阶段定义的键和值域。
-- [ ] KPOINTS 由固定模板或受控生成器产生。
-- [ ] 所有校验在创建 Slurm 作业前完成。
-- [ ] 校验失败写入事件表，但不得产生 Job ID 或 attempt 执行目录。
+- [x] 先写失败测试覆盖缺文件、路径穿越、命令注入、错误元素顺序和参数越界。
+- [x] 创建 Alembic migration，并在全新数据库和上一 schema 的数据库副本上各运行一次；两者均升级到 `107c0ffee001`，六张表齐全且 `PRAGMA integrity_check=ok`。
+- [x] 固定 MoS2 模板版本为 `mos2_v1`，不接受任意模板上传。
+- [x] Operator 可以上传一个最大 `1 MiB`、最多 `200` 原子的文本 POSCAR/CIF；Viewer 和 demo 模式在 provider 调用前拒绝写入。
+- [x] 上传文件先使用结构解析器读取并记录 SHA-256，不依赖扩展名、MIME 字符串或用户提供的路径决定可信格式。
+- [x] 合法输入先保存为可追溯草稿；只有 Operator 明确确认后才进入 `validated`，界面显示“已校验，等待 Slurm 适配器”。
+- [x] 使用结构解析器核对 POSCAR 元素顺序，不使用字符串猜测。
+- [x] INCAR 只允许阶段定义的键和值域。
+- [x] KPOINTS 由固定模板或受控生成器产生。
+- [x] 阶段 5 不调用 Slurm，不创建 Job ID、attempt 或执行目录，全部输入校验均在未来 `sbatch` 边界之前完成。
+- [x] 校验失败写入事件表，但不得产生 Job ID 或 attempt 执行目录。
+- [x] 功能 PR #16 已合并到受保护 `main`，合并提交为 `619b9116aee4f6cd4129debca87c1d4a35e12c5c`，包含阶段 5 状态提交 `aaee9a19b8d448d674c6b05abf86be430ab7168a`。
+- [ ] 合并专用 live-preview 部署补丁后，在 107 的隔离 preview 中迁移正式数据库副本，完成真实 Operator/Viewer API、浏览器和稳定环境不变验收；通过前阶段 5 保持 `PARTIAL`。
 
 ## 11. 阶段 6：Slurm 适配器
 
@@ -566,13 +572,13 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 实现 demo/live 数据提供器；预览模式的全部 mutation 失败关闭且不伪造成功。
 - [x] 使用内置 MoS2 演示成功、运行中和人为失败状态；不导入 4090 生产数据。
 - [x] 在本地完成针对性测试、构建和代码检查，只记录为本地预检。
-- [ ] 将功能分支推送 Gitea 并通过 PR 合并；107 只拉取固定合并提交，不直接检出未合并功能分支。
-- [ ] 通过 107 Slurm 构建不晋升的 `previews/<commit>` 发布和独立 manifest。
-- [ ] 启动独立 Slurm 预览 Job，使用独立数据库、runtime 目录和未占用端口；不得切换 `current` 或修改稳定数据库。
-- [ ] 从 Windows 浏览器完成 `1440x900`、`1024x768` 和 `390x844` 验收，包括 3D Canvas 非空检查。
-- [ ] 记录预览 Job、节点、提交、端口、manifest、健康检查和结束后端口消失证据。
-- [ ] 对比预览前后的稳定 `current`、正式数据库和稳定服务 Job，证明未受影响。
-- [ ] 用户确认前端预览后，再为阶段 5 工作流模型与输入校验创建下一份实施计划。
+- [x] 将功能分支推送 Gitea 并通过 PR 合并；107 只拉取固定合并提交，不直接检出未合并功能分支。
+- [x] 通过 107 Slurm 构建不晋升的 `previews/<commit>` 发布和独立 manifest。
+- [x] 启动独立 Slurm 预览 Job，使用独立数据库、runtime 目录和未占用端口；不得切换 `current` 或修改稳定数据库。
+- [x] 从 Windows 浏览器完成 `1440x900`、`1024x768` 和 `390x844` 验收，包括 3D Canvas 非空检查。
+- [x] 记录预览 Job、节点、提交、端口、manifest、健康检查和结束后端口消失证据；详见 `docs/107cup/frontend-preview-evidence.md`。
+- [x] 对比预览前后的稳定 `current`、正式数据库和稳定服务 Job，证明未受影响。
+- [x] 用户确认前端预览后，再为阶段 5 工作流模型与输入校验创建下一份实施计划；专项计划为 `docs/superpowers/plans/2026-08-12-107cup-stage5-workflows.md`。
 
 另外两名成员的 Git 和应用身份仍是阶段 1/4 的剩余门禁；按用户决定暂不处理，不阻塞本次前端预览，但必须在比赛交付前完成。
 
@@ -677,3 +683,34 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Task 13 Step 1 已完成完整 Windows 本地预检：后端命令 `python -m unittest tests.test_107cup_authz tests.test_107cup_runtime tests.test_107cup_deploy_contract tests.test_107cup_preview_deploy_contract tests.test_health_readiness -v` 通过 `42/42`；前端 `npm test` 通过 `103/103`；`VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=demo npm run build` 成功转换 `1857` 个模块；定向 ESLint 与 `git diff --check` 均通过。
 - 本地预检同时处理两项平台兼容问题：Windows 不提供可依赖的 POSIX 最终权限位，因此迁移测试仅在非 Windows 平台断言目录 `0700` 和备份 `0600`，Linux/107 的严格断言保持不变，跨平台仍检查 `os.open` 使用 `O_CREAT|O_EXCL` 和 `0600`；周期表组件仅为已批准的兼容 helper 重导出增加定向 ESLint 说明，没有扩大豁免范围。
 - 当前五个竞赛入口、demo/live provider、三视口 Playwright 验收代码和隔离预览部署脚本均只完成本地实现与预检。尚未完成 Gitea PR 合并、107 Slurm 预览构建/服务、真实浏览器截图与 3D Canvas 像素验收，也没有生成真实工作流、Slurm 控制或 VASP 计算证据；阶段 5 至 8 继续为 `PENDING`。
+- PR #12 已合并为 `3fa7447372784a5b67c455690dc1b458197eb49e`，107 只读源码检出已刷新到该固定提交；稳定入口仍运行 Job `33852`、节点 `anode16`、端口 `18731` 和发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，尚未构建或启动新预览。
+- 第一次部署前快照 Job `36592` 在 `P107-A100/anode17` 因平台 `sacct` 后端连接 `localhost:6819` 被拒绝，以 `FAILED/1:0` 结束。失败证据保留在 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/3fa7447372784a5b67c455690dc1b458197eb49e/before-36592`：目录/文件为 `0700/0600`，已记录稳定 `current`、两套数据库 SHA-256 和 `integrity_check=ok`、Job/节点/端口/提交、健康 JSON 与 `squeue`；因脚本在 manifest 生成前退出，该目录不能作为成功 before 快照。
+- 本地热修复按 RED `8/10`、GREEN `10/10` 增加调度证据降级合同：快照和预览验证器必须保留 `scontrol` 权威状态；`sacct` stdout、stderr 和可用性需原样记录，但平台记账服务不可用不得掩盖其他成功门禁。热修复合并并在 107 重跑成功前，不提交预览构建或服务 Job，前后快照、浏览器验收和阶段 5 至 8 状态保持未完成。
+- PR #13 已将上述 `sacct` 降级修复合并为 `25b0a8630e8ebf49abe7ec9fc85088f5045c9947`，107 只读检出同步到该提交。成功前快照 Job `36608` 在 `anode17` 以 `COMPLETED/0:0` 结束，两套稳定 SQLite 的 `integrity_check` 均为 `ok`，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/25b0a8630e8ebf49abe7ec9fc85088f5045c9947/before-36608`。
+- 预览构建 Job `36611` 在 `anode02` 以 `COMPLETED/0:0` 结束：后端 `44/44`、前端 `103/103` 通过，Vite 转换 `1857` 个模块；生成不晋升的 `previews/25b0a8630e8ebf49abe7ec9fc85088f5045c9947`，manifest SHA-256 为 `011405ad3745e6bd31ca8f8f1ce23affeaa000f0b79f5eb1671a3fdc5fc7dd4c`。
+- 独立预览服务 Job `36612` 在 `anode01:20612` 启动，健康元数据明确为 `release_kind=preview`、`data_mode=demo`，使用预览数据库副本且未切换稳定 `current`。真实三视口浏览器验收发现移动端表格把 `390px` 页面扩宽至 `736px`，同时发现上传控件验收顺序、工作流文案断言、软件 WebGL 参数和提交脚本 stdout 合同问题，因此该合并提交的浏览器验收判定为失败；Job `36612` 随后受控取消，Uvicorn 完整关闭并确认端口消失，失败现场和证据均保留。
+- 本地分支 `codex/107cup-frontend-preview-qa-fix` 已针对上述问题完成热修复预检：后端 `44/44`、前端 `104/104`、定向 ESLint、demo 构建和 `git diff --check` 通过；连接 Job `36612` 的只读预览 API 后，Playwright 在 `1440x900`、`1024x768`、`390x844` 三个视口通过 `3/3`，控制台问题和业务写请求均为 `0`，三个视口的 3D Canvas 彩色像素分别为 `2248`、`2403`、`3125`。本地证据位于 `D:\Documents\matflow项目\LMateLab-107Cup-evidence\frontend-preview-local-qa-fix-3`；这只是本地热修复预检，不能替代合并后 107 构建和真实浏览器复验。
+- 后快照 Job `36627` 在 `anode17` 以 `COMPLETED/0:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/25b0a8630e8ebf49abe7ec9fc85088f5045c9947/after-36627`。manifest 全量复核通过，且与 `before-36608` 逐项比较确认稳定 `current` 仍为发布 `1bba72d0ade2bb7024081d384584524a9c9d1c69`、稳定 Job `36597` 仍运行于 `anode01:18731`、两套数据库哈希和完整性、稳定服务提交及健康响应均未改变；平台 `sacct` 仍不可用但其 stderr 和降级状态已留证。
+- 当前下一门禁是把热修复通过 PR 合并后，在 107 对新的固定 `main` 提交重新执行“前快照 -> Slurm 预览构建 -> 独立预览服务 -> 三视口 Playwright 与 Canvas 像素检查 -> 停服与端口消失 -> 后快照”。在该闭环通过前，三视口验收和预览运行证据清单保持未勾选，阶段 5 至 8 继续为 `PENDING`。
+
+### 2026-08-12
+
+- PR #14 已合并到受保护的 `main`，合并提交为 `7c9d34eccc9e4efb9a533e215d52a6eb96e2e5d8`。107 针对该固定提交完成前快照 Job `36637`、预览构建 Job `36638`、独立服务 Job `36641` 和后快照 Job `36653`；完整摘要见 `docs/107cup/frontend-preview-evidence.md`。
+- Job `36638` 在 `anode02` 以 `COMPLETED/0:0` 结束，后端 `44/44`、前端 `104/104`、Vite `1857` 模块构建通过，生成不晋升的预览发布；manifest SHA-256 为 `837e85822cb74a24134423356b6d385505e0fb0fe51d1e80cd85adbb5edd789d`。
+- Job `36641` 在 `anode01:20641` 以 `release_kind=preview`、`data_mode=demo` 启动。Windows Playwright 直接验收该 107 服务，三个固定视口通过 `3/3`，3D Canvas 彩色像素分别为 `2248`、`2403`、`3125`，控制台问题和业务写请求均为 `0`；验收后服务受控停止，Uvicorn 完整关闭且端口确认消失。
+- 前后快照比较确认稳定 `current` 仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，稳定 Job `36597` 仍运行于 `anode01:18731`，两套正式 SQLite 完整性为 `ok` 且哈希未变。平台 `sacct` 仍不可用，短作业 `scontrol` 记录已被集群清理，原始日志、前后快照和 SHA-256 证据均保留。
+- 至此“前端完整形态预览”的三视口和隔离运行证据门禁已完成，但全部业务数据仍为演示数据。阶段 5 至 8 保持 `PENDING`；只有用户明确确认预览后，才为阶段 5 工作流模型与输入校验生成下一份实施计划。
+
+- 用户已确认继续阶段 5。新增 `docs/superpowers/plans/2026-08-12-107cup-stage5-workflows.md`，把范围固定为六张工作流表、`mos2_v1` 模板、结构上传、草稿、确认和 `sbatch` 前校验；阶段 5 实现前仍为 `PENDING`，阶段 6 至 8 不变。
+
+### 2026-08-13
+
+- 阶段 5 的 Windows 本地实现检查点为 `9bfa6007c92868c3ee89e11be47e5ab0b52149af`（不含本次方案状态提交）：新增六张工作流表、唯一 Alembic head `107c0ffee001`、固定 `mos2_v1`、POSCAR/CIF 暂存与服务端摘要、私有输入物化、SHA-256 清单、草稿/确认事务、Operator/Viewer API 边界和 live 新建计算页面。确认成功只进入 `validated`，没有调用 Slurm/VASP，也没有创建 Job ID、attempt 或执行目录。
+- Task 5 规格与质量复审均通过。前端对上传、保存和确认使用同步 lock 与 pending 双门禁；参数变化不会复用已消费 upload；写响应不确定时失败关闭，upload 来源要求重新上传，确认失败不再保留权威状态未知的旧草稿。
+- 本地主流程门禁通过：阶段 5 与既有 107 后端专项 `114/114`、前端全套 `111/111`、定向 ESLint、`VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=live npm run build` 和 `git diff --check` 均为零失败。live 构建转换 `1857` 个模块；保留已有 Browserslist、3Dmol `eval` 和大 chunk 警告，不将其误报为本阶段失败。
+- Alembic 显式验收同时覆盖 fresh SQLite 和停在 `2f694f47e108` 的上一 schema 副本：两条路径均升级到 `107c0ffee001`，六张工作流表无缺失且 `PRAGMA integrity_check=ok`；未迁移 source 保持原 revision。临时本地证据位于 `%TEMP%\lmatelab-stage5-migration-631a0b4072c245889f7cad59dfca907f`，不进入 Git 或运行环境。
+- 功能分支已通过 PR #16 合并到受保护 `main`，合并提交为 `619b9116aee4f6cd4129debca87c1d4a35e12c5c`，并包含阶段 5 状态提交 `aaee9a19b8d448d674c6b05abf86be430ab7168a`。这只完成源码主线合并，107 尚未执行数据库副本迁移、真实 API/浏览器和前后快照验收，因此阶段 5 保持 `PARTIAL`，阶段 6 至 8 继续为 `PENDING`。
+- 隔离分支 `codex/107cup-stage5-live-preview` 正在补齐 Task 7 专用链路：Slurm 构建固定 `live` 前端并生成不晋升发布；服务只迁移正式 SQLite 的私有副本，重定向全部写路径，使用 Job 专用随机 JWT 和私有 Operator/Viewer 凭据；登录节点辅助脚本仅执行 fetch、`sbatch`、调度状态和健康检查。该补丁当前尚未推送、合并或在 107 运行，不得记作远端验收证据。
+- PR #17 已将上述隔离链路合并为 `644cb38282de24710e9eebda6754e07b8dac190b`。107 只读检出已固定到该提交；前快照 Job `37390` 在 `anode16` 以 `COMPLETED/0:0` 结束，两套正式 SQLite 的 `PRAGMA integrity_check` 均为 `ok`，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/644cb38282de24710e9eebda6754e07b8dac190b/before-37390`，manifest 全量校验通过。
+- 首次 workflow preview 构建 Job `37391` 在 `anode01` 以 `FAILED/1:0` 结束。失败发生于后端测试收集：`requirements-107cup.txt` 未包含 Starlette `TestClient` 必需的 `httpx`，因而抛出 `ModuleNotFoundError`；尚未运行阶段 5 后端测试、前端测试或构建，也未创建正式 preview 发布、数据库副本、端口或服务。失败日志和 `.644cb38282de24710e9eebda6754e07b8dac190b.37391` 暂存目录保留，稳定 `current`、正式数据库和 Job `36597` 未被该构建修改。
+- 当前修复门禁仅为在 107 专用依赖中固定兼容的 `httpx` 并增加依赖合同测试。该修复经独立 PR 合并前不得清理失败现场、重提构建或启动 workflow preview；合并后需对新的固定 `main` 重新执行前快照和完整 Task 7 闭环，阶段 5 继续保持 `PARTIAL`。

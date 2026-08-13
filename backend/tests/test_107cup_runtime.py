@@ -115,6 +115,28 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         ):
             self.assertFalse(any(disabled in module_name for module_name in modules))
 
+    def test_workflow_router_is_the_only_business_router(self):
+        runtime = self.require_runtime()
+
+        self.assertEqual(
+            (("routers.competition_workflows", "router"),),
+            runtime.BUSINESS_ROUTER_IMPORTS,
+        )
+
+    def test_workflow_root_is_environment_driven_with_107_writable_default(self):
+        runtime = self.require_runtime()
+
+        configured = runtime.workflow_root(
+            {"LMATELAB_WORKFLOW_ROOT": "/tmp/lmatelab-stage5"}
+        )
+        default = runtime.workflow_root({})
+
+        self.assertEqual(Path("/tmp/lmatelab-stage5"), configured)
+        self.assertEqual(
+            Path("/home/scc/pb23030683/lmatelab-107cup/data/workflows"),
+            default,
+        )
+
     def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):
         entrypoint = BACKEND_ROOT / "main_107cup.py"
         self.assertTrue(entrypoint.is_file(), str(entrypoint))
@@ -178,7 +200,14 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             "flagembedding",
         ):
             self.assertNotIn(excluded, packages)
-        for required in ("fastapi", "uvicorn", "sqlalchemy", "alembic", "ase"):
+        for required in (
+            "fastapi",
+            "uvicorn",
+            "sqlalchemy",
+            "alembic",
+            "ase",
+            "httpx",
+        ):
             self.assertIn(required, packages)
 
 
