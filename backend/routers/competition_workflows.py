@@ -14,7 +14,7 @@ from database import get_db
 from models import User
 from models_workflow import WorkflowRun, WorkflowStep
 from schemas_workflow import DraftCreateRequest
-from services.competition_inputs import InputValidationError
+from services.competition_inputs import InputValidationError, MAX_STRUCTURE_BYTES
 from services.competition_workflows import (
     WorkflowServiceError,
     confirm_workflow,
@@ -122,7 +122,9 @@ async def upload_structure(
     db: Session = Depends(get_db),
 ):
     try:
-        content = await file.read()
+        content = await file.read(MAX_STRUCTURE_BYTES + 1)
+        if len(content) > MAX_STRUCTURE_BYTES:
+            raise InputValidationError("structure file exceeds 1 MiB limit")
         result = stage_structure(
             db,
             workflow_root(),
@@ -136,6 +138,8 @@ async def upload_structure(
         _raise_service_error(exc)
     except Exception:
         raise HTTPException(status_code=500, detail="workflow service unavailable") from None
+    finally:
+        await file.close()
     return {
         "id": result.id,
         "size_bytes": result.size_bytes,

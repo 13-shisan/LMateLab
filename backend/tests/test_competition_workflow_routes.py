@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
@@ -12,7 +12,9 @@ from auth_identity import get_current_user
 from database import Base, get_db
 from models import User
 from models_workflow import WorkflowEvent, WorkflowRun
-from routers.competition_workflows import router
+from routers.competition_workflows import router, upload_structure
+from schemas_workflow import StructureUploadResult
+from services.competition_inputs import InputValidationError, MAX_STRUCTURE_BYTES
 
 
 VALID_POSCAR = b"""MoS2
@@ -143,6 +145,46 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         with Session(self.engine) as session:
             run = session.get(WorkflowRun, draft["id"])
             self.assertEqual(self.operator_id, run.owner_id)
+
+    def test_oversize_upload_is_rejected_before_structure_service(self):
+        with mock.patch(
+            "routers.competition_workflows.stage_structure"
+        ) as stage_structure_spy:
+            response = self.client.post(
+                "/api/competition/structures",
+                files={
+                    "file": (
+                        "POSCAR",
+                        b"x" * (MAX_STRUCTURE_BYTES + 1),
+                        "application/octet-stream",
+                    )
+                },
+            )
+
+        self.assertEqual(422, response.status_code, response.text)
+        stage_structure_spy.assert_not_called()
+        self.assertNotIn(str(self.workflow_root), response.text)
+
+    def test_exact_upload_limit_reaches_structure_service(self):
+        expected = StructureUploadResult(
+            id="upload-id",
+            relative_path="private/not-serialized",
+            size_bytes=MAX_STRUCTURE_BYTES,
+            sha256="a" * 64,
+            source_format="vasp",
+            summary={"formula": "MoS2"},
+        )
+        with mock.patch(
+            "routers.competition_workflows.stage_structure", return_value=expected
+        ) as stage_structure_spy:
+            response = self.client.post(
+                "/api/competition/structures",
+                files={"file": ("POSCAR", b"x" * MAX_STRUCTURE_BYTES)},
+            )
+
+        self.assertEqual(201, response.status_code, response.text)
+        self.assertEqual(MAX_STRUCTURE_BYTES, len(stage_structure_spy.call_args.kwargs["content"]))
+        self.assertNotIn("relative_path", response.text)
 
     def test_viewer_cannot_call_any_stage_five_write_route(self):
         self.identity_id = self.viewer_id
@@ -300,6 +342,53 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             )
             self.assertIsNotNone(event)
             self.assertNotIn(str(self.workflow_root), event.payload_json)
+
+
+class UploadResourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_file_is_closed_once_on_all_outcomes(self):
+        current_user = mock.Mock(id=1)
+        session = mock.Mock()
+        successful_result = StructureUploadResult(
+            id="upload-id",
+            relative_path="private/not-serialized",
+            size_bytes=1,
+            sha256="a" * 64,
+            source_format="vasp",
+            summary={"formula": "MoS2"},
+        )
+        cases = (
+            (b"x", successful_result, None),
+            (b"x", InputValidationError("invalid structure"), HTTPException),
+            (b"x" * (MAX_STRUCTURE_BYTES + 1), successful_result, HTTPException),
+            (b"x", RuntimeError("database path /secret"), HTTPException),
+        )
+
+        for content, service_outcome, expected_error in cases:
+            with self.subTest(service_outcome=type(service_outcome).__name__):
+                upload = mock.Mock()
+                upload.filename = "POSCAR"
+                upload.read = mock.AsyncMock(return_value=content)
+                upload.close = mock.AsyncMock()
+                if isinstance(service_outcome, Exception):
+                    service_patch = mock.patch(
+                        "routers.competition_workflows.stage_structure",
+                        side_effect=service_outcome,
+                    )
+                else:
+                    service_patch = mock.patch(
+                        "routers.competition_workflows.stage_structure",
+                        return_value=service_outcome,
+                    )
+                with service_patch as stage_structure_spy:
+                    if expected_error is None:
+                        await upload_structure(upload, current_user, session)
+                    else:
+                        with self.assertRaises(expected_error):
+                            await upload_structure(upload, current_user, session)
+                upload.read.assert_awaited_once_with(MAX_STRUCTURE_BYTES + 1)
+                upload.close.assert_awaited_once_with()
+                if len(content) > MAX_STRUCTURE_BYTES:
+                    stage_structure_spy.assert_not_called()
 
 
 if __name__ == "__main__":
