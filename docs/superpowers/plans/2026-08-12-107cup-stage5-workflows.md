@@ -114,4 +114,4 @@
 - [x] 浏览器验证工作台、新建计算、工作流列表和详情；results/database 显示真实空状态而不是 demo。
 - [x] 停止 preview 并确认端口消失；后快照证明稳定 `current`、Job、端口和正式数据库未变。
 - [x] 固化 Job、节点、提交、manifest、SQLite、API、浏览器和 SHA-256 证据到 `docs/107cup/stage5-workflow-evidence.md`。
-- [ ] 合并独立证据文档 PR；只有合并后阶段 5 才可改为 `DONE`。
+- [x] 独立证据文档 PR #22 已合并为 `3cf9b44f0b55a11e43f0a4960dc689cf0607ced2`；阶段 5 已改为 `DONE`，阶段 6 仍等待用户明确确认。
