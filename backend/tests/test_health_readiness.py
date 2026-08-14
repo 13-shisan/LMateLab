@@ -30,17 +30,18 @@ class HealthReadinessTests(unittest.TestCase):
         return engine
 
     def test_database_readiness_requires_primary_and_digest_tables(self):
-        primary = self.engine_with_table("users")
-        digest = self.engine_with_table("daily_digests")
+        with mock.patch.dict(os.environ, {"LMATELAB_EDITION": ""}):
+            primary = self.engine_with_table("users")
+            digest = self.engine_with_table("daily_digests")
 
-        self.assertEqual(
-            {"status": "ready"},
-            health.database_readiness(primary, digest),
-        )
+            self.assertEqual(
+                {"status": "ready"},
+                health.database_readiness(primary, digest),
+            )
 
-        missing_primary = create_engine("sqlite://")
-        with self.assertRaises(SQLAlchemyError):
-            health.database_readiness(missing_primary, digest)
+            missing_primary = create_engine("sqlite://")
+            with self.assertRaises(SQLAlchemyError):
+                health.database_readiness(missing_primary, digest)
 
     def test_competition_readiness_requires_workflow_migration(self):
         primary = self.engine_with_table("users")
