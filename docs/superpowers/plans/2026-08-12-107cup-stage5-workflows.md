@@ -107,10 +107,11 @@
 
 **前置补丁：** `codex/107cup-stage5-live-preview` 仅提供 Task 7 的隔离 Slurm 构建、服务和验证链路。补丁合并前不得部署；本地合同通过不能替代下列 107 门禁。
 
-- [ ] 107 只读检出固定 `main` 合并提交；先运行稳定状态快照，不修改 `current` 和正式 SQLite。
-- [ ] 通过 Slurm 构建不晋升 preview，后端/前端测试及 manifest 全部通过。
-- [ ] 使用正式数据库的私有副本启动独立 preview；执行 migration，验证六张表、readiness 和空工作流页面。
-- [ ] 使用隔离测试 Operator 创建内置草稿和上传草稿，确认合法输入进入 `validated`；恶意路径、命令字符串、错元素顺序和越界参数均在无 attempt、无 Job ID 条件下失败。
-- [ ] 浏览器验证工作台、新建计算、工作流列表和详情；results/database 显示真实空状态而不是 demo。
-- [ ] 停止 preview 并确认端口消失；后快照证明稳定 `current`、Job、端口和正式数据库未变。
-- [ ] 固化 Job、节点、提交、manifest、SQLite、API、浏览器和 SHA-256 证据，再通过独立文档 PR 合并；只有这一闭环通过后阶段 5 才可改为 `DONE`。
+- [x] 107 只读检出固定 `main` 合并提交；先运行稳定状态快照，不修改 `current` 和正式 SQLite。
+- [x] 通过 Slurm 构建不晋升 preview，后端/前端测试及 manifest 全部通过。
+- [x] 使用正式数据库的私有副本启动独立 preview；执行 migration，验证六张表、readiness 和空工作流页面。
+- [x] 使用隔离测试 Operator 创建内置草稿和上传草稿，确认合法输入进入 `validated`；恶意路径、命令字符串、错元素顺序和越界参数均在无 attempt、无 Job ID 条件下失败。
+- [x] 浏览器验证工作台、新建计算、工作流列表和详情；results/database 显示真实空状态而不是 demo。
+- [x] 停止 preview 并确认端口消失；后快照证明稳定 `current`、Job、端口和正式数据库未变。
+- [x] 固化 Job、节点、提交、manifest、SQLite、API、浏览器和 SHA-256 证据到 `docs/107cup/stage5-workflow-evidence.md`。
+- [ ] 合并独立证据文档 PR；只有合并后阶段 5 才可改为 `DONE`。
