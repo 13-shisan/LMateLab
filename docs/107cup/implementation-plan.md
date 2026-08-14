@@ -137,11 +137,11 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | Gitea `main` 与 107 只读 detached checkout 已同步到 PR #21 合并提交 `46f2f0d`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
+| 1. 竞赛仓库初始化 | PARTIAL | Gitea `main`、Windows 本地 `main` 与 107 只读 detached checkout 已同步到 PR #22 合并提交 `3cf9b44`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | 最终前后快照确认稳定 Job `36597` 在 `anode01:18731` 运行，发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`；Job `34005` 已完成旧发布隔离启动、健康检查、优雅关闭和 Slurm 零退出 | 增加服务与 4090 转发自动恢复 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 真实业务路由确认 Operator 可写私有工作流、Viewer 三个写路由均为 `403`，两个角色均可读取验收工作流 | 配置三名成员独立应用身份；阶段 6 再验收 Slurm 作业归属边界 |
-| 5. 工作流模型与输入校验 | PARTIAL | PR #21 已修复发布提交追溯；固定提交 `46f2f0d` 在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环，两条真实 `validated` 工作流均记录完整提交且无 attempt/Job ID | 合并本次独立证据 PR；合并后才改为 `DONE`，阶段 6 仍需用户明确确认后开始 |
+| 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变；阶段 6 仍需用户明确确认后开始 |
 | 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
@@ -407,7 +407,7 @@ workflow_templates
 - [x] PR #17、#18 和 #21 已合并；固定提交 `46f2f0d6f96d937d2d5a42129aba2cbbb11b9be7` 在 107 的隔离 preview 中完成正式数据库副本迁移、真实 Operator/Viewer API、SQLite 和三视口浏览器验收。
 - [x] 最终验收服务 Job `37611` 只产生两条 `validated` 工作流，六类非法输入均在零 attempt、零 Job ID 条件下返回 `422`；服务停止后端口消失。
 - [x] 前快照 Job `37593` 与后快照 Job `37614` 逐项比较确认稳定 `current`、Job `36597`、`anode01:18731` 和两套正式 SQLite 未改变。
-- [ ] 合并 `docs/107cup/stage5-workflow-evidence.md` 所在的独立证据 PR；合并前阶段 5 保持 `PARTIAL`。
+- [x] `docs/107cup/stage5-workflow-evidence.md` 已通过独立证据 PR #22 合并，合并提交为 `3cf9b44f0b55a11e43f0a4960dc689cf0607ced2`；阶段 5 改为 `DONE`。
 
 ## 11. 阶段 6：Slurm 适配器
 
@@ -728,4 +728,4 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Viewer 可以读取两条工作流，但结构上传、草稿创建和确认三个写路由均为 `403`。路径文件名、额外字段、命令注入字符串、越界 `ENCUT`、超 `1 MiB` 文件和错误 `S Mo` 元素顺序六类输入均为 `422`，且拒绝响应不泄露服务器路径；Results 与 VASP Database 均为 `data_kind=live` 的真实空集合。
 - Windows Playwright 1.54.2 通过临时双层 SSH 转发直接验收 Job `37611`；`1440x900`、`1024x768`、`390x844` 三个视口均通过，每个视口记录 `14` 个成功 API 响应和 `7` 张截图，控制台问题、页面错误、失败请求、意外写请求及页面横向溢出均为 `0`。最终外部证据目录含 `21` 张截图、`5` 份 JSON，`26` 项 SHA-256 清单自身哈希为 `8913d249ce53bfef8f946017ea349a1c2a2838c8d3cffbc840ac727148b0ed1b`。
 - Job `37611` 验收后受控停止为 `CANCELLED/0:15`，Uvicorn 完整关闭，计算节点端口和 Windows/4090 临时 `18736` 转发均确认消失。后快照 Job `37614` 在 `anode16` 以 `COMPLETED/0:0` 结束，`comparison.txt` 为 `stable state matches before snapshot`；稳定发布仍为 `1bba72d0ade2bb7024081d384584524a9c9d1c69`，Job `36597` 仍位于 `anode01:18731`，两套正式 SQLite 哈希未变且完整性为 `ok`。
-- 完整证据见 `docs/107cup/stage5-workflow-evidence.md`。运行验收门禁已经闭合，但本证据 PR 尚未合并，因此阶段 5 仍为 `PARTIAL`；阶段 6 至 8 保持 `PENDING`，没有提交普通 Slurm 测试作业或 VASP 作业。
+- 完整证据见 `docs/107cup/stage5-workflow-evidence.md`。独立证据 PR #22 已合并为 `3cf9b44f0b55a11e43f0a4960dc689cf0607ced2`；Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到该提交且 107 工作树干净，因此阶段 5 改为 `DONE`。阶段 6 至 8 仍为 `PENDING`，没有提交普通 Slurm 测试作业或 VASP 作业。

@@ -10,7 +10,7 @@
 - Viewer 三个写路由均为 `403`；六类恶意或非法输入均为 `422`，且没有增加工作流、attempt 或 Job ID。
 - Windows Playwright 对实际 107 live 预览执行三个固定视口，`3/3` 通过；控制台、页面错误、失败请求、意外写请求和横向溢出均为零。
 - 预览停止后计算节点端口和双层 SSH 转发消失；前后快照证明稳定发布、服务和正式数据库未改变。
-- 运行门禁已经闭合，但本证据 PR 合并前阶段 5 继续保持 `PARTIAL`。阶段 6 至 8 均未开始。
+- 运行门禁已经闭合，独立证据 PR #22 已合并为 `3cf9b44f0b55a11e43f0a4960dc689cf0607ced2`，阶段 5 状态为 `DONE`。阶段 6 至 8 均未开始。
 
 ## 2. 固定提交与构建
 
@@ -164,4 +164,4 @@ D:\Documents\matflow项目\LMateLab-107Cup-evidence\stage5-workflow-46f2f0d-3761
 
 107 的 `sacct` 后端仍不可用，快照已保存 stdout、stderr 和降级状态；短构建 Job `37594` 随后也已被集群从 `scontrol` 清理。因此 Job 完成结论同时依赖现场状态记录、原始 Slurm 日志、日志 SHA-256、不可变发布 manifest 和前后快照，不把后续查询不到短 Job 误写为未运行。
 
-本次没有实现阶段 6 的 `sbatch/squeue/sacct/scancel` 控制链，也没有执行阶段 7 的 `relax -> SCF -> BAND -> DOS`。本证据 PR 合并后才能把阶段 5 改为 `DONE`；是否开始阶段 6 继续等待用户明确确认。
+本次没有实现阶段 6 的 `sbatch/squeue/sacct/scancel` 控制链，也没有执行阶段 7 的 `relax -> SCF -> BAND -> DOS`。证据 PR #22 合并后阶段 5 已改为 `DONE`；是否开始阶段 6 继续等待用户明确确认。
