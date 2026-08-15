@@ -137,12 +137,12 @@
 **Files:**
 - Modify: `docs/107cup/implementation-plan.md`
 
-- [ ] Run the focused RED/GREEN suite and the existing Stage 5 backend suites.
-- [ ] Run all 107 Cup backend deployment/runtime suites.
-- [ ] Run frontend `npm test`; no frontend source change is expected.
-- [ ] Run `git diff --check` and scan the diff for secrets, arbitrary command
+- [x] Run the focused RED/GREEN suite and the existing Stage 5 backend suites.
+- [x] Run all 107 Cup backend deployment/runtime suites.
+- [x] Run frontend `npm test`; no frontend source change is expected.
+- [x] Run `git diff --check` and scan the diff for secrets, arbitrary command
       execution, `shell=True`, unbounded reads and unrelated feature drift.
-- [ ] Update the implementation plan with local-only evidence and keep Stage 6
+- [x] Update the implementation plan with local-only evidence and keep Stage 6
       `PARTIAL` until merged 107 validation succeeds.
 - [ ] Commit, push `codex/107cup-stage6-slurm-adapter`, and create a PR to protected
       `main`.

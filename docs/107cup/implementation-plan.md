@@ -142,7 +142,7 @@
 | 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `37715` 在 `anode02:18731` 运行发布 `bec82bc9fed3ad9355235b965f5bf8cdba152a60`；公网入口返回 `stable/live` 且两套 SQLite 完整性为 `ok`，旧 Job `36597` 已受控停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 真实业务路由确认 Operator 可写私有工作流、Viewer 三个写路由均为 `403`，两个角色均可读取验收工作流 | 配置三名成员独立应用身份；阶段 6 再验收 Slurm 作业归属边界 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变；阶段 6 仍需用户明确确认后开始 |
-| 6. Slurm 适配器 | PENDING | 尚无提交、取消和对账控制链 | 完成普通短作业的全状态真实验收 |
+| 6. Slurm 适配器 | PARTIAL | 分支 `codex/107cup-stage6-slurm-adapter` 已完成固定命令、提交 ledger、状态对账、归属取消、API 和 smoke harness 的本地实现；尚未合并或产生 107 真实普通作业证据 | 合并功能 PR 后完成 success/fail/cancel、重启对账和非归属拒绝的 107 计算节点验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
@@ -418,23 +418,24 @@ workflow_templates
 - Create: `backend/tests/test_competition_slurm.py`
 - Create: `backend/tests/fixtures/fake_slurm/`
 - Create: `deploy/107cup/slurm/probe.slurm`
+- Create: `deploy/107cup/slurm/stage6-smoke.py`
 - Modify: `backend/routers/competition_workflows.py`
 
 适配器只能使用参数数组调用固定二进制，不使用 `shell=True`。LMateLab 作业必须同时满足以下归属证据：
 
 ```text
 JobName 前缀为 lmatelab-
-WorkDir 位于 /home/scc/pb23030683/lmatelab-107cup/workflows
+WorkDir 位于 /home/scc/pb23030683/lmatelab-107cup/data/workflows
 Slurm comment 含 workflow_id 和 attempt_id
 数据库 ledger 中存在相同 Job ID
 ```
 
 - [ ] 从服务计算节点验证 `sbatch --test-only`、`squeue`、`sacct` 和 `scancel`。
-- [ ] 假 Slurm 测试覆盖提交、排队、运行、完成、失败、取消和命令超时。
-- [ ] 状态映射保留原始 Slurm state、exit code、reason 和时间戳。
-- [ ] 日志读取限制在 attempt 目录并限制单次读取字节数。
-- [ ] `scancel` 前验证四项归属证据，任一不符即拒绝。
-- [ ] 服务重启后从数据库和 `sacct` 对账，不把陈旧状态显示为运行中。
+- [x] 假 Slurm 测试覆盖提交、排队、运行、完成、失败、取消和命令超时。
+- [x] 状态映射保留原始 Slurm state、exit code、reason 和时间戳。
+- [x] 日志读取限制在 attempt 目录并限制单次读取字节数。
+- [x] `scancel` 前验证四项归属证据，任一不符即拒绝。
+- [x] 服务重启后从数据库和 `squeue/scontrol/sacct` 对账；无权威终态时记录 `unknown/stale`，不把陈旧状态显示为运行中。
 - [ ] 真实提交一个短时普通作业并完成取消、失败和重启对账验收。
 - [ ] 创建一个非 LMateLab 作业并验证平台无法取消它。
 
@@ -750,3 +751,5 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Windows 新 worktree 使用项目锁定依赖完成阶段 5 模型、输入、服务和路由基线 `67/67`。首次复用旧虚拟环境因缺少 `httpx` 在测试收集前失败，随后建立 worktree 专用 `.venv` 后原命令通过；该环境问题不记作代码回归。
 - 从稳定服务 Job `37715` 的 `anode02` 计算分配内实测：`sbatch --test-only`、`squeue`、`scontrol --json`、`squeue --json` 和 `scancel` 客户端可用；test-only 报告的测试 ID `38285` 不存在于 `squeue`，没有创建作业。`sacct` 仍因 `localhost:6819` 连接被拒绝而不可用。
 - 阶段 6 对账因此固定为：在线状态以结构化 `squeue/scontrol` 为权威，`sacct` 可用时补最终记账；若两类来源都不能证明最终状态，则记录 `unknown/stale`，不得继续显示为运行中，也不得猜测成功。当前没有提交普通测试作业、没有调用 `scancel`、没有运行 VASP，阶段 6 仍为 `PENDING`。
+- 阶段 6 本地实现检查点为 `a6a59d4`（不含本次状态记录提交）：固定绝对 Slurm 二进制与 argv、`sbatch --test-only`/提交、attempt 私有目录和 receipt、SQLite 提交 ledger、重启对账、四项归属取消、Operator API、ledger-only Dashboard、固定 `success|fail|cancel` 探针以及独立 smoke 证据包均已实现。107/阶段 5/阶段 6 后端范围回归 `169/169` 通过，另有 2 项仅因 Windows 文件符号链接权限跳过；前端在按锁文件执行 `npm ci` 后 `111/111` 通过，live 构建转换 `1857` 个模块；四个变更 Slurm/Bash 文件通过 WSL `bash -n`，Python smoke 通过 `py_compile`。保留既有 Browserslist、3Dmol `eval` 和大 chunk 警告；`npm ci` 同时报告既有依赖树 8 个 high 漏洞，本分支未运行会改写锁文件的自动修复。
+- 上述仍只是 Windows 本地源码和测试证据，分支尚未合并，107 未构建该提交，也没有提交真实 `success`、`fail`、`cancel` 或非归属控制作业。阶段 6 因此只改为 `PARTIAL`；合并后必须在 107 Slurm 计算节点运行 smoke、保留 Job ID/原始调度输出/SQLite 完整性/SHA-256 清单并通过独立证据 PR 后，才能改为 `DONE`。阶段 7 保持 `PENDING`，没有运行 VASP。
