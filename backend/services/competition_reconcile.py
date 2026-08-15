@@ -53,6 +53,16 @@ class CancellationOutcome:
     result: str
 
 
+@dataclass(frozen=True)
+class ReconciliationOutcome:
+    workflow_id: str
+    attempt_id: str
+    job_id: str
+    raw_state: str | None
+    status: str
+    stale: bool
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -423,8 +433,33 @@ class CompetitionReconciler:
             "source": observation.source,
             "stale": observation.stale,
             "state": observation.state,
+            "started_at": (
+                observation.started_at.isoformat()
+                if observation.started_at is not None
+                else None
+            ),
+            "finished_at": (
+                observation.finished_at.isoformat()
+                if observation.finished_at is not None
+                else None
+            ),
             "user_name": observation.user_name,
         }
+
+    @staticmethod
+    def _observation_signature(evidence: dict[str, object]) -> tuple[object, ...]:
+        return tuple(
+            evidence.get(key)
+            for key in (
+                "error_code",
+                "exit_code",
+                "raw_state",
+                "reason",
+                "source",
+                "stale",
+                "state",
+            )
+        )
 
     @staticmethod
     def _decoded_attempt_metadata(attempt: WorkflowAttempt) -> dict[str, object]:
@@ -606,4 +641,125 @@ class CompetitionReconciler:
             status="cancelling",
             result="requested",
             event_type="cancellation_requested",
+        )
+
+    def reconcile_attempt(
+        self,
+        session: Session,
+        attempt_id: str,
+    ) -> ReconciliationOutcome:
+        session.rollback()
+        attempt = session.get(WorkflowAttempt, attempt_id)
+        if attempt is None or not attempt.slurm_job_id:
+            raise ReconcileError(
+                "attempt_not_reconcilable",
+                "attempt does not have a scheduler job",
+            )
+        step = session.get(WorkflowStep, attempt.step_id)
+        run = session.get(WorkflowRun, step.workflow_id) if step is not None else None
+        if step is None or run is None:
+            raise ReconcileError(
+                "attempt_not_reconcilable",
+                "attempt does not have a workflow ledger",
+            )
+
+        try:
+            observation = self.slurm.observe(attempt.slurm_job_id)
+        except (SlurmError, ValueError) as exc:
+            raise ReconcileError(
+                "scheduler_unavailable",
+                "scheduler observation is unavailable",
+            ) from exc
+
+        if not observation.stale:
+            expected_directory = str(
+                self.slurm.prepare_attempt_directory(run.id, attempt.id).resolve()
+            )
+            expected_comment = f"lmatelab:workflow={run.id};attempt={attempt.id}"
+            identity_matches = (
+                observation.job_id == attempt.slurm_job_id
+                and isinstance(observation.job_name, str)
+                and observation.job_name.startswith("lmatelab-")
+                and observation.working_directory == expected_directory
+                and observation.comment == expected_comment
+                and (
+                    self.slurm_user is None
+                    or observation.user_name == self.slurm_user
+                )
+            )
+            if not identity_matches:
+                observation = SlurmJobObservation(
+                    job_id=observation.job_id,
+                    raw_state=observation.raw_state,
+                    state="unknown",
+                    exit_code=observation.exit_code,
+                    reason=observation.reason,
+                    source=observation.source,
+                    job_name=None,
+                    working_directory=None,
+                    comment=None,
+                    user_name=None,
+                    node_list=observation.node_list,
+                    observed_at=observation.observed_at,
+                    started_at=observation.started_at,
+                    finished_at=observation.finished_at,
+                    stale=True,
+                    error_code="scheduler_ownership_mismatch",
+                    payload_sha256=observation.payload_sha256,
+                )
+
+        metadata = self._decoded_attempt_metadata(attempt)
+        previous = metadata.get("scheduler_observation")
+        evidence = self._observation_evidence(observation)
+        state_changed = (
+            not isinstance(previous, dict)
+            or self._observation_signature(previous)
+            != self._observation_signature(evidence)
+        )
+        metadata["scheduler_observation"] = evidence
+
+        now = self._clock()
+        attempt.metadata_json = metadata
+        attempt.status = observation.state
+        attempt.updated_at = now
+        if observation.started_at is not None:
+            attempt.started_at = observation.started_at
+        if observation.state in {"succeeded", "failed", "cancelled"}:
+            attempt.finished_at = observation.finished_at or observation.observed_at
+
+        step.status = observation.state
+        step.updated_at = now
+        if observation.state == "succeeded":
+            statuses = session.scalars(
+                select(WorkflowStep.status).where(WorkflowStep.workflow_id == run.id)
+            ).all()
+            run.status = "succeeded" if statuses and all(
+                status == "succeeded" for status in statuses
+            ) else "running"
+        else:
+            run.status = observation.state
+        run.updated_at = now
+
+        if state_changed:
+            append_workflow_event(
+                session,
+                workflow_id=run.id,
+                event_type="scheduler_state_changed",
+                payload={
+                    "attempt_id": attempt.id,
+                    "error_code": observation.error_code,
+                    "job_id": attempt.slurm_job_id,
+                    "raw_state": observation.raw_state,
+                    "stale": observation.stale,
+                    "status": observation.state,
+                },
+            )
+        session.commit()
+        return ReconciliationOutcome(
+            workflow_id=run.id,
+            attempt_id=attempt.id,
+            job_id=attempt.slurm_job_id,
+            raw_state=observation.raw_state,
+            status=observation.state,
+            stale=observation.stale,
         )

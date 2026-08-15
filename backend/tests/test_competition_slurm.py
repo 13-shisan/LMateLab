@@ -791,6 +791,125 @@ class CompetitionReconcileTests(unittest.TestCase):
                 )
             )
 
+    @staticmethod
+    def payload_with_state(payload, raw_state, exit_code="0:0"):
+        changed = json.loads(json.dumps(payload))
+        changed["jobs"][0]["job_state"] = [raw_state]
+        return_code, signal = (int(part) for part in exit_code.split(":"))
+        changed["jobs"][0]["exit_code"] = {
+            "return_code": {"number": return_code},
+            "signal": {"id": {"number": signal}},
+        }
+        return changed
+
+    def reconcile_with_payload(self, attempt_id, payload):
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=SequenceExecutor(response(stdout=json.dumps(payload).encode())),
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+        with Session(self.engine) as session:
+            return reconciler.reconcile_attempt(session, attempt_id)
+
+    def test_fresh_reconcilers_advance_queued_running_and_completed_states(self):
+        outcome, base = self.accepted_attempt()
+        observed = []
+        for raw_state, expected in (
+            ("PENDING", "queued"),
+            ("RUNNING", "running"),
+            ("COMPLETED", "succeeded"),
+        ):
+            result = self.reconcile_with_payload(
+                outcome.attempt_id,
+                self.payload_with_state(base, raw_state),
+            )
+            observed.append((result.raw_state, result.status))
+
+        self.assertEqual(
+            [("PENDING", "queued"), ("RUNNING", "running"), ("COMPLETED", "succeeded")],
+            observed,
+        )
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual("succeeded", attempt.status)
+            self.assertEqual("succeeded", step.status)
+            self.assertEqual("running", run.status)
+            self.assertIsNotNone(attempt.finished_at)
+
+    def assert_terminal_reconciliation(self, raw_state, exit_code, expected):
+        outcome, base = self.accepted_attempt()
+        result = self.reconcile_with_payload(
+            outcome.attempt_id,
+            self.payload_with_state(base, raw_state, exit_code),
+        )
+
+        self.assertEqual(expected, result.status)
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual((expected, expected, expected), (attempt.status, step.status, run.status))
+
+    def test_fresh_reconciler_persists_failed_terminal_state(self):
+        self.assert_terminal_reconciliation("FAILED", "1:0", "failed")
+
+    def test_fresh_reconciler_persists_cancelled_terminal_state(self):
+        self.assert_terminal_reconciliation("CANCELLED", "0:15", "cancelled")
+
+    def test_missing_live_and_accounting_records_become_unknown_stale_idempotently(self):
+        outcome, _base = self.accepted_attempt()
+        clocks = (
+            datetime(2026, 8, 15, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 15, 10, 1, tzinfo=timezone.utc),
+        )
+        for observed_at in clocks:
+            executor = SequenceExecutor(
+                response(stdout=json.dumps({"jobs": []}).encode()),
+                response(stderr=b"invalid job id", returncode=1),
+                response(stderr=b"accounting unavailable", returncode=1),
+            )
+            reconciler = CompetitionReconciler(
+                slurm=SlurmClient(
+                    binaries=fixed_binaries(),
+                    executor=executor,
+                    workflow_root=self.workflow_root,
+                    allowed_scripts=(self.script,),
+                    clock=lambda value=observed_at: value,
+                ),
+                probe_script=self.script,
+                slurm_user="pb23030683",
+                clock=lambda value=observed_at: value,
+            )
+            with Session(self.engine) as session:
+                result = reconciler.reconcile_attempt(session, outcome.attempt_id)
+            self.assertEqual(("unknown", True), (result.status, result.stale))
+
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            metadata = json.loads(attempt.metadata_json)
+            self.assertEqual(("unknown", "unknown", "unknown"), (attempt.status, step.status, run.status))
+            self.assertTrue(metadata["scheduler_observation"]["stale"])
+            self.assertEqual(
+                "scheduler_record_unavailable",
+                metadata["scheduler_observation"]["error_code"],
+            )
+            events = session.scalars(
+                select(WorkflowEvent).where(
+                    WorkflowEvent.workflow_id == self.workflow_id,
+                    WorkflowEvent.event_type == "scheduler_state_changed",
+                )
+            ).all()
+            self.assertEqual(1, len(events))
+
 
 class SlurmObservationTests(unittest.TestCase):
     observed_at = datetime(2026, 8, 15, 9, 30, tzinfo=timezone.utc)

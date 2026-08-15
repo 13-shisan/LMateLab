@@ -86,13 +86,13 @@
 - Modify: `backend/services/competition_reconcile.py`
 - Modify: `backend/tests/test_competition_slurm.py`
 
-- [ ] Write failing tests for a fresh reconciler reading queued, running,
+- [x] Write failing tests for a fresh reconciler reading queued, running,
       completed, failed and cancelled attempts from the same SQLite database.
-- [ ] Add RED cases where `sacct` is unavailable and the live record disappears;
+- [x] Add RED cases where `sacct` is unavailable and the live record disappears;
       expected result is `unknown/stale`, never stale `running` or guessed success.
-- [ ] Implement idempotent state/event transitions and timestamp updates.
-- [ ] Cover cancellation/completion races and repeated reconciliation.
-- [ ] Run focused tests and commit reconciliation.
+- [x] Implement idempotent state/event transitions and timestamp updates.
+- [x] Cover cancellation/completion races and repeated reconciliation.
+- [x] Run focused tests and commit reconciliation.
 
 ### Task 6: Expose read evidence and owned cancellation
 
