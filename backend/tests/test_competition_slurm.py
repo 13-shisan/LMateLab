@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -79,10 +80,10 @@ class SlurmCommandContractTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name)
         self.script = self.root / "probe.slurm"
         self.script.write_text("#!/bin/bash\n", encoding="utf-8")
-        self.attempt_dir = self.root / "workflows" / str(uuid.uuid4()) / "attempts" / str(uuid.uuid4())
-        self.attempt_dir.mkdir(parents=True)
         self.workflow_id = str(uuid.uuid4())
         self.attempt_id = str(uuid.uuid4())
+        self.attempt_dir = self.root / "workflows" / self.workflow_id / "attempts" / self.attempt_id
+        self.attempt_dir.mkdir(parents=True)
 
     def submission(self, *, mode: str = "success") -> SlurmSubmission:
         return SlurmSubmission(
@@ -102,6 +103,7 @@ class SlurmCommandContractTests(unittest.TestCase):
             timeout_seconds=3.0,
             max_output_bytes=max_output_bytes,
             allowed_scripts=(self.script,),
+            workflow_root=self.root / "workflows",
         )
 
     def test_binaries_must_be_fixed_absolute_posix_paths(self):
@@ -161,6 +163,7 @@ class SlurmCommandContractTests(unittest.TestCase):
             executor=TimeoutExecutor(),
             timeout_seconds=0.5,
             allowed_scripts=(self.script,),
+            workflow_root=self.root / "workflows",
         )
         with self.assertRaisesRegex(SlurmCommandTimeout, "sbatch timed out") as raised:
             client.submit(self.submission())
@@ -175,6 +178,138 @@ class SlurmCommandContractTests(unittest.TestCase):
                 client = self.client(RecordingExecutor(**payload), max_output_bytes=64)
                 with self.assertRaises(SlurmOutputTooLarge):
                     client.test_submission(self.submission())
+
+
+class SlurmFilesystemBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name)
+        self.workflow_root = self.root / "workflow-data"
+        self.workflow_id = str(uuid.uuid4())
+        self.attempt_id = str(uuid.uuid4())
+        self.client = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=RecordingExecutor(),
+            workflow_root=self.workflow_root,
+            max_log_tail_bytes=8,
+        )
+
+    def test_attempt_directory_is_private_and_derived_only_from_canonical_ids(self):
+        attempt_dir = self.client.prepare_attempt_directory(
+            self.workflow_id,
+            self.attempt_id,
+        )
+
+        self.assertEqual(
+            self.workflow_root / self.workflow_id / "attempts" / self.attempt_id,
+            attempt_dir,
+        )
+        self.assertTrue(attempt_dir.is_dir())
+        if os.name == "posix":
+            self.assertEqual(0, attempt_dir.stat().st_mode & 0o077)
+
+        for invalid in ("../escape", "/tmp/escape", "not-a-uuid"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    self.client.prepare_attempt_directory(invalid, self.attempt_id)
+
+    def test_submission_rejects_traversal_sibling_prefix_and_absolute_paths(self):
+        script = self.root / "probe.slurm"
+        script.write_text("#!/bin/bash\n", encoding="utf-8")
+        client = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=RecordingExecutor(stdout=b"41010\n"),
+            workflow_root=self.workflow_root,
+            allowed_scripts=(script,),
+        )
+        expected = client.prepare_attempt_directory(self.workflow_id, self.attempt_id)
+        candidates = (
+            expected / ".." / "escape",
+            Path(f"{self.workflow_root}-sibling") / self.workflow_id / "attempts" / self.attempt_id,
+            self.root / "absolute-outside" / self.attempt_id,
+        )
+        for candidate in candidates:
+            with self.subTest(candidate=candidate):
+                candidate.mkdir(parents=True, exist_ok=True)
+                submission = SlurmSubmission(
+                    workflow_id=self.workflow_id,
+                    attempt_id=self.attempt_id,
+                    step_key="relax",
+                    attempt_number=1,
+                    attempt_directory=candidate,
+                    script_path=script,
+                    probe_mode="success",
+                )
+                with self.assertRaises(ValueError):
+                    client.submit(submission)
+
+    def test_attempt_directory_symlink_is_rejected(self):
+        expected = self.workflow_root / self.workflow_id / "attempts" / self.attempt_id
+        expected.parent.mkdir(parents=True)
+        outside = self.root / "outside"
+        outside.mkdir()
+        try:
+            expected.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            if os.name != "nt":
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            created = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(expected), str(outside)],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if created.returncode != 0:
+                self.skipTest("directory links unavailable")
+
+        with self.assertRaises(ValueError):
+            self.client.prepare_attempt_directory(self.workflow_id, self.attempt_id)
+
+    def test_job_receipt_is_atomic_private_and_validated(self):
+        attempt_dir = self.client.prepare_attempt_directory(self.workflow_id, self.attempt_id)
+
+        receipt = self.client.write_job_receipt(self.workflow_id, self.attempt_id, "41011")
+
+        self.assertEqual(attempt_dir / "job-id.receipt", receipt)
+        self.assertEqual("41011\n", receipt.read_text(encoding="ascii"))
+        if os.name == "posix":
+            self.assertEqual(0, receipt.stat().st_mode & 0o077)
+        self.assertEqual([], list(attempt_dir.glob(".job-id.receipt.*.tmp")))
+        self.assertEqual(
+            receipt,
+            self.client.write_job_receipt(self.workflow_id, self.attempt_id, "41011"),
+        )
+        with self.assertRaises(ValueError):
+            self.client.write_job_receipt(self.workflow_id, self.attempt_id, "41012")
+        self.assertEqual("41011\n", receipt.read_text(encoding="ascii"))
+        with self.assertRaises(ValueError):
+            self.client.write_job_receipt(self.workflow_id, self.attempt_id, "41011;bad")
+
+    def test_log_reads_are_name_allowlisted_and_tail_bounded(self):
+        attempt_dir = self.client.prepare_attempt_directory(self.workflow_id, self.attempt_id)
+        (attempt_dir / "stdout.log").write_bytes(b"0123456789")
+        (attempt_dir / "stderr.log").write_bytes(b"abcdefghij")
+
+        self.assertEqual("23456789", self.client.read_log_tail(self.workflow_id, self.attempt_id, "stdout"))
+        self.assertEqual("cdefghij", self.client.read_log_tail(self.workflow_id, self.attempt_id, "stderr"))
+        for invalid in ("../stdout", "/etc/passwd", "job-id.receipt"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    self.client.read_log_tail(self.workflow_id, self.attempt_id, invalid)
+
+    def test_log_symlinks_are_rejected_even_when_the_target_is_inside_root(self):
+        attempt_dir = self.client.prepare_attempt_directory(self.workflow_id, self.attempt_id)
+        target = attempt_dir / "owned.log"
+        target.write_text("secret", encoding="utf-8")
+        link = attempt_dir / "stdout.log"
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            self.skipTest(f"file symlinks unavailable: {exc}")
+
+        with self.assertRaises(ValueError):
+            self.client.read_log_tail(self.workflow_id, self.attempt_id, "stdout")
 
 
 class SlurmObservationTests(unittest.TestCase):

@@ -38,12 +38,12 @@
 - Modify: `backend/services/competition_slurm.py`
 - Modify: `backend/tests/test_competition_slurm.py`
 
-- [ ] Write failing tests for traversal, sibling-prefix paths, absolute
+- [x] Write failing tests for traversal, sibling-prefix paths, absolute
       user-supplied paths, symlinks and reads larger than the configured tail.
-- [ ] Implement resolved-root containment, private directory creation, atomic
+- [x] Implement resolved-root containment, private directory creation, atomic
       `job-id.receipt` writes and bounded `stdout.log`/`stderr.log` tail reads.
-- [ ] Verify the tests fail before implementation and pass afterward.
-- [ ] Commit the filesystem boundary.
+- [x] Verify the tests fail before implementation and pass afterward.
+- [x] Commit the filesystem boundary.
 
 ### Task 3: Add database-backed attempt submission and recovery
 
