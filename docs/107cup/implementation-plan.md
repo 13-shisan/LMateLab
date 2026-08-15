@@ -742,3 +742,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 入口切换并验证新 Job 后，旧稳定 Job `36597` 经归属核对受控停止为 `CANCELLED/0:15`；Uvicorn 完整 shutdown，`anode01:18731` 确认不可达，公网入口仍返回 Job `37715`。候选 Job `37707` 随后受控停止，`anode01:21707`、Windows `18736` 和 4090 临时 `18736/18737` 均确认消失；稳定 `18734` 保留。
 - 部署后状态快照 Job `37718` 在 `anode19` 以 `COMPLETED/0:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/bec82bc9fed3ad9355235b965f5bf8cdba152a60/before-37718`，manifest SHA-256 为 `2a9a3446a234fd97039586b5339f217cc41caf4163052ed4dd3520242156a9b7`。正式 `eln.db` SHA-256 从 `cd5d639bccfa35414769901f444bf64b867826ce20962d5098a0dac8e07f135a` 变为 `de6176f960e6b7cbe4e44254585b23a8032e7ca146236cab7ec2eea736c6ce86`，对应阶段 5 migration；`digests.db` 保持 `2c1069bb4768fa81707623fa80e72f616e313b809d7b1a1b7da4d203ef56b969`，两库完整性均为 `ok`。完整摘要见 `docs/107cup/stable-frontend-deployment-evidence.md`。
 - 本次只完成既有完整竞赛前端的稳定部署，没有开始阶段 6，没有提交普通 Slurm 控制作业或 VASP 作业，也没有创建 Agent、机器学习或其他旁支功能。阶段 5 继续为 `DONE`，阶段 6 至 8 继续为 `PENDING`。
+
+### 2026-08-15
+
+- 阶段 5 已完成并维持 `DONE`。PR #25 已把稳定前端部署证据合并到受保护 `main`，合并提交为 `2c7366d4dc7c53ff63841607f1c0b896949d24e4`；稳定网页仍正确运行源码提交 `bec82bc9fed3ad9355235b965f5bf8cdba152a60`，因为 PR #25 只修改文档。
+- 阶段 6 已在隔离分支 `codex/107cup-stage6-slurm-adapter` 开始，基线为 `2c7366d`。详细设计与实施计划分别为 `docs/superpowers/specs/2026-08-15-107cup-stage6-slurm-adapter-design.md` 和 `docs/superpowers/plans/2026-08-15-107cup-stage6-slurm-adapter.md`；本条记录只表示开始，不是实现、合并或远端验收完成。
+- Windows 新 worktree 使用项目锁定依赖完成阶段 5 模型、输入、服务和路由基线 `67/67`。首次复用旧虚拟环境因缺少 `httpx` 在测试收集前失败，随后建立 worktree 专用 `.venv` 后原命令通过；该环境问题不记作代码回归。
+- 从稳定服务 Job `37715` 的 `anode02` 计算分配内实测：`sbatch --test-only`、`squeue`、`scontrol --json`、`squeue --json` 和 `scancel` 客户端可用；test-only 报告的测试 ID `38285` 不存在于 `squeue`，没有创建作业。`sacct` 仍因 `localhost:6819` 连接被拒绝而不可用。
+- 阶段 6 对账因此固定为：在线状态以结构化 `squeue/scontrol` 为权威，`sacct` 可用时补最终记账；若两类来源都不能证明最终状态，则记录 `unknown/stale`，不得继续显示为运行中，也不得猜测成功。当前没有提交普通测试作业、没有调用 `scancel`、没有运行 VASP，阶段 6 仍为 `PENDING`。
