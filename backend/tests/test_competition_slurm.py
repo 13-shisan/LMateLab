@@ -9,7 +9,15 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.orm import Session
+
+from database import Base
+from models import User
+from models_workflow import WorkflowAttempt, WorkflowEvent, WorkflowRun, WorkflowStep
+from services.competition_reconcile import CompetitionReconciler, ReconcileError
 from services.competition_slurm import (
     SlurmBinaries,
     SlurmClient,
@@ -310,6 +318,280 @@ class SlurmFilesystemBoundaryTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.client.read_log_tail(self.workflow_id, self.attempt_id, "stdout")
+
+
+class CompetitionReconcileTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name)
+        self.workflow_root = self.root / "workflow-data"
+        self.engine = create_engine(f"sqlite:///{self.root / 'workflow.sqlite'}")
+
+        @event.listens_for(self.engine, "connect")
+        def enable_foreign_keys(connection, _record):
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=1000")
+
+        Base.metadata.create_all(self.engine)
+        self.addCleanup(self.engine.dispose)
+        with Session(self.engine) as session:
+            owner = User(
+                email="stage6-owner@example.com",
+                password_hash="hash",
+                name="stage6-owner",
+                alias="",
+                role="operator",
+            )
+            session.add(owner)
+            session.flush()
+            run = WorkflowRun(
+                id=str(uuid.uuid4()),
+                owner_id=owner.id,
+                template_version="mos2_v1",
+                material="MoS2",
+                source_kind="builtin",
+                status="validated",
+                input_sha256="a" * 64,
+                release_commit="b" * 40,
+                metadata_json={},
+            )
+            session.add(run)
+            session.flush()
+            for position, step_key in enumerate(("relax", "scf", "band", "dos")):
+                session.add(
+                    WorkflowStep(
+                        workflow_id=run.id,
+                        step_key=step_key,
+                        position=position,
+                        status="waiting",
+                        parameters_json={},
+                    )
+                )
+            session.add(
+                WorkflowEvent(
+                    workflow_id=run.id,
+                    sequence=1,
+                    event_type="workflow_validated",
+                    payload_json={"input_sha256": run.input_sha256},
+                )
+            )
+            session.commit()
+            self.workflow_id = run.id
+
+        self.script = self.root / "probe.slurm"
+        self.script.write_text("#!/bin/bash\n", encoding="utf-8")
+        self.executor = RecordingExecutor(stdout=b"41020\n")
+        self.slurm = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=self.executor,
+            workflow_root=self.workflow_root,
+            allowed_scripts=(self.script,),
+        )
+        self.reconciler = CompetitionReconciler(
+            slurm=self.slurm,
+            probe_script=self.script,
+        )
+
+    def test_only_one_stale_session_claims_the_first_waiting_step(self):
+        first = Session(self.engine, expire_on_commit=False)
+        second = Session(self.engine, expire_on_commit=False)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        self.assertEqual("validated", first.get(WorkflowRun, self.workflow_id).status)
+        self.assertEqual("validated", second.get(WorkflowRun, self.workflow_id).status)
+        first.commit()
+        second.commit()
+
+        claim = self.reconciler.claim_next_attempt(first, self.workflow_id, "success")
+        with self.assertRaises(ReconcileError) as denied:
+            self.reconciler.claim_next_attempt(second, self.workflow_id, "success")
+
+        self.assertEqual("workflow_not_claimable", denied.exception.code)
+        self.assertEqual("relax", claim.submission.step_key)
+        self.assertEqual(1, claim.submission.attempt_number)
+        self.assertEqual([], self.executor.calls)
+        with Session(self.engine) as session:
+            attempts = session.scalars(select(WorkflowAttempt)).all()
+            self.assertEqual(1, len(attempts))
+            self.assertEqual(claim.attempt_id, attempts[0].id)
+            self.assertEqual("submitting", attempts[0].status)
+            self.assertIsNone(attempts[0].slurm_job_id)
+            self.assertEqual(str(claim.submission.attempt_directory), attempts[0].working_directory)
+            steps = session.scalars(
+                select(WorkflowStep)
+                .where(WorkflowStep.workflow_id == self.workflow_id)
+                .order_by(WorkflowStep.position)
+            ).all()
+            self.assertEqual(["submitting", "waiting", "waiting", "waiting"], [step.status for step in steps])
+            self.assertEqual("submitting", session.get(WorkflowRun, self.workflow_id).status)
+            self.assertEqual(
+                1,
+                session.scalar(select(func.count()).select_from(WorkflowAttempt)),
+            )
+
+    def test_attempt_ledger_is_committed_before_sbatch_and_acceptance_is_atomic(self):
+        observed_before_sbatch = []
+
+        class LedgerCheckingExecutor:
+            def __call__(inner_self, argv, **kwargs):
+                with Session(self.engine) as audit:
+                    attempt = audit.scalar(select(WorkflowAttempt))
+                    observed_before_sbatch.append(
+                        (attempt.status, attempt.slurm_job_id, Path(attempt.working_directory).is_dir())
+                    )
+                return subprocess.CompletedProcess(argv, 0, b"41020\n", b"")
+
+        slurm = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=LedgerCheckingExecutor(),
+            workflow_root=self.workflow_root,
+            allowed_scripts=(self.script,),
+        )
+        reconciler = CompetitionReconciler(slurm=slurm, probe_script=self.script)
+
+        with Session(self.engine) as session:
+            outcome = reconciler.submit_probe(session, self.workflow_id, "success")
+
+        self.assertEqual([("submitting", None, True)], observed_before_sbatch)
+        self.assertEqual("queued", outcome.status)
+        self.assertEqual("41020", outcome.job_id)
+        receipt = self.workflow_root / self.workflow_id / "attempts" / outcome.attempt_id / "job-id.receipt"
+        self.assertEqual("41020\n", receipt.read_text(encoding="ascii"))
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual(("queued", "41020"), (attempt.status, attempt.slurm_job_id))
+            self.assertEqual("queued", step.status)
+            self.assertEqual("queued", run.status)
+            events = session.scalars(
+                select(WorkflowEvent)
+                .where(WorkflowEvent.workflow_id == self.workflow_id)
+                .order_by(WorkflowEvent.sequence)
+            ).all()
+            self.assertEqual([1, 2], [event_row.sequence for event_row in events])
+            self.assertEqual(["workflow_validated", "submission_accepted"], [row.event_type for row in events])
+
+    def test_scheduler_rejection_is_recorded_without_a_job_receipt(self):
+        failing = RecordingExecutor(stderr=b"private scheduler detail", returncode=1)
+        slurm = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=failing,
+            workflow_root=self.workflow_root,
+            allowed_scripts=(self.script,),
+        )
+        reconciler = CompetitionReconciler(slurm=slurm, probe_script=self.script)
+
+        with Session(self.engine) as session:
+            with self.assertRaises(ReconcileError) as raised:
+                reconciler.submit_probe(session, self.workflow_id, "fail")
+
+        self.assertEqual("submission_failed", raised.exception.code)
+        self.assertNotIn("private scheduler detail", str(raised.exception))
+        with Session(self.engine) as session:
+            attempt = session.scalar(select(WorkflowAttempt))
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual("submission_failed", attempt.status)
+            self.assertIsNone(attempt.slurm_job_id)
+            self.assertEqual("failed", step.status)
+            self.assertEqual("failed", run.status)
+            event_row = session.scalar(
+                select(WorkflowEvent).where(WorkflowEvent.event_type == "submission_failed")
+            )
+            self.assertIsNotNone(event_row)
+            self.assertEqual("scheduler_rejected", json.loads(event_row.payload_json)["reason_code"])
+        self.assertEqual([], list(self.workflow_root.rglob("job-id.receipt")))
+
+    def test_database_failure_after_scheduler_acceptance_recovers_from_exact_receipt(self):
+        with Session(self.engine) as session:
+            original_commit = session.commit
+            commit_calls = 0
+
+            def fail_second_commit():
+                nonlocal commit_calls
+                commit_calls += 1
+                if commit_calls == 2:
+                    raise RuntimeError("database finalize failed")
+                return original_commit()
+
+            with mock.patch.object(session, "commit", side_effect=fail_second_commit):
+                with self.assertRaises(ReconcileError) as raised:
+                    self.reconciler.submit_probe(session, self.workflow_id, "success")
+
+        self.assertEqual("submission_uncertain", raised.exception.code)
+        self.assertNotIn("database finalize failed", str(raised.exception))
+        with Session(self.engine) as session:
+            attempt = session.scalar(select(WorkflowAttempt))
+            self.assertEqual("submitting", attempt.status)
+            self.assertIsNone(attempt.slurm_job_id)
+            receipt = Path(attempt.working_directory) / "job-id.receipt"
+            self.assertEqual("41020\n", receipt.read_text(encoding="ascii"))
+            metadata = json.loads(attempt.metadata_json)
+            payload = {
+                "jobs": [
+                    {
+                        "job_id": 41020,
+                        "name": metadata["job_name"],
+                        "job_state": ["RUNNING"],
+                        "exit_code": {
+                            "return_code": {"number": 0},
+                            "signal": {"id": {"number": 0}},
+                        },
+                        "state_reason": "None",
+                        "current_working_directory": attempt.working_directory,
+                        "comment": metadata["comment"],
+                        "user_name": "pb23030683",
+                        "nodes": "anode02",
+                    }
+                ]
+            }
+            event_types = session.scalars(
+                select(WorkflowEvent.event_type)
+                .where(WorkflowEvent.workflow_id == self.workflow_id)
+                .order_by(WorkflowEvent.sequence)
+            ).all()
+            self.assertEqual(["workflow_validated", "submission_uncertain"], event_types)
+
+        recovery_slurm = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=SequenceExecutor(response(stdout=json.dumps(payload).encode())),
+            workflow_root=self.workflow_root,
+            allowed_scripts=(self.script,),
+        )
+        recovery = CompetitionReconciler(slurm=recovery_slurm, probe_script=self.script)
+        with Session(self.engine) as session:
+            outcome = recovery.recover_submission(session, attempt.id)
+
+        self.assertEqual(("41020", "queued"), (outcome.job_id, outcome.status))
+        with Session(self.engine) as session:
+            recovered = session.get(WorkflowAttempt, attempt.id)
+            self.assertEqual(("queued", "41020"), (recovered.status, recovered.slurm_job_id))
+            event_types = session.scalars(
+                select(WorkflowEvent.event_type)
+                .where(WorkflowEvent.workflow_id == self.workflow_id)
+                .order_by(WorkflowEvent.sequence)
+            ).all()
+            self.assertEqual(
+                ["workflow_validated", "submission_uncertain", "submission_recovered"],
+                event_types,
+            )
+
+    def test_accepted_workflow_cannot_submit_a_duplicate_job(self):
+        with Session(self.engine) as session:
+            first = self.reconciler.submit_probe(session, self.workflow_id, "success")
+            with self.assertRaises(ReconcileError) as raised:
+                self.reconciler.submit_probe(session, self.workflow_id, "success")
+
+        self.assertEqual("workflow_not_claimable", raised.exception.code)
+        self.assertEqual("41020", first.job_id)
+        self.assertEqual(1, len(self.executor.calls))
+        with Session(self.engine) as session:
+            self.assertEqual(
+                1,
+                session.scalar(select(func.count()).select_from(WorkflowAttempt)),
+            )
 
 
 class SlurmObservationTests(unittest.TestCase):

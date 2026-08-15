@@ -52,17 +52,17 @@
 - Modify: `backend/tests/test_competition_slurm.py`
 - Modify: `backend/services/competition_workflows.py`
 
-- [ ] Write failing tests that only one session can claim the first waiting step
+- [x] Write failing tests that only one session can claim the first waiting step
       of a validated workflow and that an attempt ledger exists before `sbatch`.
-- [ ] Implement the SQLite-safe claim, attempt directory, canonical JobName and
+- [x] Implement the SQLite-safe claim, attempt directory, canonical JobName and
       exact comment construction.
-- [ ] Write failing tests for scheduler rejection, Job ID receipt recovery,
+- [x] Write failing tests for scheduler rejection, Job ID receipt recovery,
       database failure after scheduler acceptance and duplicate submission.
-- [ ] Implement submission finalization and exact scheduler recovery without
+- [x] Implement submission finalization and exact scheduler recovery without
       submitting arbitrary scripts or options.
-- [ ] Record monotonic workflow events for submission accepted, failed and
+- [x] Record monotonic workflow events for submission accepted, failed and
       uncertain outcomes.
-- [ ] Run workflow plus Slurm suites and commit the submission ledger.
+- [x] Run workflow plus Slurm suites and commit the submission ledger.
 
 ### Task 4: Implement ownership-gated cancellation
 

@@ -317,6 +317,23 @@ class SlurmClient:
                 os.close(descriptor)
             temporary.unlink(missing_ok=True)
 
+    def read_job_receipt(self, workflow_id: str, attempt_id: str) -> str:
+        attempt_directory = self._attempt_directory(workflow_id, attempt_id, create=False)
+        receipt = attempt_directory / "job-id.receipt"
+        if receipt.is_symlink():
+            raise ValueError("job receipt cannot be a symlink")
+        try:
+            receipt_stat = receipt.stat()
+        except OSError as exc:
+            raise ValueError("job receipt is unavailable") from exc
+        if not stat.S_ISREG(receipt_stat.st_mode) or receipt_stat.st_size > 128:
+            raise ValueError("job receipt is invalid")
+        try:
+            value = receipt.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeError) as exc:
+            raise ValueError("job receipt is invalid") from exc
+        return self._validate_job_id(value)
+
     def read_log_tail(
         self,
         workflow_id: str,
