@@ -19,18 +19,18 @@
 - Create: `backend/tests/fixtures/fake_slurm/scontrol-running.json`
 - Create: `backend/tests/fixtures/fake_slurm/scontrol-completed.json`
 
-- [ ] Write failing tests for absolute fixed binaries, argv-only calls, bounded
+- [x] Write failing tests for absolute fixed binaries, argv-only calls, bounded
       timeouts, `sbatch --test-only`, `sbatch --parsable` Job ID parsing and
       malformed/oversized output.
-- [ ] Run `backend/.venv/Scripts/python.exe -m unittest tests.test_competition_slurm -v`
+- [x] Run `backend/.venv/Scripts/python.exe -m unittest tests.test_competition_slurm -v`
       and confirm RED because the module does not exist.
-- [ ] Implement the injectable runner and typed exceptions without `shell=True`.
-- [ ] Add failing fixture-based tests for queued, running, completing, succeeded,
+- [x] Implement the injectable runner and typed exceptions without `shell=True`.
+- [x] Add failing fixture-based tests for queued, running, completing, succeeded,
       failed, cancelled and unknown Slurm states, retaining raw state, exit code,
       reason, source, node and observation timestamp.
-- [ ] Implement JSON parsing for `squeue` and `scontrol`; add optional `sacct`
+- [x] Implement JSON parsing for `squeue` and `scontrol`; add optional `sacct`
       parsing that reports accounting unavailable without hiding live evidence.
-- [ ] Run the focused suite and commit the green command/state boundary.
+- [x] Run the focused suite and commit the green command/state boundary.
 
 ### Task 2: Constrain working directories, receipts and logs
 
