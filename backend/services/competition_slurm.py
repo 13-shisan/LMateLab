@@ -573,3 +573,62 @@ class SlurmClient:
             ),
             payload_sha256=invalid_payload_sha256,
         )
+
+    def inspect_job(self, job_id: str) -> SlurmJobObservation:
+        job_id = self._validate_job_id(job_id)
+        observed_at = self._clock()
+        if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+            raise ValueError("clock must return an aware datetime")
+        result = self._run(
+            [self.binaries.scontrol, "--json", "show", "job", job_id]
+        )
+        payload_sha256 = hashlib.sha256(result.stdout.encode("utf-8")).hexdigest()
+        try:
+            record = self._matching_record(result.stdout, job_id)
+        except (json.JSONDecodeError, ValueError):
+            return SlurmJobObservation(
+                job_id=job_id,
+                raw_state=None,
+                state="unknown",
+                exit_code=None,
+                reason=None,
+                source="scontrol",
+                job_name=None,
+                working_directory=None,
+                comment=None,
+                user_name=None,
+                node_list=None,
+                observed_at=observed_at,
+                stale=True,
+                error_code="scheduler_payload_invalid",
+                payload_sha256=payload_sha256,
+            )
+        if record is None:
+            return SlurmJobObservation(
+                job_id=job_id,
+                raw_state=None,
+                state="unknown",
+                exit_code=None,
+                reason=None,
+                source="scontrol",
+                job_name=None,
+                working_directory=None,
+                comment=None,
+                user_name=None,
+                node_list=None,
+                observed_at=observed_at,
+                stale=True,
+                error_code="scheduler_record_unavailable",
+                payload_sha256=payload_sha256,
+            )
+        return self._observation_from_record(
+            job_id=job_id,
+            source="scontrol",
+            record=record,
+            observed_at=observed_at,
+            payload_sha256=payload_sha256,
+        )
+
+    def cancel(self, job_id: str) -> SlurmCommandResult:
+        job_id = self._validate_job_id(job_id)
+        return self._run([self.binaries.scancel, job_id])

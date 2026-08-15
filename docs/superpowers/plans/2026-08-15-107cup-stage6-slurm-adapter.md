@@ -71,14 +71,14 @@
 - Modify: `backend/services/competition_reconcile.py`
 - Modify: `backend/tests/test_competition_slurm.py`
 
-- [ ] Write one failing test for each required ownership mismatch: JobName,
+- [x] Write one failing test for each required ownership mismatch: JobName,
       WorkDir, exact comment and database Job ID.
-- [ ] Add tests for missing scheduler metadata, terminal jobs, current-account
+- [x] Add tests for missing scheduler metadata, terminal jobs, current-account
       mismatch and the race where a job completes before `scancel`.
-- [ ] Implement an immediate `scontrol` ownership snapshot followed by
+- [x] Implement an immediate `scontrol` ownership snapshot followed by
       `scancel <ledger job id>` only when every check passes.
-- [ ] Preserve the before-cancel snapshot and result in attempt metadata/events.
-- [ ] Run focused tests and commit the cancellation gate.
+- [x] Preserve the before-cancel snapshot and result in attempt metadata/events.
+- [x] Run focused tests and commit the cancellation gate.
 
 ### Task 5: Reconcile state across fresh processes
 

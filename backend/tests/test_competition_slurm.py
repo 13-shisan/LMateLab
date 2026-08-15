@@ -393,6 +393,31 @@ class CompetitionReconcileTests(unittest.TestCase):
             probe_script=self.script,
         )
 
+    def accepted_attempt(self):
+        with Session(self.engine) as session:
+            outcome = self.reconciler.submit_probe(session, self.workflow_id, "success")
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            metadata = json.loads(attempt.metadata_json)
+            return outcome, {
+                "jobs": [
+                    {
+                        "job_id": int(outcome.job_id),
+                        "name": metadata["job_name"],
+                        "job_state": ["RUNNING"],
+                        "exit_code": {
+                            "return_code": {"number": 0},
+                            "signal": {"id": {"number": 0}},
+                        },
+                        "state_reason": "None",
+                        "current_working_directory": attempt.working_directory,
+                        "comment": metadata["comment"],
+                        "user_name": "pb23030683",
+                        "nodes": "anode02",
+                    }
+                ]
+            }
+
     def test_only_one_stale_session_claims_the_first_waiting_step(self):
         first = Session(self.engine, expire_on_commit=False)
         second = Session(self.engine, expire_on_commit=False)
@@ -591,6 +616,179 @@ class CompetitionReconcileTests(unittest.TestCase):
             self.assertEqual(
                 1,
                 session.scalar(select(func.count()).select_from(WorkflowAttempt)),
+            )
+
+    def test_cancel_rejects_each_ownership_or_scheduler_identity_mismatch(self):
+        outcome, valid_payload = self.accepted_attempt()
+        cases = {
+            "job_name": ("name", "foreign-job"),
+            "working_directory": ("current_working_directory", str(self.root / "sibling")),
+            "comment": ("comment", "lmatelab:workflow=wrong;attempt=wrong"),
+            "database_job_id": ("job_id", 99999),
+            "user_name": ("user_name", "another-user"),
+            "missing_comment": ("comment", None),
+        }
+        for label, (field, value) in cases.items():
+            with self.subTest(label=label):
+                payload = json.loads(json.dumps(valid_payload))
+                if value is None:
+                    payload["jobs"][0].pop(field)
+                else:
+                    payload["jobs"][0][field] = value
+                executor = SequenceExecutor(response(stdout=json.dumps(payload).encode()))
+                slurm = SlurmClient(
+                    binaries=fixed_binaries(),
+                    executor=executor,
+                    workflow_root=self.workflow_root,
+                    allowed_scripts=(self.script,),
+                )
+                reconciler = CompetitionReconciler(
+                    slurm=slurm,
+                    probe_script=self.script,
+                    slurm_user="pb23030683",
+                )
+                with Session(self.engine) as session:
+                    with self.assertRaises(ReconcileError) as raised:
+                        reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+                self.assertEqual("cancellation_ownership_mismatch", raised.exception.code)
+                self.assertEqual(1, len(executor.calls))
+                self.assertEqual(
+                    ["/usr/bin/scontrol", "--json", "show", "job", outcome.job_id],
+                    executor.calls[0][0],
+                )
+
+    def test_cancel_rejects_terminal_jobs_without_calling_scancel(self):
+        outcome, payload = self.accepted_attempt()
+        payload["jobs"][0]["job_state"] = ["COMPLETED"]
+        executor = SequenceExecutor(response(stdout=json.dumps(payload).encode()))
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session:
+            with self.assertRaises(ReconcileError) as raised:
+                reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+
+        self.assertEqual("job_not_active", raised.exception.code)
+        self.assertEqual(1, len(executor.calls))
+
+    def test_owned_active_attempt_is_cancelled_and_evidence_is_persisted(self):
+        outcome, payload = self.accepted_attempt()
+        executor = SequenceExecutor(
+            response(stdout=json.dumps(payload).encode()),
+            response(),
+        )
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session:
+            result = reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+
+        self.assertEqual("cancelling", result.status)
+        self.assertEqual(["/usr/bin/scancel", outcome.job_id], executor.calls[1][0])
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            metadata = json.loads(attempt.metadata_json)
+            self.assertEqual(("cancelling", "cancelling", "cancelling"), (attempt.status, step.status, run.status))
+            self.assertEqual("RUNNING", metadata["before_cancel"]["raw_state"])
+            self.assertEqual("requested", metadata["cancel_result"]["result"])
+            event_row = session.scalar(
+                select(WorkflowEvent).where(WorkflowEvent.event_type == "cancellation_requested")
+            )
+            self.assertIsNotNone(event_row)
+
+    def test_completion_race_after_scancel_failure_records_real_terminal_state(self):
+        outcome, running = self.accepted_attempt()
+        completed = json.loads(json.dumps(running))
+        completed["jobs"][0]["job_state"] = ["COMPLETED"]
+        executor = SequenceExecutor(
+            response(stdout=json.dumps(running).encode()),
+            response(stderr=b"already completing", returncode=1),
+            response(stdout=json.dumps(completed).encode()),
+        )
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session:
+            result = reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+
+        self.assertEqual("succeeded", result.status)
+        self.assertEqual(["/usr/bin/scancel", outcome.job_id], executor.calls[1][0])
+        self.assertEqual(["/usr/bin/squeue", "--json", f"--jobs={outcome.job_id}"], executor.calls[2][0])
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            self.assertEqual("succeeded", attempt.status)
+            self.assertEqual(
+                "cancellation_raced_terminal",
+                session.scalar(
+                    select(WorkflowEvent.event_type).where(
+                        WorkflowEvent.event_type == "cancellation_raced_terminal"
+                    )
+                ),
+            )
+
+    def test_scancel_failure_preserves_snapshots_without_changing_active_state(self):
+        outcome, running = self.accepted_attempt()
+        executor = SequenceExecutor(
+            response(stdout=json.dumps(running).encode()),
+            response(stderr=b"scheduler private rejection", returncode=1),
+            response(stdout=json.dumps(running).encode()),
+        )
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session:
+            with self.assertRaises(ReconcileError) as raised:
+                reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+
+        self.assertEqual("cancellation_failed", raised.exception.code)
+        self.assertNotIn("scheduler private rejection", str(raised.exception))
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, outcome.attempt_id)
+            metadata = json.loads(attempt.metadata_json)
+            self.assertEqual("queued", attempt.status)
+            self.assertEqual("RUNNING", metadata["before_cancel"]["raw_state"])
+            self.assertEqual("failed", metadata["cancel_result"]["result"])
+            self.assertEqual("RUNNING", metadata["cancel_result"]["scheduler"]["raw_state"])
+            self.assertIsNotNone(
+                session.scalar(
+                    select(WorkflowEvent).where(
+                        WorkflowEvent.event_type == "cancellation_failed"
+                    )
+                )
             )
 
 

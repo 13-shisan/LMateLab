@@ -16,6 +16,7 @@ from services.competition_slurm import (
     PROBE_MODES,
     SlurmClient,
     SlurmError,
+    SlurmJobObservation,
     SlurmSubmission,
 )
 from services.competition_workflows import append_workflow_event
@@ -43,6 +44,15 @@ class SubmissionOutcome:
     status: str
 
 
+@dataclass(frozen=True)
+class CancellationOutcome:
+    workflow_id: str
+    attempt_id: str
+    job_id: str
+    status: str
+    result: str
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -54,10 +64,12 @@ class CompetitionReconciler:
         slurm: SlurmClient,
         probe_script: Path,
         clock: Callable[[], datetime] = _utc_now,
+        slurm_user: str | None = None,
     ) -> None:
         self.slurm = slurm
         self.probe_script = Path(probe_script).resolve()
         self._clock = clock
+        self.slurm_user = slurm_user
 
     def claim_next_attempt(
         self,
@@ -395,4 +407,203 @@ class CompetitionReconciler:
             claim,
             job_id,
             event_type="submission_recovered",
+        )
+
+    @staticmethod
+    def _observation_evidence(observation: SlurmJobObservation) -> dict[str, object]:
+        return {
+            "error_code": observation.error_code,
+            "exit_code": observation.exit_code,
+            "job_id": observation.job_id,
+            "node_list": observation.node_list,
+            "observed_at": observation.observed_at.isoformat(),
+            "payload_sha256": observation.payload_sha256,
+            "raw_state": observation.raw_state,
+            "reason": observation.reason,
+            "source": observation.source,
+            "stale": observation.stale,
+            "state": observation.state,
+            "user_name": observation.user_name,
+        }
+
+    @staticmethod
+    def _decoded_attempt_metadata(attempt: WorkflowAttempt) -> dict[str, object]:
+        try:
+            metadata = json.loads(attempt.metadata_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ReconcileError(
+                "cancellation_ownership_mismatch",
+                "attempt ownership metadata is invalid",
+            ) from exc
+        if not isinstance(metadata, dict):
+            raise ReconcileError(
+                "cancellation_ownership_mismatch",
+                "attempt ownership metadata is invalid",
+            )
+        return metadata
+
+    def _persist_cancel_result(
+        self,
+        session: Session,
+        *,
+        run: WorkflowRun,
+        step: WorkflowStep,
+        attempt: WorkflowAttempt,
+        before: SlurmJobObservation,
+        status: str,
+        result: str,
+        event_type: str,
+        after: SlurmJobObservation | None = None,
+    ) -> CancellationOutcome:
+        now = self._clock()
+        metadata = self._decoded_attempt_metadata(attempt)
+        metadata["before_cancel"] = self._observation_evidence(before)
+        metadata["cancel_result"] = {
+            "observed_at": now.isoformat(),
+            "result": result,
+        }
+        if after is not None:
+            metadata["cancel_result"]["scheduler"] = self._observation_evidence(after)
+        attempt.metadata_json = metadata
+        attempt.status = status
+        attempt.updated_at = now
+        step.status = status
+        step.updated_at = now
+        run.status = status
+        run.updated_at = now
+        if status in {"succeeded", "failed", "cancelled"}:
+            attempt.finished_at = (after.finished_at if after is not None else None) or now
+        append_workflow_event(
+            session,
+            workflow_id=run.id,
+            event_type=event_type,
+            payload={
+                "attempt_id": attempt.id,
+                "job_id": attempt.slurm_job_id,
+                "result": result,
+                "status": status,
+            },
+        )
+        session.commit()
+        return CancellationOutcome(
+            workflow_id=run.id,
+            attempt_id=attempt.id,
+            job_id=attempt.slurm_job_id,
+            status=status,
+            result=result,
+        )
+
+    def cancel_attempt(
+        self,
+        session: Session,
+        workflow_id: str,
+        attempt_id: str,
+    ) -> CancellationOutcome:
+        if not self.slurm_user:
+            raise ReconcileError(
+                "cancellation_not_configured",
+                "scheduler account is not configured",
+            )
+        now = self._clock()
+        session.rollback()
+        attempt = session.get(WorkflowAttempt, attempt_id)
+        if attempt is None:
+            raise ReconcileError("attempt_not_found", "attempt was not found")
+        step = session.get(WorkflowStep, attempt.step_id)
+        run = session.get(WorkflowRun, step.workflow_id) if step is not None else None
+        if step is None or run is None or run.id != workflow_id:
+            raise ReconcileError("attempt_not_found", "attempt was not found")
+        if attempt.status not in {"queued", "running"} or not attempt.slurm_job_id:
+            raise ReconcileError("job_not_active", "attempt does not have an active job")
+
+        lock = session.execute(
+            update(WorkflowAttempt)
+            .where(
+                WorkflowAttempt.id == attempt.id,
+                WorkflowAttempt.slurm_job_id == attempt.slurm_job_id,
+                WorkflowAttempt.status.in_(("queued", "running")),
+            )
+            .values(updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if lock.rowcount != 1:
+            session.rollback()
+            raise ReconcileError("job_not_active", "attempt does not have an active job")
+
+        try:
+            before = self.slurm.inspect_job(attempt.slurm_job_id)
+        except (SlurmError, ValueError) as exc:
+            session.rollback()
+            raise ReconcileError(
+                "scheduler_unavailable",
+                "scheduler ownership snapshot is unavailable",
+            ) from exc
+
+        expected_directory = str(
+            self.slurm.prepare_attempt_directory(run.id, attempt.id).resolve()
+        )
+        expected_comment = f"lmatelab:workflow={run.id};attempt={attempt.id}"
+        ownership_matches = (
+            not before.stale
+            and before.job_id == attempt.slurm_job_id
+            and isinstance(before.job_name, str)
+            and before.job_name.startswith("lmatelab-")
+            and before.working_directory == expected_directory
+            and before.comment == expected_comment
+            and before.user_name == self.slurm_user
+        )
+        if not ownership_matches:
+            session.rollback()
+            raise ReconcileError(
+                "cancellation_ownership_mismatch",
+                "scheduler ownership evidence did not match the attempt",
+            )
+        if before.state not in {"queued", "running"}:
+            session.rollback()
+            raise ReconcileError("job_not_active", "scheduler job is not active")
+
+        try:
+            self.slurm.cancel(attempt.slurm_job_id)
+        except SlurmError as cancel_error:
+            try:
+                after = self.slurm.observe(attempt.slurm_job_id)
+            except (SlurmError, ValueError):
+                after = None
+            if after is not None and after.state in {"succeeded", "failed", "cancelled"}:
+                return self._persist_cancel_result(
+                    session,
+                    run=run,
+                    step=step,
+                    attempt=attempt,
+                    before=before,
+                    after=after,
+                    status=after.state,
+                    result="raced_terminal",
+                    event_type="cancellation_raced_terminal",
+                )
+            self._persist_cancel_result(
+                session,
+                run=run,
+                step=step,
+                attempt=attempt,
+                before=before,
+                after=after,
+                status=attempt.status,
+                result="failed",
+                event_type="cancellation_failed",
+            )
+            raise ReconcileError(
+                "cancellation_failed",
+                "scheduler did not accept cancellation",
+            ) from cancel_error
+
+        return self._persist_cancel_result(
+            session,
+            run=run,
+            step=step,
+            attempt=attempt,
+            before=before,
+            status="cancelling",
+            result="requested",
+            event_type="cancellation_requested",
         )
