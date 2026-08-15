@@ -101,16 +101,16 @@
 - Modify: `backend/tests/test_competition_workflow_routes.py`
 - Modify: `backend/tests/test_competition_slurm.py`
 
-- [ ] Write failing route tests for latest-attempt serialization in the existing
+- [x] Write failing route tests for latest-attempt serialization in the existing
       workflow timeline fields.
-- [ ] Write failing route tests proving Viewer and non-owner cancellation are
+- [x] Write failing route tests proving Viewer and non-owner cancellation are
       forbidden, an arbitrary Job ID cannot be supplied, and scheduler errors
       do not leak paths or command output.
-- [ ] Implement `POST /competition/workflows/{workflow_id}/attempts/{attempt_id}/cancel`
+- [x] Implement `POST /competition/workflows/{workflow_id}/attempts/{attempt_id}/cancel`
       using authenticated workflow and attempt ownership.
-- [ ] Replace dashboard `not-integrated` only with a bounded ledger-derived
+- [x] Replace dashboard `not-integrated` only with a bounded ledger-derived
       scheduler summary; do not enumerate or expose unrelated shared-account jobs.
-- [ ] Run workflow route and Slurm suites and commit API integration.
+- [x] Run workflow route and Slurm suites and commit API integration.
 
 ### Task 7: Add the fixed probe and deployment contracts
 

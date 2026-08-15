@@ -41,6 +41,24 @@ def release_commit(environ: Mapping[str, str] | None = None) -> str:
     return commit
 
 
+def slurm_user(environ: Mapping[str, str] | None = None) -> str:
+    values = os.environ if environ is None else environ
+    value = values.get("LMATELAB_SLURM_USER", "pb23030683").strip()
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", value) is None:
+        raise ValueError("LMATELAB_SLURM_USER is invalid")
+    return value
+
+
+def slurm_probe_script(environ: Mapping[str, str] | None = None) -> Path:
+    values = os.environ if environ is None else environ
+    return Path(
+        values.get(
+            "LMATELAB_SLURM_PROBE_SCRIPT",
+            "/home/scc/pb23030683/lmatelab-107cup/current/deploy/107cup/slurm/probe.slurm",
+        )
+    )
+
+
 def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     values = os.environ if environ is None else environ
     return {
