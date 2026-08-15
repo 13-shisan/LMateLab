@@ -111,6 +111,11 @@ python -m unittest \
   tests.test_107cup_deploy_contract \
   tests.test_107cup_preview_deploy_contract \
   tests.test_health_readiness \
+  tests.test_competition_workflow_models \
+  tests.test_competition_inputs \
+  tests.test_competition_workflow_service \
+  tests.test_competition_workflow_routes \
+  tests.test_competition_slurm \
   -v
 
 cd "$project/frontend"
@@ -123,17 +128,18 @@ cd "$project/backend"
 python -c "from main_107cup import app; paths={route.path for route in app.routes}; assert '/api/health/live' in paths; assert '/api/agents' not in paths"
 
 rm -rf "$staging"
-mkdir -p "$staging/source" "$staging/frontend-dist"
+mkdir -p "$staging/source" "$staging/frontend-dist" "$staging/deploy/107cup"
 tar \
   --exclude=.git \
   --exclude=frontend/node_modules \
   --exclude=frontend/dist \
   -C "$project" -cf - . | tar -C "$staging/source" -xf -
 cp -a "$project/frontend/dist/." "$staging/frontend-dist/"
+cp -a "$project/deploy/107cup/slurm" "$staging/deploy/107cup/"
 
 cd "$staging"
 printf '%s\n' "$commit" > commit.txt
-find source frontend-dist -type f -print0 | sort -z | xargs -0 sha256sum > manifest.txt
+find source frontend-dist deploy -type f -print0 | sort -z | xargs -0 sha256sum > manifest.txt
 sha256sum manifest.txt > manifest.sha256
 sha256sum -c manifest.sha256
 sha256sum -c manifest.txt

@@ -146,6 +146,30 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     runtime.release_commit(values)
 
+    def test_slurm_identity_and_probe_path_are_fixed_by_runtime_configuration(self):
+        runtime = self.require_runtime()
+        probe = "/opt/lmatelab/deploy/107cup/slurm/probe.slurm"
+
+        self.assertEqual(
+            "pb23030683",
+            runtime.slurm_user({"LMATELAB_SLURM_USER": "pb23030683"}),
+        )
+        self.assertEqual(
+            Path(probe),
+            runtime.slurm_probe_script({"LMATELAB_SLURM_PROBE_SCRIPT": probe}),
+        )
+        for values in (
+            {"LMATELAB_SLURM_USER": "bad user"},
+            {"LMATELAB_SLURM_PROBE_SCRIPT": "relative/probe.slurm"},
+            {"LMATELAB_SLURM_PROBE_SCRIPT": "/opt/../tmp/probe.slurm"},
+        ):
+            with self.subTest(values=values):
+                with self.assertRaises(ValueError):
+                    if "LMATELAB_SLURM_USER" in values:
+                        runtime.slurm_user(values)
+                    else:
+                        runtime.slurm_probe_script(values)
+
     def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):
         entrypoint = BACKEND_ROOT / "main_107cup.py"
         self.assertTrue(entrypoint.is_file(), str(entrypoint))

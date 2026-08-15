@@ -41,6 +41,70 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertIn(required, source)
         self.assertNotIn("#SBATCH --gres", source)
 
+    def test_stage6_probe_is_fixed_small_private_and_never_runs_vasp(self):
+        source = self.read_required("slurm/probe.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=1",
+            "#SBATCH --mem=256M",
+            "#SBATCH --time=00:03:00",
+            "SLURM_JOB_ID",
+            "umask 077",
+            "success|fail|cancel",
+            "exit 42",
+            "sleep 1",
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("vasp", "mpirun", "srun", "eval", "bash -c", "sh -c"):
+            self.assertNotIn(forbidden, source.lower())
+
+    def test_stage6_smoke_is_compute_only_isolated_and_hashes_all_evidence(self):
+        source = self.read_required("slurm/stage6-smoke.py")
+        for required in (
+            "SLURM_JOB_ID",
+            "sqlite:///",
+            "stage6-smoke.sqlite",
+            "CompetitionReconciler",
+            "SlurmClient",
+            "success",
+            "fail",
+            "cancel",
+            "submission_accepted",
+            "submission_failed",
+            "cancellation_requested",
+            "scheduler_state_changed",
+            "manifest.sha256",
+            "hashlib.sha256",
+            "integrity_check",
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("shell=True", "docker", "vasp_std", "vasp_gam", "vasp_ncl"):
+            self.assertNotIn(forbidden, source)
+
+    def test_formal_build_runs_stage5_and_stage6_workflow_suites(self):
+        source = self.read_required("build.slurm")
+        for suite in (
+            "tests.test_competition_workflow_models",
+            "tests.test_competition_inputs",
+            "tests.test_competition_workflow_service",
+            "tests.test_competition_workflow_routes",
+            "tests.test_competition_slurm",
+        ):
+            self.assertIn(suite, source)
+
+    def test_formal_release_materializes_the_fixed_stage6_script_path(self):
+        source = self.read_required("build.slurm")
+        self.assertIn('"$staging/deploy/107cup"', source)
+        self.assertIn(
+            'cp -a "$project/deploy/107cup/slurm" "$staging/deploy/107cup/"',
+            source,
+        )
+        self.assertIn("find source frontend-dist deploy -type f", source)
+
     def test_build_job_uses_module_python_with_a_valid_pip_environment(self):
         source = self.read_required("build.slurm")
         module_init = "source /etc/profile.d/modules.sh"
@@ -259,6 +323,11 @@ class CompetitionDeployContractTests(unittest.TestCase):
             line = next((item for item in source.splitlines() if item.startswith(f"{variable}=")), "")
             self.assertTrue(line, variable)
             self.assertIn(root, line, line)
+        self.assertIn("LMATELAB_SLURM_USER=pb23030683", source)
+        self.assertIn(
+            "LMATELAB_SLURM_PROBE_SCRIPT=/home/scc/pb23030683/lmatelab-107cup/current/deploy/107cup/slurm/probe.slurm",
+            source,
+        )
 
     def test_allowed_users_example_is_fresh_competition_identity(self):
         source = self.read_required("allowed_users.example.json")

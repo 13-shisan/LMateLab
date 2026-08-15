@@ -96,6 +96,7 @@ python -m unittest \
   tests.test_competition_inputs \
   tests.test_competition_workflow_service \
   tests.test_competition_workflow_routes \
+  tests.test_competition_slurm \
   -v
 
 cd "$source_tree/frontend"

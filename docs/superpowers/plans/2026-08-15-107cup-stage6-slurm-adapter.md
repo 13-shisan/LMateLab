@@ -122,14 +122,14 @@
 - Modify: `deploy/107cup/workflow-preview-build.slurm`
 - Modify: `deploy/107cup/build.slurm`
 
-- [ ] Write failing contract tests for a fixed competition account, partition,
+- [x] Write failing contract tests for a fixed competition account, partition,
       QOS, one CPU, small memory/time limits, private umask and allowlisted
       `success|fail|cancel` probe modes.
-- [ ] Implement the probe without VASP, arbitrary commands or login-node work.
-- [ ] Add a smoke harness that uses an isolated SQLite database and emits raw
+- [x] Implement the probe without VASP, arbitrary commands or login-node work.
+- [x] Add a smoke harness that uses an isolated SQLite database and emits raw
       scheduler evidence plus a SHA-256 manifest.
-- [ ] Add Stage 6 tests to preview and formal build gates.
-- [ ] Run `bash -n` for every changed Bash/Slurm file and commit deployment
+- [x] Add Stage 6 tests to preview and formal build gates.
+- [x] Run `bash -n` for every changed Bash/Slurm file and commit deployment
       contracts.
 
 ### Task 8: Run local regression and prepare the feature PR

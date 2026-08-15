@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Mapping
 
 
@@ -51,12 +51,14 @@ def slurm_user(environ: Mapping[str, str] | None = None) -> str:
 
 def slurm_probe_script(environ: Mapping[str, str] | None = None) -> Path:
     values = os.environ if environ is None else environ
-    return Path(
-        values.get(
-            "LMATELAB_SLURM_PROBE_SCRIPT",
-            "/home/scc/pb23030683/lmatelab-107cup/current/deploy/107cup/slurm/probe.slurm",
-        )
+    value = values.get(
+        "LMATELAB_SLURM_PROBE_SCRIPT",
+        "/home/scc/pb23030683/lmatelab-107cup/current/deploy/107cup/slurm/probe.slurm",
     )
+    path = PurePosixPath(value)
+    if not path.is_absolute() or ".." in path.parts:
+        raise ValueError("LMATELAB_SLURM_PROBE_SCRIPT must be a fixed absolute POSIX path")
+    return Path(value)
 
 
 def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, str]:
