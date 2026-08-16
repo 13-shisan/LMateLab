@@ -85,6 +85,27 @@ class CompetitionDeployContractTests(unittest.TestCase):
         for forbidden in ("shell=True", "docker", "vasp_std", "vasp_gam", "vasp_ncl"):
             self.assertNotIn(forbidden, source)
 
+    def test_stage6_smoke_resolves_the_pinned_release_when_slurm_spools_the_script(self):
+        source = self.read_required("slurm/stage6-smoke.py")
+
+        self.assertNotIn("Path(__file__).resolve()", source)
+        for required in (
+            'RELEASE_COMMIT = os.environ.get("LMATELAB_GIT_COMMIT", "")',
+            'RELEASE_PARENT = Path("/home/scc/pb23030683/lmatelab-107cup/releases")',
+            'RELEASE_ROOT = RELEASE_PARENT / RELEASE_COMMIT',
+            'BACKEND_ROOT = RELEASE_ROOT / "source" / "backend"',
+            'os.environ["LMATELAB_SLURM_PROBE_SCRIPT"] = str(',
+            'EVIDENCE_ROOT.mkdir(mode=0o700, parents=True)',
+            'EVIDENCE_ROOT / "failure.json"',
+        ):
+            self.assertIn(required, source)
+
+        evidence_creation = source.index("EVIDENCE_ROOT.mkdir(mode=0o700, parents=True)")
+        backend_validation = source.index("competition backend source is unavailable")
+        sqlalchemy_import = source.index("from sqlalchemy import")
+        self.assertLess(evidence_creation, backend_validation)
+        self.assertLess(evidence_creation, sqlalchemy_import)
+
     def test_formal_build_runs_stage5_and_stage6_workflow_suites(self):
         source = self.read_required("build.slurm")
         for suite in (

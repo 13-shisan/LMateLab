@@ -144,8 +144,8 @@
       execution, `shell=True`, unbounded reads and unrelated feature drift.
 - [x] Update the implementation plan with local-only evidence and keep Stage 6
       `PARTIAL` until merged 107 validation succeeds.
-- [ ] Commit, push `codex/107cup-stage6-slurm-adapter`, and create a PR to protected
-      `main`.
+- [x] Commit, push `codex/107cup-stage6-slurm-adapter`, and create PR #26 to protected
+      `main`; merged as `74fb0b45d69dbc56ba6bb8f4ef27f27106d51ff2`.
 
 ### Task 9: Validate the merged commit on 107
 
@@ -162,6 +162,13 @@
 - [ ] Verify stable service, databases, public entry and unrelated jobs remain
       unchanged.
 - [ ] Record immutable evidence with SHA-256 and submit a separate evidence PR.
+
+Initial merged-commit attempt on 2026-08-16: checkout pin, pre-snapshot Job
+`38592` and formal build Job `38593` succeeded. Smoke Job `38598` failed before
+submitting child jobs because Slurm spooled the Python batch script and its
+`__file__` no longer identified the release root. The failure is retained; Task
+9 remains unchecked until the bootstrap fix is merged and every runtime gate is
+repeated against the new exact `main` commit.
 
 ### Task 10: Close Stage 6
 
