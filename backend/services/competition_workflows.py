@@ -419,6 +419,23 @@ def _next_event_sequence(session: Session, workflow_id: str) -> int:
     return int(current or 0) + 1
 
 
+def append_workflow_event(
+    session: Session,
+    *,
+    workflow_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> WorkflowEvent:
+    event = WorkflowEvent(
+        workflow_id=workflow_id,
+        sequence=_next_event_sequence(session, workflow_id),
+        event_type=event_type,
+        payload_json=payload,
+    )
+    session.add(event)
+    return event
+
+
 def _transition_workflow_status(
     session: Session,
     *,

@@ -192,6 +192,7 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
             "tests.test_competition_inputs",
             "tests.test_competition_workflow_service",
             "tests.test_competition_workflow_routes",
+            "tests.test_competition_slurm",
             "manifest.sha256",
             "npm ci",
             "npm test",
@@ -239,6 +240,8 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
             "DATABASE_URL=sqlite:////home/scc/pb23030683/lmatelab-107cup/data/db/eln.db",
             source,
         )
+        self.assertIn("LMATELAB_SLURM_USER", source)
+        self.assertIn("LMATELAB_SLURM_PROBE_SCRIPT", source)
         for required in (
             'runtime_parent="$root/workflow-preview-runtime/$commit"',
             'runtime="$runtime_parent/$SLURM_JOB_ID"',

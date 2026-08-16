@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "job_id": 41002,
+      "name": "lmatelab-12345678-relax-a1",
+      "job_state": ["COMPLETED"],
+      "exit_code": {
+        "return_code": {"number": 0},
+        "signal": {"id": {"number": 0}}
+      },
+      "state_reason": "None",
+      "current_working_directory": "/home/scc/pb23030683/lmatelab-107cup/data/workflows/12345678-1234-1234-1234-123456789012/attempts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "comment": "lmatelab:workflow=12345678-1234-1234-1234-123456789012;attempt=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "user_name": "pb23030683",
+      "nodes": "anode02",
+      "start_time": {"set": true, "number": 1786784000},
+      "end_time": {"set": true, "number": 1786784060}
+    }
+  ],
+  "errors": [],
+  "warnings": []
+}

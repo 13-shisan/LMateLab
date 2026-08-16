@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Mapping
 
 
@@ -39,6 +39,26 @@ def release_commit(environ: Mapping[str, str] | None = None) -> str:
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise ValueError("LMATELAB_GIT_COMMIT must be a full lowercase Git SHA")
     return commit
+
+
+def slurm_user(environ: Mapping[str, str] | None = None) -> str:
+    values = os.environ if environ is None else environ
+    value = values.get("LMATELAB_SLURM_USER", "pb23030683").strip()
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", value) is None:
+        raise ValueError("LMATELAB_SLURM_USER is invalid")
+    return value
+
+
+def slurm_probe_script(environ: Mapping[str, str] | None = None) -> Path:
+    values = os.environ if environ is None else environ
+    value = values.get(
+        "LMATELAB_SLURM_PROBE_SCRIPT",
+        "/home/scc/pb23030683/lmatelab-107cup/current/deploy/107cup/slurm/probe.slurm",
+    )
+    path = PurePosixPath(value)
+    if not path.is_absolute() or ".." in path.parts:
+        raise ValueError("LMATELAB_SLURM_PROBE_SCRIPT must be a fixed absolute POSIX path")
+    return Path(value)
 
 
 def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, str]:

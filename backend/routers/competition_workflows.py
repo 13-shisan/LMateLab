@@ -2,19 +2,28 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
+from pydantic import BaseModel, ConfigDict
 
 from competition_authz import require_operator, require_viewer_or_operator
-from competition_runtime import release_commit, workflow_root
+from competition_runtime import (
+    release_commit,
+    slurm_probe_script,
+    slurm_user,
+    workflow_root,
+)
 from database import get_db
 from models import User
-from models_workflow import WorkflowRun, WorkflowStep
+from models_workflow import WorkflowAttempt, WorkflowRun, WorkflowStep
 from schemas_workflow import DraftCreateRequest
 from services.competition_inputs import InputValidationError, MAX_STRUCTURE_BYTES
+from services.competition_reconcile import CompetitionReconciler, ReconcileError
+from services.competition_slurm import SlurmClient
 from services.competition_workflows import (
     WorkflowServiceError,
     confirm_workflow,
@@ -25,9 +34,29 @@ from services.competition_workflows import (
 
 router = APIRouter(prefix="/competition", tags=["competition-workflows"])
 
-_EXECUTING_STATUSES = frozenset({"queued", "running"})
+_EXECUTING_STATUSES = frozenset({"submitting", "queued", "running", "cancelling"})
 _SUCCESS_STATUSES = frozenset({"succeeded"})
-_ATTENTION_STATUSES = frozenset({"failed", "validation_failed", "blocked"})
+_ATTENTION_STATUSES = frozenset(
+    {"failed", "validation_failed", "blocked", "submission_failed", "unknown"}
+)
+
+
+class CancellationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def get_competition_reconciler() -> CompetitionReconciler:
+    root = workflow_root()
+    script = slurm_probe_script()
+    client = SlurmClient(
+        workflow_root=root,
+        allowed_scripts=(script,),
+    )
+    return CompetitionReconciler(
+        slurm=client,
+        probe_script=script,
+        slurm_user=slurm_user(),
+    )
 
 
 def _metadata(value: str | dict[str, Any] | None) -> dict[str, Any]:
@@ -50,28 +79,64 @@ def _source_label(source_kind: str) -> str:
     return "uploaded structure" if source_kind == "upload" else "built-in MoS2"
 
 
-def _step_payload(step: WorkflowStep) -> dict[str, Any]:
+def _latest_attempt(step: WorkflowStep) -> WorkflowAttempt | None:
+    return max(step.attempts, key=lambda item: item.attempt_number, default=None)
+
+
+def _relative_attempt_directory(
+    workflow_id: str,
+    attempt: WorkflowAttempt,
+) -> str | None:
+    if not attempt.working_directory:
+        return None
+    root = workflow_root().resolve()
+    expected = root / workflow_id / "attempts" / attempt.id
+    candidate = Path(attempt.working_directory)
+    try:
+        if candidate.resolve() != expected.resolve():
+            return None
+        return expected.resolve().relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+def _step_payload(step: WorkflowStep, workflow_id: str) -> dict[str, Any]:
+    attempt = _latest_attempt(step)
+    metadata = _metadata(attempt.metadata_json) if attempt is not None else {}
+    observation = metadata.get("scheduler_observation", {})
+    if not isinstance(observation, dict):
+        observation = {}
     return {
         "key": step.step_key,
         "status": step.status,
-        "job_id": None,
-        "attempt": 0,
-        "attempt_dir": None,
-        "slurm_state": None,
-        "exit_code": None,
-        "reason": None,
-        "accepted": None,
+        "job_id": attempt.slurm_job_id if attempt is not None else None,
+        "attempt": attempt.attempt_number if attempt is not None else 0,
+        "attempt_dir": (
+            _relative_attempt_directory(workflow_id, attempt)
+            if attempt is not None
+            else None
+        ),
+        "slurm_state": observation.get("raw_state"),
+        "exit_code": observation.get("exit_code"),
+        "reason": observation.get("reason"),
+        "accepted": attempt.slurm_job_id is not None if attempt is not None else None,
     }
 
 
 def _list_item(run: WorkflowRun) -> dict[str, Any]:
+    attempts = [
+        (step, attempt)
+        for step in run.steps
+        if (attempt := _latest_attempt(step)) is not None
+    ]
+    latest = max(attempts, key=lambda item: item[1].updated_at, default=None)
     return {
         "id": run.id,
         "material": run.material,
         "source": _source_label(run.source_kind),
         "status": run.status,
-        "current_step": None,
-        "latest_job_id": None,
+        "current_step": latest[0].step_key if latest is not None else None,
+        "latest_job_id": latest[1].slurm_job_id if latest is not None else None,
         "updated_at": _timestamp(run.updated_at),
         "data_kind": "live",
     }
@@ -87,13 +152,24 @@ def _detail(run: WorkflowRun) -> dict[str, Any]:
         "input_sha256": run.input_sha256,
         "release_commit": run.release_commit,
         "structure_summary": metadata.get("structure_summary", {}),
-        "steps": [_step_payload(step) for step in steps],
+        "steps": [_step_payload(step, run.id) for step in steps],
         "created_at": _timestamp(run.created_at),
     }
 
 
 def _visible_runs_statement(current_user: User):
     statement = select(WorkflowRun)
+    if str(current_user.role).strip().lower() == "operator":
+        statement = statement.where(WorkflowRun.owner_id == current_user.id)
+    return statement
+
+
+def _visible_attempts_statement(current_user: User):
+    statement = (
+        select(WorkflowAttempt.status, WorkflowAttempt.updated_at)
+        .join(WorkflowStep, WorkflowAttempt.step_id == WorkflowStep.id)
+        .join(WorkflowRun, WorkflowStep.workflow_id == WorkflowRun.id)
+    )
     if str(current_user.role).strip().lower() == "operator":
         statement = statement.where(WorkflowRun.owner_id == current_user.id)
     return statement
@@ -219,7 +295,10 @@ def list_workflows(
         statement = statement.where(WorkflowRun.status == normalized_status)
     total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
     rows = db.scalars(
-        statement.order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id)
+        statement.options(
+            selectinload(WorkflowRun.steps).selectinload(WorkflowStep.attempts)
+        )
+        .order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id)
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
@@ -241,7 +320,10 @@ def get_workflow(
     statement = (
         _visible_runs_statement(current_user)
         .where(WorkflowRun.id == workflow_id)
-        .options(selectinload(WorkflowRun.steps), selectinload(WorkflowRun.owner))
+        .options(
+            selectinload(WorkflowRun.steps).selectinload(WorkflowStep.attempts),
+            selectinload(WorkflowRun.owner),
+        )
     )
     run = db.scalar(statement)
     if run is None:
@@ -256,7 +338,11 @@ def dashboard(
 ):
     statement = _visible_runs_statement(current_user)
     rows = db.scalars(
-        statement.order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id).limit(10)
+        statement.options(
+            selectinload(WorkflowRun.steps).selectinload(WorkflowStep.attempts)
+        )
+        .order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id)
+        .limit(10)
     ).all()
     total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
 
@@ -267,6 +353,31 @@ def dashboard(
             )
         ) or 0
 
+    attempt_rows = _visible_attempts_statement(current_user).subquery()
+    queued = db.scalar(
+        select(func.count()).select_from(attempt_rows).where(attempt_rows.c.status == "queued")
+    ) or 0
+    running = db.scalar(
+        select(func.count())
+        .select_from(attempt_rows)
+        .where(attempt_rows.c.status.in_(("running", "cancelling")))
+    ) or 0
+    unknown = db.scalar(
+        select(func.count()).select_from(attempt_rows).where(attempt_rows.c.status == "unknown")
+    ) or 0
+    attempt_total = db.scalar(select(func.count()).select_from(attempt_rows)) or 0
+    scheduler_updated_at = db.scalar(select(func.max(attempt_rows.c.updated_at)))
+    scheduler_state = (
+        "unknown"
+        if unknown
+        else "running"
+        if running
+        else "queued"
+        if queued
+        else "idle"
+    )
+    active = next((run for run in rows if run.status in _EXECUTING_STATUSES), None)
+
     return {
         "summary": {
             "total": total,
@@ -275,15 +386,90 @@ def dashboard(
             "needs_attention": count_statuses(_ATTENTION_STATUSES),
         },
         "recent_workflows": [_list_item(run) for run in rows],
-        "active_workflow": None,
+        "active_workflow": _list_item(active) if active is not None else None,
         "slurm": {
             "partition": None,
-            "queued": 0,
-            "running": 0,
-            "state": "not-integrated",
-            "updated_at": None,
+            "queued": queued,
+            "running": running,
+            "state": scheduler_state,
+            "updated_at": _timestamp(scheduler_updated_at),
+            "attempts": attempt_total,
         },
         "data_kind": "live",
+    }
+
+
+def _raise_reconcile_error(exc: ReconcileError) -> None:
+    responses = {
+        "attempt_not_found": (status.HTTP_404_NOT_FOUND, "attempt was not found"),
+        "job_not_active": (status.HTTP_409_CONFLICT, "attempt does not have an active job"),
+        "cancellation_ownership_mismatch": (
+            status.HTTP_409_CONFLICT,
+            "scheduler ownership could not be verified",
+        ),
+        "cancellation_not_configured": (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "scheduler service unavailable",
+        ),
+        "scheduler_unavailable": (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "scheduler service unavailable",
+        ),
+        "cancellation_failed": (
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "scheduler service unavailable",
+        ),
+    }
+    http_status, detail = responses.get(
+        exc.code,
+        (status.HTTP_409_CONFLICT, "cancellation could not be completed"),
+    )
+    raise HTTPException(
+        status_code=http_status,
+        detail=detail,
+        headers={"X-Error-Code": exc.code},
+    ) from None
+
+
+@router.post("/workflows/{workflow_id}/attempts/{attempt_id}/cancel")
+def cancel_attempt(
+    workflow_id: str,
+    attempt_id: str,
+    _payload: CancellationRequest | None = None,
+    current_user: User = Depends(require_operator),
+    db: Session = Depends(get_db),
+    reconciler: CompetitionReconciler = Depends(get_competition_reconciler),
+):
+    run = db.scalar(
+        _visible_runs_statement(current_user).where(WorkflowRun.id == workflow_id)
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="workflow was not found")
+    attempt = db.scalar(
+        select(WorkflowAttempt)
+        .join(WorkflowStep, WorkflowAttempt.step_id == WorkflowStep.id)
+        .where(
+            WorkflowAttempt.id == attempt_id,
+            WorkflowStep.workflow_id == run.id,
+        )
+    )
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="attempt was not found")
+    try:
+        result = reconciler.cancel_attempt(db, workflow_id, attempt_id)
+    except ReconcileError as exc:
+        _raise_reconcile_error(exc)
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="scheduler service unavailable",
+        ) from None
+    return {
+        "workflow_id": result.workflow_id,
+        "attempt_id": result.attempt_id,
+        "job_id": result.job_id,
+        "status": result.status,
+        "result": result.result,
     }
 
 
