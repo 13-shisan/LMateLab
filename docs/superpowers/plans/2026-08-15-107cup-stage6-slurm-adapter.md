@@ -163,7 +163,7 @@
       unchanged.
 - [x] Record immutable evidence with SHA-256 in
       `docs/107cup/stage6-slurm-evidence.md`.
-- [ ] Merge the separate evidence PR and synchronize Windows, Gitea `main` and
+- [x] Merge the separate evidence PR and synchronize Windows, Gitea `main` and
       the 107 detached checkout before closing Stage 6.
 
 Initial merged-commit attempt on 2026-08-16: checkout pin, pre-snapshot Job
@@ -176,8 +176,12 @@ PR #27 merged the fix as `93465522424ce0db24dabdfca04efe22fc523fa7`.
 Pre-snapshot Job `38620`, build Job `38621`, smoke Job `38623` and post-snapshot
 Job `38629` completed. Child Jobs `38625`, `38626`, `38627` and `38628` cover
 success, deliberate failure, owned cancellation and non-owned cancellation
-rejection. The stable service and databases remained unchanged. Task 9 remains
-open only for the evidence PR merge and final three-way synchronization.
+rejection. The stable service and databases remained unchanged. At that point,
+Task 9 remained open only for the evidence PR merge and final three-way
+synchronization. PR #28 then merged the evidence as
+`044ada5a5287f402f57507f25245764a807bc8d4`;
+Windows `main`, Gitea `main` and the clean 107 detached checkout were synchronized
+to that commit, closing Task 9.
 
 ### Task 10: Close Stage 6
 
@@ -185,8 +189,13 @@ open only for the evidence PR merge and final three-way synchronization.
 - Modify: `docs/107cup/implementation-plan.md`
 - Create: `docs/107cup/stage6-slurm-evidence.md`
 
-- [ ] Reconcile every Job ID and retained artifact against the merged commit.
-- [ ] Review ownership and failure evidence independently.
-- [ ] Mark Stage 6 `DONE` only after the evidence PR is merged and Windows,
+- [x] Reconcile every Job ID and retained artifact against the merged commit.
+- [x] Review ownership and failure evidence independently.
+- [x] Mark Stage 6 `DONE` only after the evidence PR is merged and Windows,
       Gitea `main`, and the 107 checkout agree.
-- [ ] Keep Stage 7 and Stage 8 `PENDING`; do not run VASP in this plan.
+- [x] Keep Stage 7 and Stage 8 `PENDING`; do not run VASP in this plan.
+
+Stage 6 closed on 2026-08-16 after PR #28 merged and all three source checkouts
+agreed at `044ada5a5287f402f57507f25245764a807bc8d4`. Stable Job `37715` remained
+running on `anode02`, and public live, ready and Dashboard checks returned `200`.
+No VASP job was submitted.
