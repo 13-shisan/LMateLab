@@ -152,23 +152,32 @@
 **Files:**
 - Evidence only; do not edit source on 107.
 
-- [ ] After merge, pin the 107 detached checkout to the exact `main` merge commit.
-- [ ] Run pre-change snapshot and a Slurm build job; do not build or run tests on
+- [x] After merge, pin the 107 detached checkout to the exact `main` merge commit.
+- [x] Run pre-change snapshot and a Slurm build job; do not build or run tests on
       the login node.
-- [ ] Run the fixed Stage 6 smoke from a compute allocation and retain successful,
+- [x] Run the fixed Stage 6 smoke from a compute allocation and retain successful,
       failed, cancelled, restart-reconciled and non-owned rejection evidence.
-- [ ] Confirm `sbatch --test-only` leaves no residual job and the smoke harness
+- [x] Confirm `sbatch --test-only` leaves no residual job and the smoke harness
       cleans up only its explicitly owned foreign control job.
-- [ ] Verify stable service, databases, public entry and unrelated jobs remain
+- [x] Verify stable service, databases, public entry and unrelated jobs remain
       unchanged.
-- [ ] Record immutable evidence with SHA-256 and submit a separate evidence PR.
+- [x] Record immutable evidence with SHA-256 in
+      `docs/107cup/stage6-slurm-evidence.md`.
+- [ ] Merge the separate evidence PR and synchronize Windows, Gitea `main` and
+      the 107 detached checkout before closing Stage 6.
 
 Initial merged-commit attempt on 2026-08-16: checkout pin, pre-snapshot Job
 `38592` and formal build Job `38593` succeeded. Smoke Job `38598` failed before
 submitting child jobs because Slurm spooled the Python batch script and its
 `__file__` no longer identified the release root. The failure is retained; Task
-9 remains unchecked until the bootstrap fix is merged and every runtime gate is
-repeated against the new exact `main` commit.
+9 runtime gates were repeated only after the bootstrap fix merged.
+
+PR #27 merged the fix as `93465522424ce0db24dabdfca04efe22fc523fa7`.
+Pre-snapshot Job `38620`, build Job `38621`, smoke Job `38623` and post-snapshot
+Job `38629` completed. Child Jobs `38625`, `38626`, `38627` and `38628` cover
+success, deliberate failure, owned cancellation and non-owned cancellation
+rejection. The stable service and databases remained unchanged. Task 9 remains
+open only for the evidence PR merge and final three-way synchronization.
 
 ### Task 10: Close Stage 6
 

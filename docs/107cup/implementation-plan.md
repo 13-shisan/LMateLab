@@ -137,12 +137,12 @@
 
 | 阶段 | 状态 | 当前结论 | 下一门禁 |
 |---|---|---|---|
-| 1. 竞赛仓库初始化 | PARTIAL | Gitea `main`、Windows 本地 `main` 与 107 只读 detached checkout 已同步到 PR #24 合并提交 `bec82bc`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
+| 1. 竞赛仓库初始化 | PARTIAL | Gitea `main` 与 107 只读 detached checkout 已同步到 PR #27 合并提交 `9346552`，107 Deploy Key 只读和 `main` 保护均已完成；Windows 证据分支也基于该提交 | 证据 PR 合并后再同步本地 `main` 与 107；取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
 | 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `37715` 在 `anode02:18731` 运行发布 `bec82bc9fed3ad9355235b965f5bf8cdba152a60`；公网入口返回 `stable/live` 且两套 SQLite 完整性为 `ok`，旧 Job `36597` 已受控停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
-| 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 真实业务路由确认 Operator 可写私有工作流、Viewer 三个写路由均为 `403`，两个角色均可读取验收工作流 | 配置三名成员独立应用身份；阶段 6 再验收 Slurm 作业归属边界 |
-| 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变；阶段 6 仍需用户明确确认后开始 |
-| 6. Slurm 适配器 | PARTIAL | PR #26 已合并为 `74fb0b4`；前快照 Job `38592` 与构建 Job `38593` 成功，首次 smoke Job `38598` 因 Slurm spool 下错误使用 `__file__` 定位发布目录而在提交子作业前失败；本地修复已通过 `165/165` 回归，尚待合并和重跑 | 合并 bootstrap 修复后固定新的 `main`、重新构建，并完成 success/fail/cancel、重启对账和非归属拒绝的 107 计算节点验收 |
+| 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
+| 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
+| 6. Slurm 适配器 | PARTIAL | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留 | 合并 `docs/107cup/stage6-slurm-evidence.md` 的独立证据 PR，随后同步 Windows、Gitea `main` 与 107 并再将阶段改为 `DONE` |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
@@ -436,8 +436,8 @@ Slurm comment 含 workflow_id 和 attempt_id
 - [x] 日志读取限制在 attempt 目录并限制单次读取字节数。
 - [x] `scancel` 前验证四项归属证据，任一不符即拒绝。
 - [x] 服务重启后从数据库和 `squeue/scontrol/sacct` 对账；无权威终态时记录 `unknown/stale`，不把陈旧状态显示为运行中。
-- [ ] 真实提交一个短时普通作业并完成取消、失败和重启对账验收。
-- [ ] 创建一个非 LMateLab 作业并验证平台无法取消它。
+- [x] 真实提交短时普通作业：Job `38625` 成功、Job `38626` 故意失败、Job `38627` 受控取消，并由新 reconciler/数据库会话完成重启式对账。
+- [x] smoke 自建非归属控制 Job `38628`；适配器以 `cancellation_ownership_mismatch` 拒绝取消，随后 harness 只按已知 Job ID 精确清理该控制作业。
 
 ## 12. 阶段 7：VASP 四步真实闭环
 
@@ -762,3 +762,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 首次真实 smoke Job `38598` 在 `anode01` 以 `FAILED/1:0` 结束，stderr 为 `competition backend source is unavailable`，SHA-256 为 `36d0f6242943582f438e2bc061f49b0bb9abeb448eac151ae7f7a6c6766a64c3`。失败发生在任何 `sbatch --test-only`、普通探针、`scancel` 或非归属控制作业之前，因此没有子 Job ID、没有修改数据库，也没有可误记为 Slurm 适配器验收的成功证据；失败日志保留，队列仍只有稳定 Job `37715`。
 - 根因是 Slurm 把 Python 批脚本复制到 spool 路径后，`__file__` 不再位于发布目录，而 smoke 用其父目录定位 backend。修复通过完整小写 commit 固定 `releases/<commit>/source/backend` 和同一 release 内的探针，并在业务依赖导入前建立私有证据目录、记录早期 `failure.json` 与 SHA-256 manifest。新增合同测试先 RED 后 GREEN；Windows 阶段 5/6 与 107 专项回归 `165/165` 通过，另有 1 项 Windows 符号链接权限预期跳过，`py_compile` 与 `git diff --check` 通过。
 - 上述修复尚未合并、没有部署到 107；在修复 PR 合并并针对新的固定 `main` 重做构建和完整 smoke 前，阶段 6 继续为 `PARTIAL`。阶段 7 与阶段 8 保持 `PENDING`，没有运行 VASP。
+- PR #27 已把 Slurm spool 启动修复合并为受保护 `main` 提交 `93465522424ce0db24dabdfca04efe22fc523fa7`；107 只读 detached checkout 已固定到该提交且工作树干净。前快照 Job `38620` 在 `anode16` 以 `COMPLETED/0:0` 结束，manifest SHA-256 为 `476ebc4a1175419dfb1b115451f5ad0743c5abc04dd2d039dc1067851d895171`。
+- 正式构建 Job `38621` 在 `anode01` 以 `COMPLETED/0:0` 结束，耗时 `42` 秒；后端 `165/165`、前端 `111/111` 和 Vite `1857` 模块构建通过，生成 `516` 项发布 manifest，SHA-256 为 `ae7e8772b2d24c394a5862762693ffb196c1b2967c06c4ee04fb93e95a096623`。
+- Stage 6 smoke Job `38623` 在 `anode01` 以 `COMPLETED/0:0` 结束，耗时 `8` 秒。Job `38625` 为 `COMPLETED/0:0`，Job `38626` 为 `FAILED/42:0` 且 `Reason=NonZeroExitCode`，Job `38627` 经归属检查后为 `CANCELLED`；适配器以 `cancellation_ownership_mismatch` 拒绝取消 smoke 自建控制 Job `38628`，harness 随后只清理该已知作业。
+- `sbatch --test-only` 返回 `0` 且没有残留作业；受控调度拒绝没有产生 Job ID；新 reconciler 对象和数据库会话完成成功、失败与取消对账。独立 SQLite 完整性为 `ok`，`54` 项证据清单全部复核通过，清单文件 SHA-256 为 `dec0f89f1ad317d996286b72563973dad5f38ce2fcfabd5f52f641b6d60437f4`。`sacct` 仍因 `localhost:6819` 拒绝连接而不可用，保留的结构化 `scontrol` 记录为权威终态。
+- 后快照 Job `38629` 在 `anode16` 以 `COMPLETED/0:0` 结束，standalone 模式证据目录为 `before-38629`，manifest SHA-256 为 `4bb663dca35f6d92f02f54177b279fc8e4f467c2e008f5436f765e000ea876a4`。两套正式 SQLite 哈希和完整性、稳定 Job `37715`、`anode02:18731`、运行提交 `bec82bc9...` 及公开 live/ready/Dashboard 均未改变；`current` 按构建合同切换到新发布，不表示运行中的稳定服务已重启。
+- 完整运行证据见 `docs/107cup/stage6-slurm-evidence.md`。该证据尚在独立待合并分支，因此阶段 6 继续为 `PARTIAL`；证据 PR 合并并完成 Windows、Gitea `main` 与 107 同步后，才可在后续状态提交中改为 `DONE`。阶段 7 和阶段 8 保持 `PENDING`，没有运行 VASP。
