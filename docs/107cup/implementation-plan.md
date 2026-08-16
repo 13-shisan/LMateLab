@@ -142,7 +142,7 @@
 | 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `37715` 在 `anode02:18731` 运行发布 `bec82bc9fed3ad9355235b965f5bf8cdba152a60`；公网入口返回 `stable/live` 且两套 SQLite 完整性为 `ok`，旧 Job `36597` 已受控停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 真实业务路由确认 Operator 可写私有工作流、Viewer 三个写路由均为 `403`，两个角色均可读取验收工作流 | 配置三名成员独立应用身份；阶段 6 再验收 Slurm 作业归属边界 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变；阶段 6 仍需用户明确确认后开始 |
-| 6. Slurm 适配器 | PARTIAL | 分支 `codex/107cup-stage6-slurm-adapter` 已完成固定命令、提交 ledger、状态对账、归属取消、API 和 smoke harness 的本地实现；尚未合并或产生 107 真实普通作业证据 | 合并功能 PR 后完成 success/fail/cancel、重启对账和非归属拒绝的 107 计算节点验收 |
+| 6. Slurm 适配器 | PARTIAL | PR #26 已合并为 `74fb0b4`；前快照 Job `38592` 与构建 Job `38593` 成功，首次 smoke Job `38598` 因 Slurm spool 下错误使用 `__file__` 定位发布目录而在提交子作业前失败；本地修复已通过 `165/165` 回归，尚待合并和重跑 | 合并 bootstrap 修复后固定新的 `main`、重新构建，并完成 success/fail/cancel、重启对账和非归属拒绝的 107 计算节点验收 |
 | 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
@@ -430,7 +430,7 @@ Slurm comment 含 workflow_id 和 attempt_id
 数据库 ledger 中存在相同 Job ID
 ```
 
-- [ ] 从服务计算节点验证 `sbatch --test-only`、`squeue`、`sacct` 和 `scancel`。
+- [x] 从服务计算节点验证 `sbatch --test-only`、`squeue`、`sacct` 和 `scancel`；其中 `sacct` 因 `localhost:6819` 拒绝连接而确认不可用，适配器按 `unknown/stale` 失败关闭。
 - [x] 假 Slurm 测试覆盖提交、排队、运行、完成、失败、取消和命令超时。
 - [x] 状态映射保留原始 Slurm state、exit code、reason 和时间戳。
 - [x] 日志读取限制在 attempt 目录并限制单次读取字节数。
@@ -753,3 +753,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 阶段 6 对账因此固定为：在线状态以结构化 `squeue/scontrol` 为权威，`sacct` 可用时补最终记账；若两类来源都不能证明最终状态，则记录 `unknown/stale`，不得继续显示为运行中，也不得猜测成功。当前没有提交普通测试作业、没有调用 `scancel`、没有运行 VASP，阶段 6 仍为 `PENDING`。
 - 阶段 6 本地实现检查点为 `a6a59d4`（不含本次状态记录提交）：固定绝对 Slurm 二进制与 argv、`sbatch --test-only`/提交、attempt 私有目录和 receipt、SQLite 提交 ledger、重启对账、四项归属取消、Operator API、ledger-only Dashboard、固定 `success|fail|cancel` 探针以及独立 smoke 证据包均已实现。107/阶段 5/阶段 6 后端范围回归 `169/169` 通过，另有 2 项仅因 Windows 文件符号链接权限跳过；前端在按锁文件执行 `npm ci` 后 `111/111` 通过，live 构建转换 `1857` 个模块；四个变更 Slurm/Bash 文件通过 WSL `bash -n`，Python smoke 通过 `py_compile`。保留既有 Browserslist、3Dmol `eval` 和大 chunk 警告；`npm ci` 同时报告既有依赖树 8 个 high 漏洞，本分支未运行会改写锁文件的自动修复。
 - 上述仍只是 Windows 本地源码和测试证据，分支尚未合并，107 未构建该提交，也没有提交真实 `success`、`fail`、`cancel` 或非归属控制作业。阶段 6 因此只改为 `PARTIAL`；合并后必须在 107 Slurm 计算节点运行 smoke、保留 Job ID/原始调度输出/SQLite 完整性/SHA-256 清单并通过独立证据 PR 后，才能改为 `DONE`。阶段 7 保持 `PENDING`，没有运行 VASP。
+
+### 2026-08-16
+
+- PR #26 已把阶段 6 功能分支合并到受保护 `main`，合并提交为 `74fb0b45d69dbc56ba6bb8f4ef27f27106d51ff2`；107 detached checkout 已固定到该提交且工作树干净。稳定服务继续为 Job `37715`、`anode02:18731` 和发布 `bec82bc9fed3ad9355235b965f5bf8cdba152a60`，公网 live、ready 与 Dashboard 均为 `200`。
+- 前快照 Job `38592` 在 `anode16` 以 `COMPLETED/0:0` 结束，证据位于 `evidence/previews/74fb0b45d69dbc56ba6bb8f4ef27f27106d51ff2/before-38592`，manifest SHA-256 为 `1645c0fa20f9efd528f521af7d00427a00152e513add0c129170ff571ae2b49a`。快照记录 `eln.db` 与 `digests.db` SHA-256 分别为 `de6176f960e6b7cbe4e44254585b23a8032e7ca146236cab7ec2eea736c6ce86`、`2c1069bb4768fa81707623fa80e72f616e313b809d7b1a1b7da4d203ef56b969`，两库完整性均为 `ok`。
+- 正式构建 Job `38593` 在 `anode01` 以 `COMPLETED/0:0` 结束，通过后端 `164/164`、前端 `111/111` 和 live Vite 构建；`current` 原子切换到 `releases/74fb0b45d69dbc56ba6bb8f4ef27f27106d51ff2`。发布 manifest 含 `516` 项，SHA-256 为 `e1fc197fb4fb1de0383d724c7ba962cdaa770033c08038b8b786d8c22cc05329`，并包含固定 `probe.slurm` 与 `stage6-smoke.py`。
+- 首次真实 smoke Job `38598` 在 `anode01` 以 `FAILED/1:0` 结束，stderr 为 `competition backend source is unavailable`，SHA-256 为 `36d0f6242943582f438e2bc061f49b0bb9abeb448eac151ae7f7a6c6766a64c3`。失败发生在任何 `sbatch --test-only`、普通探针、`scancel` 或非归属控制作业之前，因此没有子 Job ID、没有修改数据库，也没有可误记为 Slurm 适配器验收的成功证据；失败日志保留，队列仍只有稳定 Job `37715`。
+- 根因是 Slurm 把 Python 批脚本复制到 spool 路径后，`__file__` 不再位于发布目录，而 smoke 用其父目录定位 backend。修复通过完整小写 commit 固定 `releases/<commit>/source/backend` 和同一 release 内的探针，并在业务依赖导入前建立私有证据目录、记录早期 `failure.json` 与 SHA-256 manifest。新增合同测试先 RED 后 GREEN；Windows 阶段 5/6 与 107 专项回归 `165/165` 通过，另有 1 项 Windows 符号链接权限预期跳过，`py_compile` 与 `git diff --check` 通过。
+- 上述修复尚未合并、没有部署到 107；在修复 PR 合并并针对新的固定 `main` 重做构建和完整 smoke 前，阶段 6 继续为 `PARTIAL`。阶段 7 与阶段 8 保持 `PENDING`，没有运行 VASP。

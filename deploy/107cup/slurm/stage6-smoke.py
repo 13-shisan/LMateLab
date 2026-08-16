@@ -37,42 +37,76 @@ if re.fullmatch(r"[1-9][0-9]*", SLURM_JOB_ID) is None:
 EVIDENCE_ROOT = EVIDENCE_PARENT / f"job-{SLURM_JOB_ID}"
 DATABASE_PATH = EVIDENCE_ROOT / "stage6-smoke.sqlite"
 WORKFLOW_ROOT = EVIDENCE_ROOT / "workflows"
-os.environ["DATABASE_URL"] = f"sqlite:///{DATABASE_PATH}"
-
-SCRIPT_PATH = Path(__file__).resolve()
-SOURCE_ROOT = SCRIPT_PATH.parents[3]
-BACKEND_ROOT = SOURCE_ROOT / "backend"
-if not BACKEND_ROOT.is_dir():
-    BACKEND_ROOT = SOURCE_ROOT / "source" / "backend"
-if not BACKEND_ROOT.is_dir():
-    raise SystemExit("competition backend source is unavailable")
-sys.path.insert(0, str(BACKEND_ROOT))
-
-from sqlalchemy import create_engine, event, select  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
-
-from competition_runtime import slurm_probe_script, slurm_user  # noqa: E402
-from database import Base  # noqa: E402
-from models import User  # noqa: E402
-from models_workflow import (  # noqa: E402
-    WorkflowAttempt,
-    WorkflowEvent,
-    WorkflowRun,
-    WorkflowStep,
-)
-from services.competition_reconcile import (  # noqa: E402
-    CompetitionReconciler,
-    ReconcileError,
-)
-from services.competition_slurm import (  # noqa: E402
-    SlurmBinaries,
-    SlurmClient,
-    SlurmSubmission,
-)
+RELEASE_COMMIT = os.environ.get("LMATELAB_GIT_COMMIT", "")
+RELEASE_PARENT = Path("/home/scc/pb23030683/lmatelab-107cup/releases")
+RELEASE_ROOT = RELEASE_PARENT / RELEASE_COMMIT
 
 
-PROBE_SCRIPT = slurm_probe_script()
-SLURM_USER = slurm_user()
+def write_json(path: Path, payload: object) -> None:
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+
+
+def write_manifest() -> None:
+    entries = []
+    for path in sorted(EVIDENCE_ROOT.rglob("*")):
+        if path.is_file() and path.name != "manifest.sha256":
+            relative = path.relative_to(EVIDENCE_ROOT).as_posix()
+            entries.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {relative}")
+    manifest = EVIDENCE_ROOT / "manifest.sha256"
+    manifest.write_text("\n".join(entries) + "\n", encoding="ascii")
+    manifest.chmod(0o600)
+
+
+EVIDENCE_ROOT.mkdir(mode=0o700, parents=True)
+
+try:
+    WORKFLOW_ROOT.mkdir(mode=0o700)
+    os.environ["DATABASE_URL"] = f"sqlite:///{DATABASE_PATH}"
+    if re.fullmatch(r"[0-9a-f]{40}", RELEASE_COMMIT) is None:
+        raise RuntimeError("LMATELAB_GIT_COMMIT must identify a pinned release")
+    BACKEND_ROOT = RELEASE_ROOT / "source" / "backend"
+    if not BACKEND_ROOT.is_dir():
+        raise RuntimeError("competition backend source is unavailable")
+    sys.path.insert(0, str(BACKEND_ROOT))
+    os.environ["LMATELAB_SLURM_PROBE_SCRIPT"] = str(
+        RELEASE_ROOT / "deploy" / "107cup" / "slurm" / "probe.slurm"
+    )
+
+    from sqlalchemy import create_engine, event, select  # noqa: E402
+    from sqlalchemy.orm import Session  # noqa: E402
+
+    from competition_runtime import slurm_probe_script, slurm_user  # noqa: E402
+    from database import Base  # noqa: E402
+    from models import User  # noqa: E402
+    from models_workflow import (  # noqa: E402
+        WorkflowAttempt,
+        WorkflowEvent,
+        WorkflowRun,
+        WorkflowStep,
+    )
+    from services.competition_reconcile import (  # noqa: E402
+        CompetitionReconciler,
+        ReconcileError,
+    )
+    from services.competition_slurm import (  # noqa: E402
+        SlurmBinaries,
+        SlurmClient,
+        SlurmSubmission,
+    )
+    PROBE_SCRIPT = slurm_probe_script()
+    SLURM_USER = slurm_user()
+except BaseException as exc:
+    write_json(
+        EVIDENCE_ROOT / "failure.json",
+        {"error_type": type(exc).__name__, "message": str(exc)},
+    )
+    write_manifest()
+    raise
+
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 EXPECTED_EVENTS = frozenset(
     {
@@ -82,14 +116,6 @@ EXPECTED_EVENTS = frozenset(
         "scheduler_state_changed",
     }
 )
-
-
-def write_json(path: Path, payload: object) -> None:
-    path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    path.chmod(0o600)
 
 
 def run_command(label: str, argv: list[str], *, check: bool = False) -> dict[str, object]:
@@ -154,7 +180,7 @@ def add_workflow(session: Session, owner_id: int, label: str) -> str:
             source_kind="probe",
             status="validated",
             input_sha256=hashlib.sha256(label.encode("ascii")).hexdigest(),
-            release_commit=os.environ.get("LMATELAB_GIT_COMMIT", "0" * 40),
+            release_commit=RELEASE_COMMIT,
             metadata_json={"stage6_smoke": label},
         )
     )
@@ -398,17 +424,6 @@ def snapshot_ledger() -> dict[str, object]:
         }
 
 
-def write_manifest() -> None:
-    entries = []
-    for path in sorted(EVIDENCE_ROOT.rglob("*")):
-        if path.is_file() and path.name != "manifest.sha256":
-            relative = path.relative_to(EVIDENCE_ROOT).as_posix()
-            entries.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {relative}")
-    manifest = EVIDENCE_ROOT / "manifest.sha256"
-    manifest.write_text("\n".join(entries) + "\n", encoding="ascii")
-    manifest.chmod(0o600)
-
-
 def cleanup_jobs() -> None:
     for job_id in sorted(OWNED_JOB_IDS, key=int):
         try:
@@ -425,10 +440,6 @@ def cleanup_jobs() -> None:
 
 
 def main() -> None:
-    if EVIDENCE_ROOT.exists():
-        raise SystemExit(f"evidence directory already exists: {EVIDENCE_ROOT}")
-    EVIDENCE_ROOT.mkdir(mode=0o700, parents=True)
-    WORKFLOW_ROOT.mkdir(mode=0o700)
     if not PROBE_SCRIPT.is_file():
         raise SystemExit(f"fixed probe script is missing: {PROBE_SCRIPT}")
 
