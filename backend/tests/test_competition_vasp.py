@@ -483,8 +483,8 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 b"Maximum resident set size (kbytes): 123456\n"
             ),
             "OUTCAR": (
-                b"vasp.6.4.3 27Mar24\n"
-                b"General timing and accounting informations for this job:\n"
+                b"vasp.6.4.2 28Jun24\n"
+                b" General timing and accounting informations for this job:\n"
             ),
             "vasprun.xml": b"<?xml version='1.0'?><modeling></modeling>\n",
         }
@@ -572,6 +572,53 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     AcceptanceReport(accepted, reason_code, checks, {}, ())
 
+    def test_acceptance_report_rejects_values_outside_canonical_json_domain(self):
+        class MutableBox:
+            def __init__(self):
+                self.value = "mutable"
+
+        hostile_values = (
+            {"mutable"},
+            frozenset({"mutable"}),
+            bytearray(b"mutable"),
+            b"bytes",
+            MutableBox(),
+            {1: "non-string key"},
+            {1: "collision", "1": "string key"},
+            math.nan,
+            math.inf,
+            -math.inf,
+        )
+        for value in hostile_values:
+            with self.subTest(value_type=type(value).__name__):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        True,
+                        None,
+                        ({"name": "valid", "passed": True},),
+                        {"hostile": value},
+                        (),
+                    )
+
+    def test_acceptance_report_valid_domain_is_deterministic_json(self):
+        mutable_array = [{"z": 2, "a": [True, None, 1, 1.5, "text"]}]
+        report = AcceptanceReport(
+            True,
+            None,
+            ({"name": "valid", "passed": True},),
+            {"nested": mutable_array},
+            (),
+        )
+        expected = report.as_dict()
+        mutable_array[0]["z"] = 99
+        mutable_array[0]["a"].append("changed")
+
+        self.assertEqual(expected, report.as_dict())
+        self.assertEqual(
+            json.dumps(expected, allow_nan=False, sort_keys=True),
+            json.dumps(report.as_dict(), allow_nan=False, sort_keys=True),
+        )
+
     def test_each_fixed_stage_accepts_complete_evidence_and_hashes_all_artifacts(self):
         for stage in FIXED_STAGE_ORDER:
             with self.subTest(stage=stage):
@@ -580,7 +627,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 self.assertTrue(report.accepted, report.as_dict())
                 self.assertIsNone(report.reason_code)
                 self.assertEqual("1.5.1", report.measurements["vaspkit_version"])
-                self.assertEqual("6.4.3", report.measurements["vasp_version"])
+                self.assertEqual("6.4.2", report.measurements["vasp_version"])
                 self.assertEqual(1.25, report.measurements["elapsed_wall_seconds"])
                 self.assertEqual(123456, report.measurements["process_tree_peak_rss_kbytes"])
                 self.assertNotIn("MaxRSS", json.dumps(report.as_dict()))
@@ -727,6 +774,24 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 self.write("OUTCAR", content)
                 self.assert_rejected("outcar_incomplete")
 
+    def test_outcar_accepts_only_the_real_single_space_completion_line(self):
+        real = b"vasp.6.4.2 28Jun24\n General timing and accounting informations for this job:\n"
+        self.write_complete_outputs("scf")
+        self.write("OUTCAR", real)
+        report = self.accept("scf")
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertEqual("6.4.2", report.measurements["vasp_version"])
+
+        for marker in (
+            b"General timing and accounting informations for this job:",
+            b"  General timing and accounting informations for this job:",
+            b" General timing and accounting informations for this job: trailing",
+        ):
+            with self.subTest(marker=marker):
+                self.write_complete_outputs("scf")
+                self.write("OUTCAR", b"vasp.6.4.2 28Jun24\n" + marker + b"\n")
+                self.assert_rejected("outcar_incomplete")
+
     def test_vasprun_must_be_complete_xml_and_pymatgen_parseable(self):
         self.write_complete_outputs("scf")
         self.write("vasprun.xml", b"<modeling><calculation>")
@@ -850,7 +915,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 self.assert_rejected(code)
 
     def test_outcar_vasp_version_is_unique_and_well_formed(self):
-        marker = b"General timing and accounting informations for this job:\n"
+        marker = b" General timing and accounting informations for this job:\n"
         for content in (
             b"VASP version 6.4.3\n" + marker,
             b"vasp.6.4\n" + marker,
@@ -930,6 +995,32 @@ class ScientificAcceptanceTests(unittest.TestCase):
             "services.competition_vasp._hash_opened_evidence", side_effect=mutate_after_hash
         ):
             self.assert_rejected("evidence_changed")
+
+    @unittest.skipIf(os.name == "nt", "Windows cannot replace a path with an open descriptor")
+    def test_output_path_replaced_after_hash_is_rejected_by_inode(self):
+        self.write_complete_outputs("scf")
+        original = competition_vasp._hash_opened_evidence
+        swapped = False
+        opened_inode = None
+
+        def replace_after_hash(opened):
+            nonlocal swapped, opened_inode
+            result = original(opened)
+            if opened.name == "CHGCAR" and not swapped:
+                replacement = self.write("CHGCAR.replacement", b"different private evidence\n")
+                opened_inode = opened.identity.st_ino
+                os.replace(replacement, self.root / "CHGCAR")
+                swapped = True
+            return result
+
+        with mock.patch(
+            "services.competition_vasp._hash_opened_evidence", side_effect=replace_after_hash
+        ):
+            self.assert_rejected("evidence_changed")
+
+        self.assertTrue(swapped)
+        self.assertNotEqual(opened_inode, (self.root / "CHGCAR").stat().st_ino)
+        self.assertFalse((self.root / "CHGCAR.replacement").exists())
 
     def test_stable_file_does_not_require_lstat_and_fstat_ctime_to_match(self):
         path = self.write("single-evidence", b"stable evidence\n")

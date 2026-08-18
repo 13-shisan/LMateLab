@@ -42,7 +42,7 @@ _MAX_ACCEPTANCE_OUTPUT_BYTES: Final = 2 * 1024 * 1024 * 1024
 _MAX_ACCEPTANCE_TEXT_BYTES: Final = 64 * 1024 * 1024
 _MAX_OUTPUT_LINE_BYTES: Final = 64 * 1024
 _OUTCAR_COMPLETION_MARKER: Final = (
-    b"General timing and accounting informations for this job:"
+    b" General timing and accounting informations for this job:"
 )
 _OUTCAR_VERSION_RE: Final = re.compile(
     rb"^\s*vasp\.(?P<version>[0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)"
@@ -91,14 +91,17 @@ class VaspPolicyError(RuntimeError):
 
 def _deep_freeze(value: object) -> object:
     if isinstance(value, Mapping):
-        frozen = {
-            str(key): _deep_freeze(item)
-            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
-        }
+        if any(type(key) is not str for key in value):
+            raise ValueError("canonical mappings require string keys")
+        frozen = {key: _deep_freeze(value[key]) for key in sorted(value)}
         return MappingProxyType(frozen)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+    if isinstance(value, (list, tuple)):
         return tuple(_deep_freeze(item) for item in value)
-    return value
+    if value is None or type(value) in (bool, int, str):
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    raise ValueError("value is outside the canonical JSON domain")
 
 
 def _deep_thaw(value: object) -> object:
