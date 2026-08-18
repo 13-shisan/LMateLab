@@ -89,8 +89,30 @@ def fixed_binaries() -> SlurmBinaries:
     )
 
 
+def _install_windows_snapshot_test_patch(test_case: unittest.TestCase) -> None:
+    # Windows has no authoritative Slurm path; this supports fake executors only.
+    test_case.production_snapshot_creator = (
+        competition_slurm._create_private_snapshot_descriptor
+    )
+    if os.name != "nt":
+        return
+
+    def create_test_snapshot_descriptor():
+        with tempfile.TemporaryFile(mode="w+b") as handle:
+            return os.dup(handle.fileno())
+
+    patcher = mock.patch.object(
+        competition_slurm,
+        "_create_private_snapshot_descriptor",
+        side_effect=create_test_snapshot_descriptor,
+    )
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
+
+
 class SlurmCommandContractTests(unittest.TestCase):
     def setUp(self):
+        _install_windows_snapshot_test_patch(self)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.root = Path(self.temp_dir.name)
@@ -339,7 +361,11 @@ class SlurmCommandContractTests(unittest.TestCase):
         executor = RecordingExecutor(stdout=b"12345\n")
         with (
             mock.patch.object(competition_slurm, "_IS_LINUX", True, create=True),
-            mock.patch.object(competition_slurm, "_IS_WINDOWS", False, create=True),
+            mock.patch.object(
+                competition_slurm,
+                "_create_private_snapshot_descriptor",
+                new=self.production_snapshot_creator,
+            ),
             mock.patch.object(competition_slurm, "_fcntl", fake_fcntl, create=True),
             mock.patch.object(
                 competition_slurm.os,
@@ -422,7 +448,11 @@ class SlurmCommandContractTests(unittest.TestCase):
         executor = RecordingExecutor(stdout=b"12345\n")
         with (
             mock.patch.object(competition_slurm, "_IS_LINUX", True, create=True),
-            mock.patch.object(competition_slurm, "_IS_WINDOWS", False, create=True),
+            mock.patch.object(
+                competition_slurm,
+                "_create_private_snapshot_descriptor",
+                new=self.production_snapshot_creator,
+            ),
             mock.patch.object(competition_slurm, "_fcntl", UnverifiedFcntl(), create=True),
             mock.patch.object(
                 competition_slurm,
@@ -499,7 +529,11 @@ class SlurmCommandContractTests(unittest.TestCase):
         executor = RecordingExecutor(stdout=b"12345\n")
         with (
             mock.patch.object(competition_slurm, "_IS_LINUX", True),
-            mock.patch.object(competition_slurm, "_IS_WINDOWS", False),
+            mock.patch.object(
+                competition_slurm,
+                "_create_private_snapshot_descriptor",
+                new=self.production_snapshot_creator,
+            ),
             mock.patch.object(competition_slurm, "_fcntl", MutatingFcntl()),
             mock.patch.object(
                 competition_slurm.os,
@@ -541,8 +575,36 @@ class SlurmCommandContractTests(unittest.TestCase):
         recorder = RecordingExecutor(stdout=b"12345\n")
         client._executor = recorder
 
-        with self.assertRaises(ValueError):
+        with (
+            mock.patch.object(
+                competition_slurm,
+                "_create_private_snapshot_descriptor",
+                new=self.production_snapshot_creator,
+            ),
+            self.assertRaises(ValueError),
+        ):
             client.submit(submission)
+
+        self.assertEqual([], recorder.calls)
+
+    @unittest.skipUnless(os.name == "nt", "Windows submissions are unsupported")
+    def test_windows_submission_fails_closed_for_an_executor_wrapper(self):
+        recorder = RecordingExecutor(stdout=b"12345\n")
+
+        def wrapped_executor(argv, **kwargs):
+            return recorder(argv, **kwargs)
+
+        client = self.client(wrapped_executor)
+
+        with (
+            mock.patch.object(
+                competition_slurm,
+                "_create_private_snapshot_descriptor",
+                new=self.production_snapshot_creator,
+            ),
+            self.assertRaises(ValueError),
+        ):
+            client.submit(self.submission())
 
         self.assertEqual([], recorder.calls)
 
@@ -676,7 +738,7 @@ class SlurmCommandContractTests(unittest.TestCase):
             source_descriptors.append(descriptor)
             return descriptor, digest
 
-        def fake_snapshot_descriptor(*, allow_windows_test_fallback):
+        def fake_snapshot_descriptor():
             descriptor = os.open(
                 snapshot_path,
                 os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
@@ -926,6 +988,7 @@ class SlurmFilesystemBoundaryTests(unittest.TestCase):
 
 class CompetitionReconcileTests(unittest.TestCase):
     def setUp(self):
+        _install_windows_snapshot_test_patch(self)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.root = Path(self.temp_dir.name)

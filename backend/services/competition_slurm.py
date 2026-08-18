@@ -7,7 +7,6 @@ import re
 import stat
 import subprocess
 import sys
-import tempfile
 import uuid
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
@@ -31,7 +30,6 @@ _LOG_NAMES = {"stdout": "stdout.log", "stderr": "stderr.log"}
 _MAX_SUBMISSION_SCRIPT_BYTES = 1024 * 1024
 _SCRIPT_READ_CHUNK_BYTES = 64 * 1024
 _IS_LINUX = sys.platform.startswith("linux")
-_IS_WINDOWS = os.name == "nt"
 
 
 class SlurmError(RuntimeError):
@@ -154,10 +152,7 @@ def _copy_script_descriptor(source: int, destination: int) -> str:
     return digest.hexdigest()
 
 
-def _create_private_snapshot_descriptor(
-    *,
-    allow_windows_test_fallback: bool,
-) -> int:
+def _create_private_snapshot_descriptor() -> int:
     if _IS_LINUX:
         memfd_create = getattr(os, "memfd_create", None)
         allow_sealing = getattr(os, "MFD_ALLOW_SEALING", None)
@@ -169,13 +164,6 @@ def _create_private_snapshot_descriptor(
                 "lmatelab-slurm-script",
                 allow_sealing | close_on_exec,
             )
-        except (OSError, TypeError, ValueError) as exc:
-            raise ValueError("submission script snapshot is unavailable") from exc
-
-    if _IS_WINDOWS and allow_windows_test_fallback:
-        try:
-            with tempfile.TemporaryFile(mode="w+b") as handle:
-                return os.dup(handle.fileno())
         except (OSError, TypeError, ValueError) as exc:
             raise ValueError("submission script snapshot is unavailable") from exc
 
@@ -212,12 +200,8 @@ def _seal_linux_snapshot(descriptor: int) -> None:
 
 def _snapshot_script_descriptor(
     source: int,
-    *,
-    allow_windows_test_fallback: bool = False,
 ) -> tuple[int, str]:
-    snapshot = _create_private_snapshot_descriptor(
-        allow_windows_test_fallback=allow_windows_test_fallback,
-    )
+    snapshot = _create_private_snapshot_descriptor()
     try:
         digest = _copy_script_descriptor(source, snapshot)
         if _IS_LINUX:
@@ -358,9 +342,6 @@ class SlurmClient:
             raise ValueError("max_log_tail_bytes must be positive")
         self.binaries = binaries or SlurmBinaries()
         self._executor = executor
-        self._allow_windows_test_snapshot = (
-            _IS_WINDOWS and executor is not subprocess.run
-        )
         self.timeout_seconds = float(timeout_seconds)
         self.max_output_bytes = int(max_output_bytes)
         self._allowed_scripts = frozenset(Path(path).resolve() for path in allowed_scripts)
@@ -434,10 +415,7 @@ class SlurmClient:
         try:
             if source_digest != submission.script_sha256:
                 raise ValueError("submission script identity changed")
-            snapshot, snapshot_digest = _snapshot_script_descriptor(
-                source,
-                allow_windows_test_fallback=self._allow_windows_test_snapshot,
-            )
+            snapshot, snapshot_digest = _snapshot_script_descriptor(source)
             if snapshot_digest != submission.script_sha256:
                 raise ValueError("submission script identity changed")
             return snapshot
