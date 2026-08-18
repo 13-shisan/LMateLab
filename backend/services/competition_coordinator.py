@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from models_workflow import (
     WorkflowAttempt,
+    WorkflowEvent,
     WorkflowFile,
     WorkflowRun,
     WorkflowStep,
@@ -189,6 +190,127 @@ class CompetitionCoordinator:
                 "workflow_scope_invalid",
                 "workflow is outside the fixed execution scope",
             )
+
+    @staticmethod
+    def _scope_failure_recorded(session: Session, workflow_id: str) -> bool:
+        return session.scalar(
+            select(WorkflowEvent.id)
+            .where(
+                WorkflowEvent.workflow_id == workflow_id,
+                WorkflowEvent.event_type == "workflow_scope_invalid",
+            )
+            .limit(1)
+        ) is not None
+
+    def _record_scope_failure(
+        self,
+        session: Session,
+        workflow_id: str,
+        *,
+        attempt_id: str | None = None,
+    ) -> None:
+        session.rollback()
+        run = session.get(WorkflowRun, workflow_id)
+        if run is None:
+            raise CoordinatorError(
+                "workflow_ledger_invalid",
+                "workflow ledger is invalid",
+            )
+        if run.status in {"cancelling", "cancelled"}:
+            return
+
+        if attempt_id is not None:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            step = (
+                session.get(WorkflowStep, attempt.step_id)
+                if attempt is not None
+                else None
+            )
+            if step is None or step.workflow_id != workflow_id:
+                raise CoordinatorError(
+                    "workflow_ledger_invalid",
+                    "workflow attempt ledger is invalid",
+                )
+            attempt_failed = session.execute(
+                update(WorkflowAttempt)
+                .where(
+                    WorkflowAttempt.id == attempt_id,
+                    WorkflowAttempt.status == "preparing",
+                    WorkflowAttempt.slurm_job_id.is_(None),
+                )
+                .values(status="submission_failed")
+                .execution_options(synchronize_session=False)
+            )
+            step_failed = session.execute(
+                update(WorkflowStep)
+                .where(
+                    WorkflowStep.id == step.id,
+                    WorkflowStep.status == "preparing",
+                )
+                .values(status="failed")
+                .execution_options(synchronize_session=False)
+            )
+            if (attempt_failed.rowcount, step_failed.rowcount) != (1, 1):
+                session.rollback()
+                return
+
+        session.execute(
+            update(WorkflowStep)
+            .where(
+                WorkflowStep.workflow_id == workflow_id,
+                WorkflowStep.status == "waiting",
+            )
+            .values(status="blocked")
+            .execution_options(synchronize_session=False)
+        )
+        original_status = run.status
+        run_failed = session.execute(
+            update(WorkflowRun)
+            .where(
+                WorkflowRun.id == workflow_id,
+                WorkflowRun.status == original_status,
+            )
+            .values(status="failed")
+            .execution_options(synchronize_session=False)
+        )
+        if run_failed.rowcount != 1:
+            session.rollback()
+            return
+        if not self._scope_failure_recorded(session, workflow_id):
+            append_workflow_event(
+                session,
+                workflow_id=workflow_id,
+                event_type="workflow_scope_invalid",
+                payload={"reason_code": "workflow_scope_invalid"},
+            )
+        session.commit()
+
+    def _revalidate_execution_scope(
+        self,
+        session: Session,
+        workflow_id: str,
+        *,
+        attempt_id: str | None = None,
+    ) -> bool:
+        session.rollback()
+        run = session.get(WorkflowRun, workflow_id)
+        if run is None:
+            raise CoordinatorError(
+                "workflow_ledger_invalid",
+                "workflow ledger is invalid",
+            )
+        try:
+            self._validate_execution_scope(run)
+        except CoordinatorError as exc:
+            if exc.code != "workflow_scope_invalid":
+                raise
+            self._record_scope_failure(
+                session,
+                workflow_id,
+                attempt_id=attempt_id,
+            )
+            return False
+        return True
 
     @staticmethod
     def _has_cancellation_intent(session: Session, workflow_id: str) -> bool:
@@ -374,6 +496,19 @@ class CompetitionCoordinator:
                     "workflow_ledger_invalid",
                     "workflow attempt ledger is invalid",
                 )
+            if not self._revalidate_execution_scope(
+                session,
+                claim.workflow_id,
+                attempt_id=claim.attempt_id,
+            ):
+                session.expire_all()
+                return self._outcome(
+                    session,
+                    claim.workflow_id,
+                    session.get(WorkflowAttempt, claim.attempt_id),
+                )
+            run = session.get(WorkflowRun, claim.workflow_id)
+            step = session.get(WorkflowStep, claim.step_id)
             self._prepare_inputs(
                 session,
                 self.workflow_root,
@@ -384,6 +519,17 @@ class CompetitionCoordinator:
                 template_version=run.template_version,
                 release_commit=run.release_commit,
             )
+            if not self._revalidate_execution_scope(
+                session,
+                claim.workflow_id,
+                attempt_id=claim.attempt_id,
+            ):
+                session.expire_all()
+                return self._outcome(
+                    session,
+                    claim.workflow_id,
+                    session.get(WorkflowAttempt, claim.attempt_id),
+                )
             submission = self.reconciler.submit_claim(
                 session,
                 claim,
@@ -620,6 +766,8 @@ class CompetitionCoordinator:
                 return None
             if self._has_cancellation_intent(session, workflow_id):
                 return None
+            if not self._revalidate_execution_scope(session, workflow_id):
+                return None
             steps = self._step_statuses(session, workflow_id)
             step_key = next_eligible_step(steps)
             if step_key is None:
@@ -645,6 +793,12 @@ class CompetitionCoordinator:
                 }:
                     return None
                 raise
+            if not self._revalidate_execution_scope(
+                session,
+                workflow_id,
+                attempt_id=claim.attempt_id,
+            ):
+                return None
             run = session.get(WorkflowRun, workflow_id)
             self._prepare_inputs(
                 session,
@@ -656,6 +810,12 @@ class CompetitionCoordinator:
                 template_version=run.template_version,
                 release_commit=run.release_commit,
             )
+            if not self._revalidate_execution_scope(
+                session,
+                workflow_id,
+                attempt_id=claim.attempt_id,
+            ):
+                return None
             submission = self.reconciler.submit_claim(
                 session,
                 claim,

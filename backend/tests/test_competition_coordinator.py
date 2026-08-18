@@ -1040,6 +1040,150 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         self.assertEqual([], self.prepared_steps)
         self.assertEqual([], list(self.workflow_root.rglob("attempts")))
 
+    def test_post_start_scope_mutation_blocks_scf_without_changing_accepted_relax(self):
+        cases = ("material", "template_metadata", "source_metadata")
+        for case in cases:
+            with self.subTest(case=case):
+                workflow_id = self.create_workflow()
+                coordinator = self.new_coordinator()
+                coordinator.start(workflow_id, self.owner_id)
+                relax = self.latest_attempt("relax", workflow_id)
+                submitted_before = len(self.slurm.submitted_steps)
+                with self.SessionLocal() as session:
+                    run = session.get(WorkflowRun, workflow_id)
+                    if case == "material":
+                        run.material = "MoSe2"
+                    else:
+                        metadata = json.loads(run.metadata_json)
+                        field = "template_version" if case == "template_metadata" else "source_kind"
+                        metadata["normalized_payload"][field] = "foreign"
+                        run.metadata_json = metadata
+                    session.commit()
+                self.slurm.set_state(
+                    relax.id,
+                    "succeeded",
+                    raw_state="COMPLETED",
+                    exit_code="0:0",
+                )
+
+                first_tick = coordinator.tick_once()
+                second_tick = coordinator.tick_once()
+
+                self.assertEqual((0, 0), (first_tick.failures, second_tick.failures))
+                self.assertEqual(submitted_before, len(self.slurm.submitted_steps))
+                self.assertEqual("succeeded", self.latest_attempt("relax", workflow_id).status)
+                self.assertEqual(0, self.attempt_count("scf", workflow_id))
+                self.assertEqual("failed", self.run_status(workflow_id))
+                self.assertEqual("blocked", self.step_statuses(workflow_id)["scf"])
+                with self.SessionLocal() as session:
+                    scope_events = list(
+                        session.scalars(
+                            select(WorkflowEvent).where(
+                                WorkflowEvent.workflow_id == workflow_id,
+                                WorkflowEvent.event_type == "workflow_scope_invalid",
+                            )
+                        )
+                    )
+                    self.assertEqual(
+                        1,
+                        len(scope_events),
+                    )
+                    self.assertEqual(
+                        {"reason_code": "workflow_scope_invalid"},
+                        json.loads(scope_events[0].payload_json),
+                    )
+                scf_directories = list(
+                    (self.workflow_root / workflow_id / "attempts").glob("*")
+                )
+                self.assertEqual(1, len(scf_directories))
+
+    def test_preparing_restart_scope_mutation_fails_before_input_or_submission(self):
+        with self.SessionLocal() as session:
+            claim = self.reconciler.claim_attempt(
+                session,
+                self.workflow_id,
+                step_key="relax",
+                runner_kind="vasp",
+                runner_mode="relax",
+                script_path=self.vasp_script,
+                claimable_run_statuses=frozenset({"validated"}),
+            )
+        with self.SessionLocal() as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            run.material = "MoSe2"
+            session.commit()
+
+        first_tick = self.new_coordinator().tick_once()
+        second_tick = self.new_coordinator().tick_once()
+
+        self.assertEqual((0, 0), (first_tick.failures, second_tick.failures))
+        self.assertEqual([], self.slurm.submitted_steps)
+        self.assertFalse(claim.submission.attempt_directory.exists())
+        with self.SessionLocal() as session:
+            attempt = session.get(WorkflowAttempt, claim.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual(
+                ("submission_failed", "failed", "failed"),
+                (attempt.status, step.status, run.status),
+            )
+            self.assertEqual(
+                1,
+                session.scalar(
+                    select(func.count())
+                    .select_from(WorkflowEvent)
+                    .where(
+                        WorkflowEvent.workflow_id == self.workflow_id,
+                        WorkflowEvent.event_type == "workflow_scope_invalid",
+                    )
+                ),
+            )
+
+    def test_scope_mutation_after_claim_fails_before_input_preparation(self):
+        original_claim = self.reconciler.claim_attempt
+
+        def claim_then_mutate(*args, **kwargs):
+            claim = original_claim(*args, **kwargs)
+            with self.SessionLocal() as session:
+                run = session.get(WorkflowRun, claim.workflow_id)
+                run.material = "MoSe2"
+                session.commit()
+            return claim
+
+        with mock.patch.object(
+            self.reconciler,
+            "claim_attempt",
+            side_effect=claim_then_mutate,
+        ):
+            outcome = self.coordinator.start(self.workflow_id, self.owner_id)
+
+        self.assertEqual("submission_failed", outcome.status)
+        self.assertEqual([], self.prepared_steps)
+        self.assertEqual([], self.slurm.submitted_steps)
+        attempt = self.latest_attempt("relax")
+        self.assertFalse(Path(attempt.working_directory).exists())
+        self.assertEqual("submission_failed", attempt.status)
+
+    def test_scope_mutation_during_input_preparation_fails_before_submission(self):
+        def prepare_then_mutate(session, workflow_root, **values):
+            prepared = self.prepare_inputs(session, workflow_root, **values)
+            with self.SessionLocal() as mutation_session:
+                run = mutation_session.get(WorkflowRun, values["workflow_id"])
+                run.material = "MoSe2"
+                mutation_session.commit()
+            return prepared
+
+        coordinator = self.new_coordinator(prepare_inputs=prepare_then_mutate)
+
+        outcome = coordinator.start(self.workflow_id, self.owner_id)
+
+        self.assertEqual("submission_failed", outcome.status)
+        self.assertEqual(["relax"], self.prepared_steps)
+        self.assertEqual([], self.slurm.submitted_steps)
+        attempt = self.latest_attempt("relax")
+        self.assertTrue(Path(attempt.working_directory).is_dir())
+        self.assertEqual("submission_failed", attempt.status)
+
 
 if __name__ == "__main__":
     unittest.main()
