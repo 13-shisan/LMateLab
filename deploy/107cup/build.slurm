@@ -116,6 +116,7 @@ python -m unittest \
   tests.test_competition_workflow_service \
   tests.test_competition_workflow_routes \
   tests.test_competition_slurm \
+  tests.test_competition_slurm_linux \
   -v
 
 cd "$project/frontend"
