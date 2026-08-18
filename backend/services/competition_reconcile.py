@@ -155,6 +155,44 @@ class CompetitionReconciler:
             )
         return expected_script
 
+    def _unpublished_vasp_attempt_directory(
+        self,
+        workflow_id: str,
+        attempt_id: str,
+    ) -> Path:
+        workflow_root = getattr(self.slurm, "workflow_root", None)
+        if workflow_root is None:
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "VASP runner requires a workflow filesystem root",
+            )
+        root = Path(workflow_root).resolve()
+        candidate = root / workflow_id / "attempts" / attempt_id
+        try:
+            resolved = candidate.resolve(strict=False)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "VASP attempt directory is invalid",
+            ) from exc
+        if not resolved.is_relative_to(root):
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "VASP attempt directory is invalid",
+            )
+        for parent in (root, root / workflow_id, root / workflow_id / "attempts"):
+            if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
+                raise ReconcileError(
+                    "invalid_runner_contract",
+                    "VASP attempt directory is invalid",
+                )
+        if candidate.exists() or candidate.is_symlink():
+            raise ReconcileError(
+                "attempt_directory_exists",
+                "VASP attempt directory is already published",
+            )
+        return candidate
+
     def _runner_contract_from_metadata(
         self,
         *,
@@ -336,6 +374,7 @@ class CompetitionReconciler:
         runner_mode: str,
         script_path: Path,
         claimable_run_statuses: frozenset[str],
+        claim_event_type: str | None = None,
     ) -> AttemptClaim:
         resolved_script = self._validated_runner_script(
             step_key=step_key,
@@ -418,9 +457,10 @@ class CompetitionReconciler:
             )
             attempt_number = int(current_attempt or 0) + 1
             attempt_id = str(uuid.uuid4())
-            attempt_directory = self.slurm.prepare_attempt_directory(
-                workflow_id,
-                attempt_id,
+            attempt_directory = (
+                self._unpublished_vasp_attempt_directory(workflow_id, attempt_id)
+                if runner_kind == "vasp"
+                else self.slurm.prepare_attempt_directory(workflow_id, attempt_id)
             )
             submission = SlurmSubmission(
                 workflow_id=workflow_id,
@@ -449,6 +489,16 @@ class CompetitionReconciler:
                     },
                 )
             )
+            if claim_event_type is not None:
+                append_workflow_event(
+                    session,
+                    workflow_id=workflow_id,
+                    event_type=claim_event_type,
+                    payload={
+                        "attempt_id": attempt_id,
+                        "step_key": step.step_key,
+                    },
+                )
             session.commit()
         except ReconcileError:
             raise
@@ -464,10 +514,13 @@ class CompetitionReconciler:
             status="preparing",
         )
 
-    def _promote_probe_claim(
+    def promote_claim(
         self,
         session: Session,
         claim: AttemptClaim,
+        *,
+        claimable_run_statuses: frozenset[str],
+        event_type: str | None = None,
     ) -> AttemptClaim:
         now = self._clock()
         session.rollback()
@@ -494,7 +547,7 @@ class CompetitionReconciler:
             update(WorkflowRun)
             .where(
                 WorkflowRun.id == claim.workflow_id,
-                WorkflowRun.status == "validated",
+                WorkflowRun.status.in_(claimable_run_statuses),
             )
             .values(status="submitting", updated_at=now)
             .execution_options(synchronize_session=False)
@@ -505,6 +558,16 @@ class CompetitionReconciler:
                 "workflow_not_claimable",
                 "workflow cannot be claimed for submission",
             )
+        if event_type is not None:
+            append_workflow_event(
+                session,
+                workflow_id=claim.workflow_id,
+                event_type=event_type,
+                payload={
+                    "attempt_id": claim.attempt_id,
+                    "step_key": claim.submission.step_key,
+                },
+            )
         session.commit()
         return AttemptClaim(
             workflow_id=claim.workflow_id,
@@ -512,6 +575,61 @@ class CompetitionReconciler:
             attempt_id=claim.attempt_id,
             submission=claim.submission,
             status="submitting",
+        )
+
+    def load_preparing_claim(
+        self,
+        session: Session,
+        attempt_id: str,
+    ) -> AttemptClaim:
+        session.rollback()
+        attempt = session.get(WorkflowAttempt, attempt_id)
+        if (
+            attempt is None
+            or attempt.status != "preparing"
+            or attempt.slurm_job_id is not None
+        ):
+            raise ReconcileError(
+                "attempt_not_preparing",
+                "attempt is not recoverable from preparation",
+            )
+        step = session.get(WorkflowStep, attempt.step_id)
+        run = session.get(WorkflowRun, step.workflow_id) if step is not None else None
+        if step is None or run is None or step.status != "preparing":
+            raise ReconcileError(
+                "attempt_not_preparing",
+                "attempt is not recoverable from preparation",
+            )
+        try:
+            metadata = json.loads(attempt.metadata_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ReconcileError(
+                "attempt_not_preparing",
+                "attempt is not recoverable from preparation",
+            ) from exc
+        if not isinstance(metadata, dict):
+            raise ReconcileError(
+                "attempt_not_preparing",
+                "attempt is not recoverable from preparation",
+            )
+        try:
+            contract = self._runner_contract_from_metadata(
+                run=run,
+                step=step,
+                attempt=attempt,
+                metadata=metadata,
+            )
+        except ReconcileError as exc:
+            raise ReconcileError(
+                "attempt_not_preparing",
+                "attempt is not recoverable from preparation",
+            ) from exc
+        return AttemptClaim(
+            workflow_id=run.id,
+            step_id=step.id,
+            attempt_id=attempt.id,
+            submission=contract.submission,
+            status="preparing",
         )
 
     def claim_next_attempt(
@@ -539,7 +657,11 @@ class CompetitionReconciler:
                 "workflow_not_claimable",
                 "workflow cannot be claimed for submission",
             ) from exc
-        return self._promote_probe_claim(session, claim)
+        return self.promote_claim(
+            session,
+            claim,
+            claimable_run_statuses=frozenset({"validated"}),
+        )
 
     def _record_submission_failed(
         self,
@@ -676,13 +798,16 @@ class CompetitionReconciler:
         )
         session.commit()
 
-    def submit_probe(
+    def _submit_promoted_claim(
         self,
         session: Session,
-        workflow_id: str,
-        probe_mode: str,
+        claim: AttemptClaim,
     ) -> SubmissionOutcome:
-        claim = self.claim_next_attempt(session, workflow_id, probe_mode)
+        if claim.status != "submitting":
+            raise ReconcileError(
+                "attempt_not_submitting",
+                "attempt is not ready for scheduler submission",
+            )
         try:
             job_id = self.slurm.submit(claim.submission)
         except (SlurmError, ValueError) as exc:
@@ -710,6 +835,30 @@ class CompetitionReconciler:
                 "submission_uncertain",
                 "scheduler accepted submission but finalization is uncertain",
             ) from exc
+
+    def submit_claim(
+        self,
+        session: Session,
+        claim: AttemptClaim,
+        *,
+        claimable_run_statuses: frozenset[str],
+    ) -> SubmissionOutcome:
+        promoted = self.promote_claim(
+            session,
+            claim,
+            claimable_run_statuses=claimable_run_statuses,
+            event_type="submission_started",
+        )
+        return self._submit_promoted_claim(session, promoted)
+
+    def submit_probe(
+        self,
+        session: Session,
+        workflow_id: str,
+        probe_mode: str,
+    ) -> SubmissionOutcome:
+        claim = self.claim_next_attempt(session, workflow_id, probe_mode)
+        return self._submit_promoted_claim(session, claim)
 
     def recover_submission(
         self,
