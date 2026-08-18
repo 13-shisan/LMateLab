@@ -1,22 +1,39 @@
 ﻿from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import traceback
 import unittest
+import uuid
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 from pydantic import ValidationError
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import NullPool
 
+from database import Base
+from models import User
+from models_workflow import (
+    WorkflowAttempt,
+    WorkflowEvent,
+    WorkflowFile,
+    WorkflowRun,
+    WorkflowStep,
+    canonical_json,
+)
 from schemas_workflow import DraftCreateRequest
 from services import competition_vasp
+from services.competition_attempt_inputs import prepare_attempt_inputs
 from services.competition_vasp import (
     AcceptanceReport,
     DEFAULT_POTCAR_CONTRACT,
@@ -27,6 +44,7 @@ from services.competition_vasp import (
     accept_vasp_attempt,
     validate_potcar,
 )
+from services.competition_workflows import confirm_workflow, create_draft
 
 
 class PotcarPolicyTests(unittest.TestCase):
@@ -486,6 +504,352 @@ class PotcarPolicyTests(unittest.TestCase):
                 combined_sha256="C" * 64,
                 vaspkit_version="1.5.1",
             )
+
+
+class InternalAcceptanceProfileIntegrationTests(unittest.TestCase):
+    release_commit = "d" * 40
+    profile = "scf_nonconvergence_v1"
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        temporary_root = Path(self.temp_dir.name)
+        self.root = temporary_root / "workflow-root"
+        self.engine = create_engine(
+            f"sqlite:///{temporary_root / 'workflow.sqlite'}",
+            poolclass=NullPool,
+        )
+
+        @event.listens_for(self.engine, "connect")
+        def enable_foreign_keys(connection, _record):
+            connection.execute("PRAGMA foreign_keys=ON")
+
+        Base.metadata.create_all(self.engine)
+        self.addCleanup(self.engine.dispose)
+        with Session(self.engine) as session:
+            owner = User(
+                email="acceptance-operator@example.com",
+                password_hash="hash",
+                name="Acceptance Operator",
+                alias="acceptance-operator",
+                role="operator",
+            )
+            other = User(
+                email="other-operator@example.com",
+                password_hash="hash",
+                name="Other Operator",
+                alias="other-operator",
+                role="operator",
+            )
+            session.add_all((owner, other))
+            session.commit()
+            self.owner_id = owner.id
+            self.other_owner_id = other.id
+        self.acceptance = self._load_acceptance_module()
+
+    @staticmethod
+    def _load_acceptance_module():
+        script = (
+            Path(__file__).resolve().parents[2]
+            / "deploy"
+            / "107cup"
+            / "slurm"
+            / "stage7-acceptance.py"
+        )
+        fake_main = ModuleType("main_107cup")
+        fake_main.build_production_coordinator = mock.Mock(
+            name="build_production_coordinator"
+        )
+        spec = importlib.util.spec_from_file_location(
+            f"stage7_acceptance_test_{uuid.uuid4().hex}", script
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError("stage7 acceptance test module is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, {"main_107cup": fake_main}):
+            spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def _decode_json(value):
+        return value if isinstance(value, dict) else json.loads(value)
+
+    @staticmethod
+    def _payload():
+        return DraftCreateRequest.model_validate(
+            {
+                "template_version": "mos2_v1",
+                "source_kind": "builtin",
+                "steps": ["relax", "scf", "band", "dos"],
+                "parameters": {},
+            }
+        )
+
+    def _create_draft(self):
+        with Session(self.engine) as session:
+            return create_draft(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                payload=self._payload(),
+                release_commit=self.release_commit,
+            ).id
+
+    def _snapshot(self, workflow_id):
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, workflow_id)
+            rows = list(
+                session.scalars(
+                    select(WorkflowFile)
+                    .where(
+                        WorkflowFile.workflow_id == workflow_id,
+                        WorkflowFile.source_kind == "generated",
+                    )
+                    .order_by(WorkflowFile.relative_path)
+                )
+            )
+            files = {}
+            for row in rows:
+                metadata = self._decode_json(row.metadata_json)
+                files[metadata["logical_path"]] = {
+                    "bytes": self.root.joinpath(*Path(row.relative_path).parts).read_bytes(),
+                    "sha256": row.sha256,
+                    "size_bytes": row.size_bytes,
+                }
+            events = list(
+                session.scalars(
+                    select(WorkflowEvent)
+                    .where(WorkflowEvent.workflow_id == workflow_id)
+                    .order_by(WorkflowEvent.sequence)
+                )
+            )
+            return {
+                "status": run.status,
+                "input_sha256": run.input_sha256,
+                "metadata": self._decode_json(run.metadata_json),
+                "files": files,
+                "events": [
+                    (event.event_type, self._decode_json(event.payload_json))
+                    for event in events
+                ],
+            }
+
+    @staticmethod
+    def _manifest(files):
+        return sorted(
+            (
+                {
+                    "logical_path": logical_path,
+                    "sha256": record["sha256"],
+                    "size_bytes": record["size_bytes"],
+                    "source_kind": "generated",
+                }
+                for logical_path, record in files.items()
+            ),
+            key=lambda item: item["logical_path"],
+        )
+
+    def _seed_relax_parent_and_scf_attempt(self, workflow_id):
+        relax_attempt_id = str(uuid.uuid4())
+        scf_attempt_id = str(uuid.uuid4())
+        contcar = b"accepted relaxed MoS2 structure\n"
+        relative_path = f"{workflow_id}/attempts/{relax_attempt_id}/CONTCAR"
+        output_path = self.root.joinpath(*Path(relative_path).parts)
+        output_path.parent.mkdir(mode=0o700, parents=True, exist_ok=False)
+        output_path.write_bytes(contcar)
+        output_path.chmod(0o600)
+        with Session(self.engine) as session:
+            steps = {
+                step.step_key: step
+                for step in session.scalars(
+                    select(WorkflowStep).where(WorkflowStep.workflow_id == workflow_id)
+                )
+            }
+            steps["relax"].status = "succeeded"
+            relax_attempt = WorkflowAttempt(
+                id=relax_attempt_id,
+                step_id=steps["relax"].id,
+                attempt_number=1,
+                status="succeeded",
+                metadata_json={},
+            )
+            scf_attempt = WorkflowAttempt(
+                id=scf_attempt_id,
+                step_id=steps["scf"].id,
+                attempt_number=1,
+                status="preparing",
+                metadata_json={},
+            )
+            session.add_all((relax_attempt, scf_attempt))
+            session.add(
+                WorkflowFile(
+                    id=str(uuid.uuid4()),
+                    workflow_id=workflow_id,
+                    attempt_id=relax_attempt_id,
+                    owner_id=self.owner_id,
+                    relative_path=relative_path,
+                    size_bytes=len(contcar),
+                    sha256=hashlib.sha256(contcar).hexdigest(),
+                    source_kind="attempt_output",
+                    metadata_json={
+                        "logical_path": "CONTCAR",
+                        "step_key": "relax",
+                        "accepted": True,
+                    },
+                )
+            )
+            session.commit()
+        return scf_attempt_id
+
+    def test_internal_profile_preserves_manifest_and_scf_attempt_lineage(self):
+        with self.assertRaises(ValidationError):
+            DraftCreateRequest.model_validate(
+                {
+                    **self._payload().model_dump(),
+                    "acceptance_profile": self.profile,
+                }
+            )
+
+        workflow_id = self._create_draft()
+        before = self._snapshot(workflow_id)
+        self.assertEqual(16, len(before["files"]))
+
+        with Session(self.engine) as session:
+            returned_sha256 = self.acceptance.apply_internal_profile(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                workflow_id=workflow_id,
+                profile=self.profile,
+            )
+
+        after = self._snapshot(workflow_id)
+        changed_paths = [
+            logical_path
+            for logical_path in before["files"]
+            if before["files"][logical_path] != after["files"][logical_path]
+        ]
+        self.assertEqual(["scf/INCAR"], changed_paths)
+        changed = after["files"]["scf/INCAR"]
+        self.assertIn(b"EDIFF = 1E-20", changed["bytes"])
+        self.assertIn(b"NELM = 1", changed["bytes"])
+        self.assertEqual(
+            hashlib.sha256(changed["bytes"]).hexdigest(), changed["sha256"]
+        )
+        self.assertEqual(len(changed["bytes"]), changed["size_bytes"])
+
+        manifest = self._manifest(after["files"])
+        manifest_sha256 = hashlib.sha256(
+            canonical_json(manifest).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(manifest, after["metadata"]["input_manifest"])
+        self.assertEqual(self.profile, after["metadata"]["acceptance_profile"])
+        self.assertEqual(manifest_sha256, after["input_sha256"])
+        self.assertEqual(manifest_sha256, returned_sha256)
+        profile_events = [
+            payload
+            for event_type, payload in after["events"]
+            if event_type == "acceptance_profile_configured"
+        ]
+        self.assertEqual(
+            [
+                {
+                    "profile": self.profile,
+                    "scf_incar_sha256": changed["sha256"],
+                    "input_sha256": manifest_sha256,
+                }
+            ],
+            profile_events,
+        )
+
+        with Session(self.engine) as session:
+            confirmed = confirm_workflow(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                workflow_id=workflow_id,
+            )
+        self.assertEqual("validated", confirmed.status)
+
+        scf_attempt_id = self._seed_relax_parent_and_scf_attempt(workflow_id)
+        with Session(self.engine) as session:
+            prepared = prepare_attempt_inputs(
+                session,
+                self.root,
+                owner_id=self.owner_id,
+                workflow_id=workflow_id,
+                step_key="scf",
+                attempt_id=scf_attempt_id,
+                template_version="mos2_v1",
+                release_commit=self.release_commit,
+            )
+        self.assertIn("INCAR", prepared.names)
+        with Session(self.engine) as session:
+            attempt_rows = list(
+                session.scalars(
+                    select(WorkflowFile).where(
+                        WorkflowFile.attempt_id == scf_attempt_id,
+                        WorkflowFile.source_kind == "attempt_input",
+                    )
+                )
+            )
+            incar_row = next(
+                row
+                for row in attempt_rows
+                if self._decode_json(row.metadata_json)["logical_path"] == "INCAR"
+            )
+            incar_metadata = self._decode_json(incar_row.metadata_json)
+        self.assertEqual(changed["sha256"], incar_row.sha256)
+        self.assertEqual(changed["sha256"], incar_metadata["source_sha256"])
+        self.assertEqual(
+            changed["bytes"],
+            self.root.joinpath(*Path(incar_row.relative_path).parts).read_bytes(),
+        )
+
+    def test_internal_profile_rejects_invalid_scope_or_state_without_mutation(self):
+        scenarios = (
+            ("invalid profile", self.owner_id, "unknown", None),
+            ("foreign owner", self.other_owner_id, self.profile, None),
+            ("non-draft", self.owner_id, self.profile, "validated"),
+        )
+        for label, owner_id, profile, status in scenarios:
+            with self.subTest(label=label):
+                workflow_id = self._create_draft()
+                if status is not None:
+                    with Session(self.engine) as session:
+                        session.get(WorkflowRun, workflow_id).status = status
+                        session.commit()
+                before = self._snapshot(workflow_id)
+                with Session(self.engine) as session:
+                    with self.assertRaises(RuntimeError):
+                        self.acceptance.apply_internal_profile(
+                            session,
+                            self.root,
+                            owner_id=owner_id,
+                            workflow_id=workflow_id,
+                            profile=profile,
+                        )
+                self.assertEqual(before, self._snapshot(workflow_id))
+
+    def test_internal_profile_commit_failure_restores_file_and_ledger(self):
+        workflow_id = self._create_draft()
+        before = self._snapshot(workflow_id)
+
+        with Session(self.engine) as session:
+            with mock.patch.object(
+                session, "commit", side_effect=RuntimeError("database unavailable")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+                    self.acceptance.apply_internal_profile(
+                        session,
+                        self.root,
+                        owner_id=self.owner_id,
+                        workflow_id=workflow_id,
+                        profile=self.profile,
+                    )
+
+        self.assertEqual(before, self._snapshot(workflow_id))
+        self.assertEqual([], list(self.root.rglob(".*.profile-*")))
 
 
 class ScientificAcceptanceTests(unittest.TestCase):

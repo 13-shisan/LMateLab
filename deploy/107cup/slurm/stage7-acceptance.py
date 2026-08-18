@@ -188,6 +188,7 @@ def apply_internal_profile(
             payload={
                 "profile": "scf_nonconvergence_v1",
                 "scf_incar_sha256": rendered_sha256,
+                "input_sha256": run.input_sha256,
             },
         )
         session.commit()
