@@ -14,6 +14,7 @@ import {
 } from './demoFixtures.js';
 
 const SUCCESS_WORKFLOW_ID = 'wf-demo-mos2-success';
+const LOG_STREAMS = new Set(['stdout', 'stderr']);
 
 function clone(value) {
   return structuredClone(value);
@@ -45,6 +46,35 @@ function matchesStatus(record, status) {
   return !status || status === 'all' || record.status === status;
 }
 
+function demoAttemptId(workflowIndex, stepIndex) {
+  const suffix = `${String(workflowIndex + 1).padStart(4, '0')}${String(stepIndex + 1).padStart(8, '0')}`;
+  return `00000000-0000-4000-8000-${suffix}`;
+}
+
+function workflowWithAttemptIds(workflow) {
+  if (!workflow) return null;
+  const cloned = clone(workflow);
+  const workflowIndex = DEMO_WORKFLOWS.findIndex((item) => item.id === workflow.id);
+  cloned.steps = cloned.steps.map((step, stepIndex) => ({
+    ...step,
+    attempt_id: step.job_id ? demoAttemptId(workflowIndex, stepIndex) : null,
+  }));
+  return cloned;
+}
+
+function validateAttemptLogRequest(workflowId, attemptId, stream) {
+  const invalidIdentifier = [workflowId, attemptId].some((value) => (
+    typeof value !== 'string'
+    || value.trim() === ''
+    || value !== value.trim()
+    || /^[\\/]/.test(value)
+    || /^[A-Za-z]:[\\/]/.test(value)
+  ));
+  if (invalidIdentifier || !LOG_STREAMS.has(stream)) {
+    throw new CompetitionRequestError('Attempt log request is invalid', 400, 'invalid-log-request');
+  }
+}
+
 export function createDemoCompetitionDataProvider() {
   return Object.freeze({
     mode: 'demo',
@@ -57,7 +87,7 @@ export function createDemoCompetitionDataProvider() {
     async listWorkflows({ query = '', status = '' } = {}) {
       const items = DEMO_WORKFLOWS.filter((workflow) => (
         matchesQuery(workflow, query) && matchesStatus(workflow, status)
-      ));
+      )).map(workflowWithAttemptIds);
       return {
         items: clone(items),
         total: items.length,
@@ -67,7 +97,7 @@ export function createDemoCompetitionDataProvider() {
 
     async getWorkflow(id) {
       const workflow = DEMO_WORKFLOWS.find((item) => item.id === id);
-      return clone(workflow || null);
+      return workflowWithAttemptIds(workflow);
     },
 
     async listResults({ query = '', status = '' } = {}) {
@@ -167,6 +197,23 @@ export function createDemoCompetitionDataProvider() {
 
     async submitWorkflow() {
       return rejectMutation('工作流提交');
+    },
+
+    async startWorkflow() {
+      return rejectMutation('工作流启动');
+    },
+
+    async getAttemptLog(workflowId, attemptId, stream) {
+      validateAttemptLogRequest(workflowId, attemptId, stream);
+      const workflow = workflowWithAttemptIds(
+        DEMO_WORKFLOWS.find((item) => item.id === workflowId),
+      );
+      const step = workflow?.steps.find((item) => item.attempt_id === attemptId);
+      if (!step) return notFound('Attempt log is unavailable');
+      return {
+        stream,
+        content: `DEMO ${stream.toUpperCase()} tail\n${workflow.id} · ${step.key} · attempt ${step.attempt}\n`,
+      };
     },
 
     async cancelWorkflow() {

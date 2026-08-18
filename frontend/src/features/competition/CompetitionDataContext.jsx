@@ -1,5 +1,12 @@
 /* eslint-disable react-refresh/only-export-components -- Provider and hooks share one context module. */
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import { competitionDataProvider } from './data/competitionDataProvider.js';
 
@@ -66,6 +73,26 @@ export function useCompetitionResource(loader) {
       active = false;
     };
   }, [loader]);
+
+  return resource;
+}
+
+
+export function useCompetitionPollingResource(loader, { enabled, intervalMs = 10000 } = {}) {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const resource = useCompetitionResource(
+    useCallback(() => loader(refreshKey), [loader, refreshKey]),
+  );
+  const pollingEnabled = typeof enabled === 'function' ? enabled(resource.data) : enabled;
+
+  useEffect(() => {
+    if (!pollingEnabled) return undefined;
+    const timer = globalThis.setInterval(
+      () => setRefreshKey((value) => value + 1),
+      intervalMs,
+    );
+    return () => globalThis.clearInterval(timer);
+  }, [pollingEnabled, intervalMs]);
 
   return resource;
 }

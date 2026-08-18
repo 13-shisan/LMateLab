@@ -1,6 +1,8 @@
 import { getAuthHeaders } from '../../../api/auth.js';
 import { CompetitionRequestError } from './competitionErrors.js';
 
+const LOG_STREAMS = new Set(['stdout', 'stderr']);
+
 function queryString(entries) {
   const params = new URLSearchParams();
   for (const [key, value] of entries) {
@@ -30,6 +32,24 @@ function filenameFromDisposition(disposition, fallback) {
     }
   }
   return disposition?.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
+}
+
+function validateAttemptLogRoute(workflowId, attemptId, stream) {
+  const identifiers = [workflowId, attemptId];
+  const invalidIdentifier = identifiers.some((value) => (
+    typeof value !== 'string'
+    || value.trim() === ''
+    || value !== value.trim()
+    || /^[\\/]/.test(value)
+    || /^[A-Za-z]:[\\/]/.test(value)
+  ));
+  if (invalidIdentifier || !LOG_STREAMS.has(stream)) {
+    throw new CompetitionRequestError(
+      'Attempt log request is invalid',
+      400,
+      'invalid-log-request',
+    );
+  }
 }
 
 export function createApiCompetitionDataProvider({
@@ -161,6 +181,18 @@ export function createApiCompetitionDataProvider({
 
     submitWorkflow(id) {
       return jsonPost(`/api/competition/workflows/${encodeURIComponent(id)}/submit`, {});
+    },
+
+    startWorkflow(id) {
+      return jsonPost(`/api/competition/workflows/${encodeURIComponent(id)}/start`, {});
+    },
+
+    async getAttemptLog(workflowId, attemptId, stream) {
+      validateAttemptLogRoute(workflowId, attemptId, stream);
+      return request(
+        `/api/competition/workflows/${encodeURIComponent(workflowId)}`
+        + `/attempts/${encodeURIComponent(attemptId)}/logs/${stream}`,
+      );
     },
 
     cancelWorkflow(id) {

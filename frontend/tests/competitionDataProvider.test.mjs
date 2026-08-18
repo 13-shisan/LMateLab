@@ -59,6 +59,7 @@ test('demo mutations reject before any supplied fetch implementation runs', asyn
     ['uploadStructure', [new Blob(['POSCAR'])], '结构上传'],
     ['saveDraft', [{ material: 'MoS2' }], '草稿保存'],
     ['submitWorkflow', ['wf-demo-mos2-running'], '工作流提交'],
+    ['startWorkflow', ['wf-demo-mos2-running'], '工作流启动'],
     ['cancelWorkflow', ['wf-demo-mos2-running'], '工作流取消'],
     ['retryWorkflow', ['wf-demo-mos2-failed', 'scf'], '工作流重试'],
     ['mutateDatabase', [{ formula: 'MoS2' }], '数据库写入'],
@@ -366,4 +367,87 @@ test('live workflow retry accepts an object and encodes id and step', async () =
   assert.equal(request.path, '/api/competition/workflows/wf%2Fdemo%20id/steps/scf%2Brestart/retry');
   assert.equal(request.init.method, 'POST');
   assert.equal(request.init.body, '{}');
+});
+
+test('live provider validates then starts through separate fixed routes', async () => {
+  const requests = [];
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    fetchImpl: async (path, init) => {
+      requests.push([path, init]);
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  await provider.submitWorkflow('wf-1');
+  await provider.startWorkflow('wf-1');
+
+  assert.deepEqual(requests.map(([path]) => path), [
+    '/api/competition/workflows/wf-1/submit',
+    '/api/competition/workflows/wf-1/start',
+  ]);
+  assert.deepEqual(requests.map(([, init]) => [init.method, init.body]), [
+    ['POST', '{}'],
+    ['POST', '{}'],
+  ]);
+});
+
+test('attempt log providers use only safe fixed stdout and stderr routes', async () => {
+  const requests = [];
+  const live = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    fetchImpl: async (path, init) => {
+      requests.push([path, init]);
+      const stream = path.endsWith('/stderr') ? 'stderr' : 'stdout';
+      return new Response(JSON.stringify({ stream, content: `${stream} tail\n` }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await live.getAttemptLog('wf-1', 'attempt-1', 'stdout'),
+    { stream: 'stdout', content: 'stdout tail\n' },
+  );
+  assert.deepEqual(
+    await live.getAttemptLog('wf-1', 'attempt-1', 'stderr'),
+    { stream: 'stderr', content: 'stderr tail\n' },
+  );
+  assert.deepEqual(requests.map(([path]) => path), [
+    '/api/competition/workflows/wf-1/attempts/attempt-1/logs/stdout',
+    '/api/competition/workflows/wf-1/attempts/attempt-1/logs/stderr',
+  ]);
+  assert.equal(requests.every(([, init]) => init.method === undefined), true);
+
+  const requestCount = requests.length;
+  for (const args of [
+    ['/home/private/workflow', 'attempt-1', 'stdout'],
+    ['wf-1', '/home/private/attempt', 'stdout'],
+    ['wf-1', 'C:\\private\\attempt', 'stderr'],
+    ['wf-1', 'attempt-1', 'combined'],
+    ['wf-1', 'attempt-1', '../../stdout'],
+  ]) {
+    await assert.rejects(() => live.getAttemptLog(...args), /invalid|不受支持/i);
+  }
+  assert.equal(requests.length, requestCount);
+
+  const demo = createDemoCompetitionDataProvider({
+    fetchImpl: async () => { throw new Error('demo logs must not request the network'); },
+  });
+  const demoWorkflow = await demo.getWorkflow('wf-demo-mos2-running');
+  const demoAttemptId = demoWorkflow.steps.find((step) => step.attempt_id)?.attempt_id;
+  assert.match(demoAttemptId, /^[0-9a-f-]{36}$/);
+  const demoLog = await demo.getAttemptLog(demoWorkflow.id, demoAttemptId, 'stdout');
+  assert.deepEqual(Object.keys(demoLog).sort(), ['content', 'stream']);
+  assert.equal(demoLog.stream, 'stdout');
+  assert.match(demoLog.content, /DEMO/);
+  assert.ok(new TextEncoder().encode(demoLog.content).byteLength <= 64 * 1024);
+  await assert.rejects(
+    () => demo.getAttemptLog(demoWorkflow.id, demoAttemptId, 'stdin'),
+    /invalid|不受支持/i,
+  );
 });

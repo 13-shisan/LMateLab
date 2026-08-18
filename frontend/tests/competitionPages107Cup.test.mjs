@@ -1366,7 +1366,7 @@ test('workflow detail page loads immutable evidence and handles missing ids expl
     source.indexOf('competition-workflow-identity') < source.indexOf('<WorkflowTimeline'),
     'immutable identity must render before the workflow timeline',
   );
-  assert.match(source, /const\s+workflowSteps\s*=\s*Array\.isArray\(workflow\.steps\)\s*\?\s*workflow\.steps\s*:\s*\[\];/);
+  assert.match(source, /const\s+workflowSteps\s*=\s*Array\.isArray\(workflow\?\.steps\)\s*\?\s*workflow\.steps\s*:\s*\[\];/);
   assert.match(source, /const\s+failedStep\s*=\s*findRetryableFailedStep\(workflowSteps\);/);
   assert.match(
     source,
@@ -1503,7 +1503,10 @@ test('workflow detail state normalization preserves provider failures and reject
   assert.match(source, /detailState\.status\s*!==\s*['"]ready['"]/);
   assert.match(source, /status=\{detailState\.status\}/);
   assert.match(source, /message=\{detailState\.message\}/);
-  assert.match(source, /const\s+workflow\s*=\s*detailState\.workflow;/);
+  assert.match(
+    source,
+    /const\s+workflow\s*=\s*detailState\.status\s*===\s*['"]ready['"]\s*\?\s*detailState\.workflow\s*:\s*null;/,
+  );
 });
 
 test('workflow detail retries only the first failed fixed-step key', () => {
@@ -1603,6 +1606,236 @@ test('workflow detail commands fail closed and execute valid cancel and retry on
   assert.equal(source.match(/finally\s*{\s*setCommandPending\(false\);\s*}/g)?.length, 2);
   assert.match(source, /async\s+function\s+handleCancel[\s\S]*?try\s*{[\s\S]*?catch/s);
   assert.match(source, /async\s+function\s+handleRetry[\s\S]*?try\s*{[\s\S]*?catch/s);
+});
+
+test('new calculation start is separate, single-flight, and fails closed', async () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+  const {
+    executeStartWorkflow,
+    isValidStartOutcome,
+  } = loadFunctions(source, ['executeStartWorkflow', 'isValidStartOutcome'], {
+    canWriteCompetitionData,
+  });
+  const calls = [];
+  const base = {
+    mode: 'live',
+    user: { role: 'operator' },
+    workflowId: 'wf-1',
+    pending: false,
+    write: async () => calls.push('start'),
+  };
+
+  for (const invalid of [
+    { ...base, mode: 'demo' },
+    { ...base, user: { role: 'viewer' } },
+    { ...base, workflowId: '' },
+    { ...base, workflowId: ' wf-1 ' },
+    { ...base, pending: true },
+    { ...base, write: null },
+  ]) {
+    assert.equal(await executeStartWorkflow(invalid), false);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(await executeStartWorkflow(base), true);
+  assert.deepEqual(calls, ['start']);
+
+  const attemptId = 'b1f1d2a8-7689-4dd4-802c-ff17c3eecb65';
+  assert.equal(isValidStartOutcome({
+    workflow_id: 'wf-1', attempt_id: attemptId, step_key: 'relax', status: 'queued',
+  }, 'wf-1'), true);
+  for (const malformed of [
+    null,
+    {},
+    { workflow_id: 'wf-other', attempt_id: attemptId, step_key: 'relax', status: 'queued' },
+    { workflow_id: 'wf-1', attempt_id: '/home/private', step_key: 'relax', status: 'queued' },
+    { workflow_id: 'wf-1', attempt_id: attemptId, step_key: 'scf', status: 'queued' },
+    { workflow_id: 'wf-1', attempt_id: attemptId, step_key: 'relax', status: 'unknown' },
+  ]) {
+    assert.equal(isValidStartOutcome(malformed, 'wf-1'), false);
+  }
+
+  assert.match(source, /useNavigate\(\)/);
+  assert.match(source, /const\s+\[startPending,\s*setStartPending\]\s*=\s*useState\(false\);/);
+  assert.match(source, /const\s+startLock\s*=\s*useRef\(false\);/);
+  assert.match(source, /provider\.startWorkflow\(serverState\.confirmation\.id\)/);
+  assert.match(source, /navigate\(`\/dashboard\/workflows\/\$\{encodeURIComponent\([^}]+\)\}`\)/);
+  assert.match(source, /serverState\.confirmation\?\.status\s*===\s*['"]validated['"]\s*\?/);
+  assert.match(source, /['"]开始计算['"]/);
+  assert.match(source, /startPending\s*\?\s*['"]启动中['"]\s*:\s*['"]开始计算['"]/);
+  assert.match(source, /catch\s*\(error\)[\s\S]*?setStartUncertain\(true\)/s);
+});
+
+test('new draft invalidation clears prior start uncertainty', () => {
+  const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
+
+  assert.match(
+    source,
+    /function\s+clearPersistedState\([^)]*\)\s*\{[\s\S]*?setStartUncertain\(false\)[\s\S]*?invalidateServerState/s,
+  );
+  assert.match(
+    source,
+    /async\s+function\s+handleStructureFileChange\([^)]*\)\s*\{[\s\S]*?setStartUncertain\(false\)[\s\S]*?invalidateServerState[\s\S]*?if\s*\(!file\)\s*return/s,
+  );
+});
+
+test('workflow polling runs only for live active scientific states', () => {
+  const contextSource = read('../src/features/competition/CompetitionDataContext.jsx');
+  const detailSource = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const shouldPollWorkflow = loadFunction(detailSource, 'shouldPollWorkflow');
+
+  for (const status of [
+    'preparing', 'submitting', 'queued', 'running', 'awaiting_acceptance', 'cancelling',
+  ]) {
+    assert.equal(shouldPollWorkflow('live', status), true, status);
+    assert.equal(shouldPollWorkflow('demo', status), false, status);
+  }
+  for (const status of [
+    'validated', 'succeeded', 'failed', 'scientific_failed', 'blocked', 'cancelled', null,
+  ]) {
+    assert.equal(shouldPollWorkflow('live', status), false, String(status));
+  }
+
+  assert.match(contextSource, /export\s+function\s+useCompetitionPollingResource\(/);
+  assert.match(contextSource, /useCompetitionResource\(\s*useCallback\(/);
+  assert.match(contextSource, /globalThis\.setInterval\(/);
+  assert.match(contextSource, /return\s*\(\)\s*=>\s*globalThis\.clearInterval\(timer\)/);
+  assert.match(contextSource, /let\s+active\s*=\s*true/);
+  assert.match(contextSource, /if\s*\(!active\)\s*return/g);
+  assert.match(detailSource, /useCompetitionPollingResource\(loadWorkflow,/);
+  assert.match(detailSource, /shouldPollWorkflow\(mode,/);
+});
+
+test('workflow scientific failed, blocked, and awaiting acceptance remain distinct', () => {
+  const source = read('../src/features/competition/components/WorkflowTimeline.jsx');
+  const detailSource = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const describeScientificState = loadFunction(source, 'describeScientificState');
+  const findRetryableFailedStep = loadFunction(detailSource, 'findRetryableFailedStep');
+
+  assert.equal(
+    describeScientificState({ status: 'awaiting_acceptance', accepted: null }),
+    '等待科学验收',
+  );
+  assert.equal(
+    describeScientificState({
+      status: 'scientific_failed', accepted: false, reason: 'electronic_not_converged',
+    }),
+    '科学验收失败 · electronic_not_converged',
+  );
+  assert.equal(
+    describeScientificState({ status: 'blocked', accepted: false }),
+    '依赖失败，未启动',
+  );
+  assert.equal(
+    describeScientificState({ status: 'running', accepted: false }),
+    '尚未验收',
+  );
+  assert.equal(
+    describeScientificState({ status: 'succeeded', accepted: false }),
+    '科学验收失败',
+  );
+  assert.equal(
+    describeScientificState({ status: 'succeeded', accepted: true }),
+    '科学验收通过',
+  );
+  const scientificFailure = { key: 'scf', status: 'scientific_failed' };
+  assert.equal(findRetryableFailedStep([scientificFailure]), scientificFailure);
+  assert.match(source, /elapsed_wall_seconds/);
+  assert.match(source, /process_tree_peak_rss_kbytes/);
+  assert.match(source, /sha256/);
+});
+
+test('workflow evidence hides unexpected absolute attempt directories', () => {
+  const source = read('../src/features/competition/components/WorkflowTimeline.jsx');
+  const displayAttemptDirectory = loadFunction(source, 'displayAttemptDirectory');
+
+  assert.equal(displayAttemptDirectory('attempt-1/scf'), 'attempt-1/scf');
+  for (const unsafe of [
+    null,
+    '',
+    ' attempt-1/scf ',
+    '/home/private/attempt',
+    '\\server\private\attempt',
+    'C:\\private\\attempt',
+    '../private/attempt',
+    'attempts/../../private',
+  ]) {
+    assert.equal(displayAttemptDirectory(unsafe), '-');
+  }
+
+  assert.match(source, /const\s+attemptDirectory\s*=\s*displayAttemptDirectory\(step\.attempt_dir\);/);
+  assert.match(source, /title=\{attemptDirectory\s*===\s*['"]-['"]\s*\?\s*undefined\s*:\s*attemptDirectory\}/);
+});
+
+test('workflow log selection uses only safe latest attempt identifiers', () => {
+  const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const {
+    isSafeAttemptIdentifier,
+    selectLatestAttemptStep,
+    normalizeAttemptLogState,
+  } = loadFunctions(source, [
+    'isSafeAttemptIdentifier',
+    'selectLatestAttemptStep',
+    'normalizeAttemptLogState',
+  ]);
+  const relaxAttempt = 'b1f1d2a8-7689-4dd4-802c-ff17c3eecb65';
+  const scfAttempt = '09dfc066-82df-4727-ac95-54aa2be24231';
+  const steps = [
+    { key: 'relax', attempt: 1, attempt_id: relaxAttempt, job_id: '41001' },
+    { key: 'scf', attempt: 2, attempt_id: scfAttempt, job_id: '41002' },
+    { key: 'band', attempt: 0, attempt_id: null },
+  ];
+
+  assert.equal(isSafeAttemptIdentifier(relaxAttempt), true);
+  for (const unsafe of [
+    null, '', 'attempt-1', '/home/private', 'C:\\private\\attempt', scfAttempt.toUpperCase(),
+  ]) {
+    assert.equal(isSafeAttemptIdentifier(unsafe), false);
+  }
+  assert.equal(selectLatestAttemptStep(steps, 'relax'), steps[0]);
+  assert.equal(selectLatestAttemptStep(steps, 'band'), steps[1]);
+  assert.equal(selectLatestAttemptStep(steps, ''), steps[1]);
+  assert.equal(selectLatestAttemptStep([
+    ...steps,
+    { key: 'dos', attempt: 99, attempt_id: '/home/private', job_id: '99999' },
+  ], 'dos'), steps[1]);
+
+  assert.deepEqual(normalizeAttemptLogState(
+    { status: 'loading', data: null, error: null }, 'stdout', scfAttempt,
+  ), { status: 'loading', message: '日志加载中', content: '' });
+  assert.deepEqual(normalizeAttemptLogState(
+    { status: 'ready', data: { stream: 'stdout', content: '' }, error: null },
+    'stdout', scfAttempt,
+  ), { status: 'empty', message: '当前日志为空', content: '' });
+  assert.deepEqual(normalizeAttemptLogState(
+    { status: 'ready', data: { stream: 'stdout', content: 'bounded tail\n' }, error: null },
+    'stdout', scfAttempt,
+  ), { status: 'ready', message: '', content: 'bounded tail\n' });
+  for (const resource of [
+    { status: 'error', data: null, error: new Error('/home/private/log') },
+    { status: 'ready', data: { stream: 'stderr', content: 'wrong stream' }, error: null },
+    { status: 'ready', data: { stream: 'stdout', content: {} }, error: null },
+  ]) {
+    assert.deepEqual(
+      normalizeAttemptLogState(resource, 'stdout', scfAttempt),
+      { status: 'error', message: '日志暂时不可用', content: '' },
+    );
+  }
+  assert.deepEqual(normalizeAttemptLogState(
+    { status: 'ready', data: null, error: null }, 'stdout', null,
+  ), { status: 'empty', message: '当前步骤暂无日志', content: '' });
+
+  assert.match(source, /provider\.getAttemptLog\(workflow\.id,\s*selectedAttemptId,\s*logStream\)/);
+  assert.match(source, /['"]stdout['"][\s\S]*?['"]stderr['"]/);
+  assert.match(source, /<pre\s+className=['"]competition-result-log['"]>/);
+  assert.doesNotMatch(source, /attempt_dir\.(?:split|match)/);
+
+  const boundedSources = [
+    source,
+    read('../src/features/competition/data/apiCompetitionDataProvider.js'),
+    read('../src/features/competition/data/demoCompetitionDataProvider.js'),
+    read('../src/features/competition/components/WorkflowTimeline.jsx'),
+  ].join('\n');
+  assert.doesNotMatch(boundedSources, /sbatch|squeue|sacct|scancel|vasp_std|\/home\//i);
 });
 
 test('workflow detail stored user parsing fails closed', () => {
