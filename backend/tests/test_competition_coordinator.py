@@ -1184,6 +1184,76 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         self.assertTrue(Path(attempt.working_directory).is_dir())
         self.assertEqual("submission_failed", attempt.status)
 
+    def test_scope_mutation_at_promotion_barrier_blocks_start_submission(self):
+        cases = ("material", "normalized_metadata")
+        for case in cases:
+            with self.subTest(case=case):
+                workflow_id = self.create_workflow()
+                original_submit = self.reconciler.submit_claim
+
+                def mutate_then_submit(session, claim, **kwargs):
+                    with self.SessionLocal() as mutation_session:
+                        run = mutation_session.get(WorkflowRun, claim.workflow_id)
+                        if case == "material":
+                            run.material = "MoSe2"
+                        else:
+                            metadata = json.loads(run.metadata_json)
+                            metadata["normalized_payload"]["source_kind"] = "foreign"
+                            run.metadata_json = metadata
+                        mutation_session.commit()
+                    return original_submit(session, claim, **kwargs)
+
+                submitted_before = len(self.slurm.submitted_steps)
+                receipts_before = len(self.slurm.receipts)
+                coordinator = self.new_coordinator()
+                with mock.patch.object(
+                    self.reconciler,
+                    "submit_claim",
+                    side_effect=mutate_then_submit,
+                ):
+                    outcome = coordinator.start(workflow_id, self.owner_id)
+
+                self.assertEqual("submission_failed", outcome.status)
+                self.assertEqual(submitted_before, len(self.slurm.submitted_steps))
+                self.assertEqual(receipts_before, len(self.slurm.receipts))
+                attempt = self.latest_attempt("relax", workflow_id)
+                self.assertEqual("submission_failed", attempt.status)
+
+    def test_scope_mutation_at_promotion_barrier_blocks_preparing_restart(self):
+        with self.SessionLocal() as session:
+            claim = self.reconciler.claim_attempt(
+                session,
+                self.workflow_id,
+                step_key="relax",
+                runner_kind="vasp",
+                runner_mode="relax",
+                script_path=self.vasp_script,
+                claimable_run_statuses=frozenset({"validated"}),
+            )
+        original_submit = self.reconciler.submit_claim
+
+        def mutate_then_submit(session, preparing_claim, **kwargs):
+            with self.SessionLocal() as mutation_session:
+                run = mutation_session.get(WorkflowRun, preparing_claim.workflow_id)
+                run.material = "MoSe2"
+                mutation_session.commit()
+            return original_submit(session, preparing_claim, **kwargs)
+
+        coordinator = self.new_coordinator()
+        with mock.patch.object(
+            self.reconciler,
+            "submit_claim",
+            side_effect=mutate_then_submit,
+        ):
+            result = coordinator.tick_once()
+
+        self.assertEqual(0, result.failures)
+        self.assertEqual([], self.slurm.submitted_steps)
+        self.assertEqual({}, self.slurm.receipts)
+        attempt = self.latest_attempt("relax")
+        self.assertEqual(claim.attempt_id, attempt.id)
+        self.assertEqual("submission_failed", attempt.status)
+
 
 if __name__ == "__main__":
     unittest.main()

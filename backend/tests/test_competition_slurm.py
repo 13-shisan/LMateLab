@@ -17,7 +17,13 @@ from sqlalchemy.orm import Session
 
 from database import Base
 from models import User
-from models_workflow import WorkflowAttempt, WorkflowEvent, WorkflowRun, WorkflowStep
+from models_workflow import (
+    WorkflowAttempt,
+    WorkflowEvent,
+    WorkflowRun,
+    WorkflowStep,
+    canonical_json,
+)
 import services.competition_slurm as competition_slurm
 from services.competition_reconcile import CompetitionReconciler, ReconcileError
 from services.competition_slurm import (
@@ -1021,7 +1027,14 @@ class CompetitionReconcileTests(unittest.TestCase):
                 status="validated",
                 input_sha256="a" * 64,
                 release_commit="b" * 40,
-                metadata_json={},
+                metadata_json={
+                    "normalized_payload": {
+                        "parameters": {},
+                        "source_kind": "builtin",
+                        "steps": ["relax", "scf", "band", "dos"],
+                        "template_version": "mos2_v1",
+                    }
+                },
             )
             session.add(run)
             session.flush()
@@ -1135,6 +1148,61 @@ class CompetitionReconcileTests(unittest.TestCase):
             self.assertEqual(expected_sha256, metadata.get("script_sha256"))
             self.assertEqual(expected_sha256, claim.submission.script_sha256)
             self.assertEqual(claim.submission.comment, metadata["comment"])
+
+    def test_vasp_claim_persists_only_the_bound_scope_identity(self):
+        self.set_run_status("running")
+
+        claim = self.claim_vasp()
+
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            attempt = session.get(WorkflowAttempt, claim.attempt_id)
+            metadata = json.loads(attempt.metadata_json)
+            run_metadata = json.loads(run.metadata_json)
+        self.assertEqual(
+            hashlib.sha256(
+                canonical_json(
+                    {
+                        "version": 1,
+                        "template_version": "mos2_v1",
+                        "material": "MoS2",
+                        "source_kind": "builtin",
+                        "input_sha256": "a" * 64,
+                        "release_commit": "b" * 40,
+                        "metadata": run_metadata,
+                    }
+                ).encode("utf-8")
+            ).hexdigest(),
+            metadata.get("execution_scope_v1_sha256"),
+        )
+        self.assertNotIn("normalized_payload", metadata)
+
+    def test_vasp_promotion_rejects_scope_mutated_after_claim(self):
+        self.set_run_status("running")
+        claim = self.claim_vasp()
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            metadata = json.loads(run.metadata_json)
+            metadata["normalized_payload"]["source_kind"] = "foreign"
+            run.metadata_json = metadata
+            session.commit()
+
+        with Session(self.engine) as session, self.assertRaises(ReconcileError) as raised:
+            self.vasp_reconciler().promote_claim(
+                session,
+                claim,
+                claimable_run_statuses=frozenset({"running"}),
+            )
+
+        self.assertEqual("workflow_scope_changed", raised.exception.code)
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, claim.attempt_id)
+            step = session.get(WorkflowStep, claim.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual(
+                ("preparing", "preparing", "running"),
+                (attempt.status, step.status, run.status),
+            )
 
     def test_claim_rejects_a_non_fixed_step(self):
         self.set_run_status("running")

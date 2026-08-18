@@ -11,7 +11,12 @@ from typing import Callable
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from models_workflow import WorkflowAttempt, WorkflowRun, WorkflowStep
+from models_workflow import (
+    WorkflowAttempt,
+    WorkflowRun,
+    WorkflowStep,
+    canonical_json,
+)
 from services.competition_slurm import (
     FIXED_STEPS,
     PROBE_MODES,
@@ -37,6 +42,7 @@ class AttemptClaim:
     attempt_id: str
     submission: SlurmSubmission
     status: str
+    execution_scope_v1_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,7 @@ class _AttemptRunnerContract:
     submission: SlurmSubmission
     expected_comment: str
     legacy: bool
+    execution_scope_v1_sha256: str | None
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,65 @@ _LEGACY_PROBE_METADATA_FIELDS = frozenset(
         "scheduler_observation",
     }
 )
+_EXECUTION_SCOPE_METADATA_KEY = "execution_scope_v1_sha256"
+
+
+def _is_lower_hex(value: object, length: int) -> bool:
+    return (
+        type(value) is str
+        and len(value) == length
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _execution_scope_v1_sha256(run: WorkflowRun) -> str:
+    try:
+        metadata = json.loads(run.metadata_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ReconcileError(
+            "invalid_execution_scope",
+            "workflow execution scope is invalid",
+        ) from exc
+    normalized = metadata.get("normalized_payload") if isinstance(metadata, dict) else None
+    values = (
+        run.template_version,
+        run.material,
+        run.source_kind,
+        run.input_sha256,
+        run.release_commit,
+    )
+    if (
+        not isinstance(normalized, dict)
+        or any(type(value) is not str or not value for value in values)
+        or not _is_lower_hex(run.input_sha256, 64)
+        or not _is_lower_hex(run.release_commit, 40)
+    ):
+        raise ReconcileError(
+            "invalid_execution_scope",
+            "workflow execution scope is invalid",
+        )
+    identity = {
+        "version": 1,
+        "template_version": run.template_version,
+        "material": run.material,
+        "source_kind": run.source_kind,
+        "input_sha256": run.input_sha256,
+        "release_commit": run.release_commit,
+        "metadata": metadata,
+    }
+    return hashlib.sha256(canonical_json(identity).encode("utf-8")).hexdigest()
+
+
+def _execution_scope_matches(
+    run: WorkflowRun | None,
+    expected_sha256: str,
+) -> bool:
+    if run is None:
+        return False
+    try:
+        return _execution_scope_v1_sha256(run) == expected_sha256
+    except ReconcileError:
+        return False
 
 
 class CompetitionReconciler:
@@ -282,10 +348,22 @@ class CompetitionReconciler:
                 "invalid_runner_contract",
                 "runner contract is not allowed",
             )
+        execution_scope_v1_sha256 = None
+        if _EXECUTION_SCOPE_METADATA_KEY in metadata:
+            execution_scope_v1_sha256 = metadata[_EXECUTION_SCOPE_METADATA_KEY]
+            if (
+                runner_kind != "vasp"
+                or not _is_lower_hex(execution_scope_v1_sha256, 64)
+            ):
+                raise ReconcileError(
+                    "invalid_runner_contract",
+                    "runner contract is not allowed",
+                )
         return _AttemptRunnerContract(
             submission=submission,
             expected_comment=expected_comment,
             legacy=legacy,
+            execution_scope_v1_sha256=execution_scope_v1_sha256,
         )
 
     @staticmethod
@@ -449,6 +527,15 @@ class CompetitionReconciler:
             )
             if step is None:
                 raise RuntimeError("claimed workflow step is unavailable")
+            run = session.get(WorkflowRun, workflow_id)
+            if run is None:
+                raise ReconcileError(
+                    "workflow_not_claimable",
+                    "workflow cannot be claimed for submission",
+                )
+            execution_scope_v1_sha256 = (
+                _execution_scope_v1_sha256(run) if runner_kind == "vasp" else None
+            )
 
             current_attempt = session.scalar(
                 select(func.max(WorkflowAttempt.attempt_number)).where(
@@ -472,6 +559,18 @@ class CompetitionReconciler:
                 runner_kind=runner_kind,
                 runner_mode=runner_mode,
             )
+            attempt_metadata = {
+                "comment": submission.comment,
+                "job_name": submission.job_name,
+                "runner_kind": runner_kind,
+                "runner_mode": runner_mode,
+                "script_path": str(resolved_script),
+                "script_sha256": submission.script_sha256,
+            }
+            if execution_scope_v1_sha256 is not None:
+                attempt_metadata[_EXECUTION_SCOPE_METADATA_KEY] = (
+                    execution_scope_v1_sha256
+                )
             session.add(
                 WorkflowAttempt(
                     id=attempt_id,
@@ -479,14 +578,7 @@ class CompetitionReconciler:
                     attempt_number=attempt_number,
                     status="preparing",
                     working_directory=str(attempt_directory),
-                    metadata_json={
-                        "comment": submission.comment,
-                        "job_name": submission.job_name,
-                        "runner_kind": runner_kind,
-                        "runner_mode": runner_mode,
-                        "script_path": str(resolved_script),
-                        "script_sha256": submission.script_sha256,
-                    },
+                    metadata_json=attempt_metadata,
                 )
             )
             if claim_event_type is not None:
@@ -512,6 +604,7 @@ class CompetitionReconciler:
             attempt_id=attempt_id,
             submission=submission,
             status="preparing",
+            execution_scope_v1_sha256=execution_scope_v1_sha256,
         )
 
     def promote_claim(
@@ -524,6 +617,40 @@ class CompetitionReconciler:
     ) -> AttemptClaim:
         now = self._clock()
         session.rollback()
+        session.expire_all()
+        if (
+            claim.submission.runner_kind == "vasp"
+            and claim.execution_scope_v1_sha256 is None
+        ):
+            raise ReconcileError(
+                "invalid_execution_scope",
+                "VASP claim is missing its bound execution scope",
+            )
+        run_conditions = [
+            WorkflowRun.id == claim.workflow_id,
+            WorkflowRun.status.in_(claimable_run_statuses),
+        ]
+        if claim.execution_scope_v1_sha256 is not None:
+            current_run = session.get(WorkflowRun, claim.workflow_id)
+            if not _execution_scope_matches(
+                current_run,
+                claim.execution_scope_v1_sha256,
+            ):
+                session.rollback()
+                raise ReconcileError(
+                    "workflow_scope_changed",
+                    "workflow execution scope changed after claim",
+                )
+            run_conditions.extend(
+                (
+                    WorkflowRun.template_version == current_run.template_version,
+                    WorkflowRun.material == current_run.material,
+                    WorkflowRun.source_kind == current_run.source_kind,
+                    WorkflowRun.input_sha256 == current_run.input_sha256,
+                    WorkflowRun.release_commit == current_run.release_commit,
+                    WorkflowRun.metadata_json == current_run.metadata_json,
+                )
+            )
         attempt = session.execute(
             update(WorkflowAttempt)
             .where(
@@ -545,15 +672,23 @@ class CompetitionReconciler:
         )
         run = session.execute(
             update(WorkflowRun)
-            .where(
-                WorkflowRun.id == claim.workflow_id,
-                WorkflowRun.status.in_(claimable_run_statuses),
-            )
+            .where(*run_conditions)
             .values(status="submitting", updated_at=now)
             .execution_options(synchronize_session=False)
         )
         if (attempt.rowcount, step.rowcount, run.rowcount) != (1, 1, 1):
             session.rollback()
+            session.expire_all()
+            if claim.execution_scope_v1_sha256 is not None:
+                current_run = session.get(WorkflowRun, claim.workflow_id)
+                if not _execution_scope_matches(
+                    current_run,
+                    claim.execution_scope_v1_sha256,
+                ):
+                    raise ReconcileError(
+                        "workflow_scope_changed",
+                        "workflow execution scope changed after claim",
+                    )
             raise ReconcileError(
                 "workflow_not_claimable",
                 "workflow cannot be claimed for submission",
@@ -575,6 +710,7 @@ class CompetitionReconciler:
             attempt_id=claim.attempt_id,
             submission=claim.submission,
             status="submitting",
+            execution_scope_v1_sha256=claim.execution_scope_v1_sha256,
         )
 
     def load_preparing_claim(
@@ -624,12 +760,21 @@ class CompetitionReconciler:
                 "attempt_not_preparing",
                 "attempt is not recoverable from preparation",
             ) from exc
+        if (
+            contract.submission.runner_kind == "vasp"
+            and contract.execution_scope_v1_sha256 is None
+        ):
+            raise ReconcileError(
+                "attempt_not_preparing",
+                "attempt is not recoverable from preparation",
+            )
         return AttemptClaim(
             workflow_id=run.id,
             step_id=step.id,
             attempt_id=attempt.id,
             submission=contract.submission,
             status="preparing",
+            execution_scope_v1_sha256=contract.execution_scope_v1_sha256,
         )
 
     def claim_next_attempt(

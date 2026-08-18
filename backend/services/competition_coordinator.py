@@ -26,7 +26,12 @@ from services.competition_inputs import (
     load_template,
     validate_draft_payload,
 )
-from services.competition_reconcile import CompetitionReconciler, ReconcileError
+from services.competition_reconcile import (
+    AttemptClaim,
+    CompetitionReconciler,
+    ReconcileError,
+    SubmissionOutcome,
+)
 from services.competition_vasp import (
     AcceptanceReport,
     FIXED_STAGE_ORDER,
@@ -210,6 +215,7 @@ class CompetitionCoordinator:
         attempt_id: str | None = None,
     ) -> None:
         session.rollback()
+        session.expire_all()
         run = session.get(WorkflowRun, workflow_id)
         if run is None:
             raise CoordinatorError(
@@ -293,6 +299,7 @@ class CompetitionCoordinator:
         attempt_id: str | None = None,
     ) -> bool:
         session.rollback()
+        session.expire_all()
         run = session.get(WorkflowRun, workflow_id)
         if run is None:
             raise CoordinatorError(
@@ -530,17 +537,41 @@ class CompetitionCoordinator:
                     claim.workflow_id,
                     session.get(WorkflowAttempt, claim.attempt_id),
                 )
-            submission = self.reconciler.submit_claim(
-                session,
-                claim,
-                claimable_run_statuses=_CLAIMABLE_RUN_STATUSES,
-            )
+            submission = self._submit_scope_bound_claim(session, claim)
+            if submission is None:
+                session.expire_all()
+                return self._outcome(
+                    session,
+                    claim.workflow_id,
+                    session.get(WorkflowAttempt, claim.attempt_id),
+                )
         return CoordinatorOutcome(
             workflow_id=submission.workflow_id,
             attempt_id=submission.attempt_id,
             step_key=claim.submission.step_key,
             status=submission.status,
         )
+
+    def _submit_scope_bound_claim(
+        self,
+        session: Session,
+        claim: AttemptClaim,
+    ) -> SubmissionOutcome | None:
+        try:
+            return self.reconciler.submit_claim(
+                session,
+                claim,
+                claimable_run_statuses=_CLAIMABLE_RUN_STATUSES,
+            )
+        except ReconcileError as exc:
+            if exc.code != "workflow_scope_changed":
+                raise
+            self._record_scope_failure(
+                session,
+                claim.workflow_id,
+                attempt_id=claim.attempt_id,
+            )
+            return None
 
     def _accept_completed_attempt(self, attempt_id: str) -> bool:
         with self._session_factory() as session:
@@ -816,11 +847,9 @@ class CompetitionCoordinator:
                 attempt_id=claim.attempt_id,
             ):
                 return None
-            submission = self.reconciler.submit_claim(
-                session,
-                claim,
-                claimable_run_statuses=_CLAIMABLE_RUN_STATUSES,
-            )
+            submission = self._submit_scope_bound_claim(session, claim)
+            if submission is None:
+                return None
         return CoordinatorOutcome(
             workflow_id=workflow_id,
             attempt_id=submission.attempt_id,
