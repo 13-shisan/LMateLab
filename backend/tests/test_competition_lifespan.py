@@ -154,6 +154,7 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
 
             await asyncio.wait_for(shutdown, timeout=0.5)
             log_error.assert_any_call("competition coordinator drain timed out")
+            self.assertIs(worker, app.state.coordinator_worker)
             self.assertNotIn(
                 "test did not release",
                 " ".join(str(call) for call in log_error.call_args_list),
@@ -168,6 +169,90 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, coordinator.close_calls)
         self.assertEqual(0, coordinator.cancel_calls)
         self.assertIsNone(app.state.coordinator_task)
+        self.assertIs(worker, app.state.coordinator_worker)
+
+    async def test_repeated_lifespan_rejects_live_worker_then_reconciles_closed_one(self):
+        tick_started = threading.Event()
+        release_tick = threading.Event()
+
+        def blocking_tick():
+            tick_started.set()
+            release_tick.wait(2.0)
+
+        original = _FakeCoordinator(blocking_tick)
+        replacement = _FakeCoordinator()
+        factory = Mock(side_effect=(original, replacement))
+        app = self.main.build_app(
+            coordinator_factory=factory,
+            coordinator_enabled=True,
+            coordinator_interval=2.0,
+            coordinator_drain_timeout=0.02,
+            coordinator_wait=_fast_wait,
+        )
+        first = app.router.lifespan_context(app)
+        await first.__aenter__()
+        for _ in range(100):
+            if tick_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        self.assertTrue(tick_started.is_set())
+        with patch.object(self.main.logger, "error") as shutdown_log:
+            await first.__aexit__(None, None, None)
+            shutdown_log.assert_any_call(
+                "competition coordinator drain timed out"
+            )
+        original_worker = app.state.coordinator_worker
+
+        second = app.router.lifespan_context(app)
+        second_entered = False
+        startup_error = None
+        with patch.object(self.main.logger, "error") as startup_log:
+            try:
+                try:
+                    await second.__aenter__()
+                except RuntimeError as exc:
+                    startup_error = exc
+                else:
+                    second_entered = True
+
+                self.assertIsNotNone(startup_error)
+                self.assertEqual(
+                    "competition coordinator worker is still active",
+                    str(startup_error),
+                )
+                startup_log.assert_any_call(
+                    "competition coordinator startup blocked by active worker"
+                )
+                self.assertEqual(1, factory.call_count)
+                self.assertIs(original_worker, app.state.coordinator_worker)
+                self.assertEqual(0, original.close_calls)
+                self.assertEqual(0, original.cancel_calls)
+            finally:
+                release_tick.set()
+                if second_entered:
+                    await second.__aexit__(None, None, None)
+
+        for _ in range(100):
+            if original.close_calls:
+                break
+            await asyncio.sleep(0.001)
+        self.assertEqual(1, original.close_calls)
+        self.assertTrue(original_worker.is_closed())
+        self.assertIs(original_worker, app.state.coordinator_worker)
+
+        class BodyFailure(RuntimeError):
+            pass
+
+        with self.assertRaises(BodyFailure):
+            async with app.router.lifespan_context(app):
+                await asyncio.sleep(0.02)
+                self.assertEqual(2, factory.call_count)
+                self.assertIsNot(original_worker, app.state.coordinator_worker)
+                raise BodyFailure("controlled body failure")
+
+        self.assertGreaterEqual(replacement.tick_calls, 1)
+        self.assertEqual(1, replacement.close_calls)
+        self.assertEqual(0, replacement.cancel_calls)
         self.assertIsNone(app.state.coordinator_worker)
 
     async def test_tick_exceptions_are_sanitized_and_loop_continues(self):

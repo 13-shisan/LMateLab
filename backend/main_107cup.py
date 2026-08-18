@@ -189,6 +189,18 @@ def build_app(
             yield
             return
 
+        existing_worker = app.state.coordinator_worker
+        if existing_worker is not None:
+            if not existing_worker.is_closed():
+                logger.error(
+                    "competition coordinator startup blocked by active worker"
+                )
+                raise RuntimeError(
+                    "competition coordinator worker is still active"
+                )
+            if app.state.coordinator_worker is existing_worker:
+                app.state.coordinator_worker = None
+
         worker = CoordinatorWorker(
             factory(),
             interval,
@@ -206,7 +218,8 @@ def build_app(
             )
             if not closed:
                 logger.error("competition coordinator drain timed out")
-            app.state.coordinator_worker = None
+            elif app.state.coordinator_worker is worker:
+                app.state.coordinator_worker = None
             app.state.coordinator_task = None
             if cancelled:
                 raise asyncio.CancelledError
