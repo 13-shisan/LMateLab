@@ -4,6 +4,8 @@ import asyncio
 import importlib
 import logging
 import os
+import threading
+import time
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,12 +19,15 @@ from competition_runtime import (
     BUSINESS_ROUTER_IMPORTS,
     CORE_ROUTER_IMPORTS,
     coordinator_batch_limit,
+    coordinator_drain_timeout_seconds,
     coordinator_enabled as runtime_coordinator_enabled,
     coordinator_interval_seconds,
     resolve_frontend_file,
     slurm_probe_script,
     slurm_user,
     vasp_stage_script,
+    validate_coordinator_drain_timeout_seconds,
+    validate_coordinator_interval_seconds,
     workflow_root,
 )
 from database import SessionLocal
@@ -69,46 +74,88 @@ def build_production_coordinator(
     )
 
 
-async def coordinator_loop(coordinator: Any, interval_seconds: float) -> None:
-    try:
-        while True:
-            loop = asyncio.get_running_loop()
-            started = loop.time()
-            tick_task = asyncio.create_task(
-                asyncio.to_thread(coordinator.tick_once),
-                name="lmatelab-competition-coordinator-tick",
-            )
-            try:
-                await asyncio.shield(tick_task)
-            except asyncio.CancelledError:
-                while not tick_task.done():
-                    try:
-                        await asyncio.shield(tick_task)
-                    except asyncio.CancelledError:
-                        continue
+class CoordinatorWorker:
+    def __init__(
+        self,
+        coordinator: Any,
+        interval_seconds: float,
+        *,
+        wait_for_stop: Callable[[threading.Event, float], bool] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._coordinator = coordinator
+        self._interval_seconds = interval_seconds
+        self._wait_for_stop = wait_for_stop or (
+            lambda stop_event, seconds: stop_event.wait(seconds)
+        )
+        self._clock = clock
+        self._stop = threading.Event()
+        self._closed = threading.Event()
+        self.thread = threading.Thread(
+            target=self._run,
+            name="lmatelab-competition-coordinator",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def is_closed(self) -> bool:
+        return self._closed.is_set()
+
+    def _run(self) -> None:
+        try:
+            while not self._stop.is_set():
+                started = self._clock()
                 try:
-                    tick_task.result()
+                    self._coordinator.tick_once()
                 except Exception:
                     logger.error("competition coordinator tick failed")
-                raise
-            except Exception:
-                logger.error("competition coordinator tick failed")
-            await asyncio.sleep(
-                coordinator_sleep_seconds(
-                    interval_seconds=interval_seconds,
+                delay = coordinator_sleep_seconds(
+                    interval_seconds=self._interval_seconds,
                     started=started,
-                    finished=loop.time(),
+                    finished=self._clock(),
                 )
-            )
-    except asyncio.CancelledError:
-        raise
-    finally:
-        close = getattr(coordinator, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                logger.error("competition coordinator close failed")
+                if self._wait_for_stop(self._stop, delay):
+                    break
+        finally:
+            close = getattr(self._coordinator, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.error("competition coordinator close failed")
+            self._closed.set()
+
+
+async def wait_for_coordinator_worker(
+    worker: CoordinatorWorker,
+    timeout_seconds: float,
+) -> tuple[bool, bool]:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    cancelled = False
+    while not worker.is_closed():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False, cancelled
+        try:
+            await asyncio.sleep(min(0.01, remaining))
+        except asyncio.CancelledError:
+            cancelled = True
+    return True, cancelled
+
+
+def _validated_runtime_value(
+    value: float | None,
+    *,
+    load_default: Callable[[], float],
+    validate: Callable[[object], float],
+) -> float:
+    return load_default() if value is None else validate(value)
 
 
 def build_app(
@@ -116,16 +163,23 @@ def build_app(
     coordinator_factory: Callable[[], Any] | None = None,
     coordinator_enabled: bool | None = None,
     coordinator_interval: float | None = None,
+    coordinator_drain_timeout: float | None = None,
+    coordinator_wait: Callable[[threading.Event, float], bool] | None = None,
 ) -> FastAPI:
     enabled = (
         runtime_coordinator_enabled()
         if coordinator_enabled is None
         else coordinator_enabled
     )
-    interval = (
-        coordinator_interval_seconds()
-        if coordinator_interval is None
-        else float(coordinator_interval)
+    interval = _validated_runtime_value(
+        coordinator_interval,
+        load_default=coordinator_interval_seconds,
+        validate=validate_coordinator_interval_seconds,
+    )
+    drain_timeout = _validated_runtime_value(
+        coordinator_drain_timeout,
+        load_default=coordinator_drain_timeout_seconds,
+        validate=validate_coordinator_drain_timeout_seconds,
     )
     factory = coordinator_factory or build_production_coordinator
 
@@ -135,22 +189,27 @@ def build_app(
             yield
             return
 
-        coordinator = factory()
-        task = asyncio.create_task(
-            coordinator_loop(coordinator, interval),
-            name="lmatelab-competition-coordinator",
+        worker = CoordinatorWorker(
+            factory(),
+            interval,
+            wait_for_stop=coordinator_wait,
         )
-        app.state.coordinator_task = task
-        await asyncio.sleep(0)
+        app.state.coordinator_worker = worker
+        worker.start()
         try:
             yield
         finally:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            worker.request_stop()
+            closed, cancelled = await wait_for_coordinator_worker(
+                worker,
+                drain_timeout,
+            )
+            if not closed:
+                logger.error("competition coordinator drain timed out")
+            app.state.coordinator_worker = None
             app.state.coordinator_task = None
+            if cancelled:
+                raise asyncio.CancelledError
 
     app = FastAPI(
         title="LMateLab 107 Cup",
@@ -160,6 +219,7 @@ def build_app(
         lifespan=lifespan,
     )
     app.state.coordinator_task = None
+    app.state.coordinator_worker = None
 
     api_router = APIRouter(prefix="/api")
     for module_name, router_name in CORE_ROUTER_IMPORTS:

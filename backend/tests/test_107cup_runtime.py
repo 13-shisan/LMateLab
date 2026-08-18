@@ -178,6 +178,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             "LMATELAB_COORDINATOR_ENABLED": "1",
             "LMATELAB_COORDINATOR_INTERVAL_SECONDS": "10",
             "LMATELAB_COORDINATOR_BATCH_LIMIT": "8",
+            "LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS": "10",
         }
 
         self.assertEqual(
@@ -187,6 +188,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         self.assertTrue(runtime.coordinator_enabled(values))
         self.assertEqual(10.0, runtime.coordinator_interval_seconds(values))
         self.assertEqual(8, runtime.coordinator_batch_limit(values))
+        self.assertEqual(10.0, runtime.coordinator_drain_timeout_seconds(values))
 
     def test_vasp_coordinator_runtime_configuration_has_bounded_defaults(self):
         runtime = self.require_runtime()
@@ -194,6 +196,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         self.assertTrue(runtime.coordinator_enabled({}))
         self.assertEqual(10.0, runtime.coordinator_interval_seconds({}))
         self.assertEqual(8, runtime.coordinator_batch_limit({}))
+        self.assertEqual(10.0, runtime.coordinator_drain_timeout_seconds({}))
 
     def test_vasp_stage_script_rejects_relative_and_traversing_paths(self):
         runtime = self.require_runtime()
@@ -227,6 +230,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             str(math.nan),
             str(math.inf),
             str(-math.inf),
+            " 10",
             "1.999",
             "60.001",
         ):
@@ -244,6 +248,22 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     runtime.coordinator_batch_limit(
                         {"LMATELAB_COORDINATOR_BATCH_LIMIT": value}
+                    )
+
+    def test_coordinator_drain_timeout_is_finite_and_bounded(self):
+        runtime = self.require_runtime()
+
+        self.assertEqual(
+            0.05,
+            runtime.coordinator_drain_timeout_seconds(
+                {"LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS": "0.05"}
+            ),
+        )
+        for value in ("invalid", "nan", "inf", " 0.05", "0.009", "60.001"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    runtime.coordinator_drain_timeout_seconds(
+                        {"LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS": value}
                     )
 
     def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):

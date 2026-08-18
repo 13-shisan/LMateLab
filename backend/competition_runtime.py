@@ -100,22 +100,61 @@ def coordinator_interval_seconds(
     environ: Mapping[str, str] | None = None,
 ) -> float:
     values = os.environ if environ is None else environ
-    value = values.get("LMATELAB_COORDINATOR_INTERVAL_SECONDS", "10")
-    if not isinstance(value, str) or value != value.strip() or not value:
-        raise ValueError(
-            "LMATELAB_COORDINATOR_INTERVAL_SECONDS must be between 2 and 60"
-        )
+    return validate_coordinator_interval_seconds(
+        values.get("LMATELAB_COORDINATOR_INTERVAL_SECONDS", "10")
+    )
+
+
+def _bounded_float(
+    value: object,
+    *,
+    variable: str,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if isinstance(value, str):
+        if value != value.strip() or not value:
+            raise ValueError(
+                f"{variable} must be between {minimum:g} and {maximum:g}"
+            )
+    elif isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{variable} must be between {minimum:g} and {maximum:g}")
     try:
         parsed = float(value)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise ValueError(
-            "LMATELAB_COORDINATOR_INTERVAL_SECONDS must be between 2 and 60"
+            f"{variable} must be between {minimum:g} and {maximum:g}"
         ) from exc
-    if not math.isfinite(parsed) or not 2 <= parsed <= 60:
-        raise ValueError(
-            "LMATELAB_COORDINATOR_INTERVAL_SECONDS must be between 2 and 60"
-        )
+    if not math.isfinite(parsed) or not minimum <= parsed <= maximum:
+        raise ValueError(f"{variable} must be between {minimum:g} and {maximum:g}")
     return parsed
+
+
+def validate_coordinator_interval_seconds(value: object) -> float:
+    return _bounded_float(
+        value,
+        variable="LMATELAB_COORDINATOR_INTERVAL_SECONDS",
+        minimum=2.0,
+        maximum=60.0,
+    )
+
+
+def coordinator_drain_timeout_seconds(
+    environ: Mapping[str, str] | None = None,
+) -> float:
+    values = os.environ if environ is None else environ
+    return validate_coordinator_drain_timeout_seconds(
+        values.get("LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS", "10")
+    )
+
+
+def validate_coordinator_drain_timeout_seconds(value: object) -> float:
+    return _bounded_float(
+        value,
+        variable="LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS",
+        minimum=0.01,
+        maximum=60.0,
+    )
 
 
 def coordinator_batch_limit(environ: Mapping[str, str] | None = None) -> int:

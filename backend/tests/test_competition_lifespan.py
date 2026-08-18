@@ -35,6 +35,10 @@ class _FakeCoordinator:
         raise AssertionError("lifespan must not cancel Slurm work")
 
 
+def _fast_wait(stop_event, seconds):
+    return stop_event.wait(min(seconds, 0.005))
+
+
 class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
@@ -68,7 +72,8 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         app = self.main.build_app(
             coordinator_factory=factory,
             coordinator_enabled=True,
-            coordinator_interval=0.01,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
         )
         await asyncio.sleep(0.02)
 
@@ -76,26 +81,30 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(0, coordinator.tick_calls)
         self.assertEqual(0, coordinator.close_calls)
         self.assertIsNone(app.state.coordinator_task)
+        self.assertIsNone(app.state.coordinator_worker)
 
     async def test_disabled_mode_creates_no_coordinator_or_task(self):
         factory = Mock(side_effect=AssertionError("disabled factory must not run"))
         app = self.main.build_app(
             coordinator_factory=factory,
             coordinator_enabled=False,
-            coordinator_interval=0.01,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
         )
 
         await self._run_lifespan(app, duration=0.02)
 
         factory.assert_not_called()
         self.assertIsNone(app.state.coordinator_task)
+        self.assertIsNone(app.state.coordinator_worker)
 
     async def test_enabled_lifespan_ticks_and_closes_exactly_once(self):
         coordinator = _FakeCoordinator()
         app = self.main.build_app(
             coordinator_factory=lambda: coordinator,
             coordinator_enabled=True,
-            coordinator_interval=0.01,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
         )
 
         await self._run_lifespan(app)
@@ -104,21 +113,24 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, coordinator.close_calls)
         self.assertEqual(0, coordinator.cancel_calls)
         self.assertIsNone(app.state.coordinator_task)
+        self.assertIsNone(app.state.coordinator_worker)
 
-    async def test_shutdown_drains_in_flight_tick_before_close(self):
+    async def test_shutdown_timeout_is_bounded_and_defers_close(self):
         tick_started = threading.Event()
         release_tick = threading.Event()
 
         def tick():
             tick_started.set()
-            if not release_tick.wait(1.0):
+            if not release_tick.wait(2.0):
                 raise AssertionError("test did not release the blocking tick")
 
         coordinator = _FakeCoordinator(tick)
         app = self.main.build_app(
             coordinator_factory=lambda: coordinator,
             coordinator_enabled=True,
-            coordinator_interval=0.01,
+            coordinator_interval=2.0,
+            coordinator_drain_timeout=0.03,
+            coordinator_wait=_fast_wait,
         )
         lifespan = app.router.lifespan_context(app)
         await lifespan.__aenter__()
@@ -127,23 +139,36 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
                 break
             await asyncio.sleep(0.001)
         self.assertTrue(tick_started.is_set())
-        loop_task = app.state.coordinator_task
-        shutdown = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        worker = app.state.coordinator_worker
+        self.assertTrue(worker.thread.daemon)
+        bounded = False
+        close_before_release = None
+        with patch.object(self.main.logger, "error") as log_error:
+            shutdown = asyncio.create_task(lifespan.__aexit__(None, None, None))
+            try:
+                await asyncio.sleep(0.08)
+                bounded = shutdown.done()
+                close_before_release = coordinator.close_calls
+            finally:
+                release_tick.set()
 
-        try:
-            await asyncio.sleep(0.01)
-            loop_task.cancel()
-            await asyncio.sleep(0.01)
-            self.assertFalse(shutdown.done())
-            self.assertEqual(0, coordinator.close_calls)
-            self.assertEqual(0, coordinator.cancel_calls)
-        finally:
-            release_tick.set()
+            await asyncio.wait_for(shutdown, timeout=0.5)
+            log_error.assert_any_call("competition coordinator drain timed out")
+            self.assertNotIn(
+                "test did not release",
+                " ".join(str(call) for call in log_error.call_args_list),
+            )
 
-        await asyncio.wait_for(shutdown, timeout=0.5)
+        for _ in range(100):
+            if coordinator.close_calls:
+                break
+            await asyncio.sleep(0.001)
+        self.assertTrue(bounded)
+        self.assertEqual(0, close_before_release)
         self.assertEqual(1, coordinator.close_calls)
         self.assertEqual(0, coordinator.cancel_calls)
         self.assertIsNone(app.state.coordinator_task)
+        self.assertIsNone(app.state.coordinator_worker)
 
     async def test_tick_exceptions_are_sanitized_and_loop_continues(self):
         second_tick = threading.Event()
@@ -157,7 +182,8 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         app = self.main.build_app(
             coordinator_factory=lambda: coordinator,
             coordinator_enabled=True,
-            coordinator_interval=0.01,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
         )
 
         with self.assertLogs("main_107cup", level="ERROR") as captured:
@@ -186,7 +212,8 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         app = self.main.build_app(
             coordinator_factory=lambda: coordinator,
             coordinator_enabled=True,
-            coordinator_interval=0.005,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
         )
 
         await self._run_lifespan(app, duration=0.06)
@@ -194,6 +221,17 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(coordinator.tick_calls, 2)
         self.assertEqual(1, state["max_active"])
         self.assertEqual(0, coordinator.cancel_calls)
+
+    async def test_injected_interval_uses_production_bounds(self):
+        for value in (0, -1, 1.999, 60.001, float("nan"), float("inf")):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    self.main.build_app(
+                        coordinator_factory=_FakeCoordinator,
+                        coordinator_enabled=True,
+                        coordinator_interval=value,
+                        coordinator_wait=_fast_wait,
+                    )
 
     def test_loop_uses_elapsed_aware_interval(self):
         self.assertAlmostEqual(
@@ -316,6 +354,7 @@ class CompetitionServiceContractTests(unittest.TestCase):
             "LMATELAB_COORDINATOR_ENABLED=1",
             "LMATELAB_COORDINATOR_INTERVAL_SECONDS=10",
             "LMATELAB_COORDINATOR_BATCH_LIMIT=8",
+            "LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS=10",
         ):
             self.assertIn(required, source)
 
