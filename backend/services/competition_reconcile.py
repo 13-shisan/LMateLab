@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 
 from models_workflow import WorkflowAttempt, WorkflowRun, WorkflowStep
 from services.competition_slurm import (
+    FIXED_STEPS,
     PROBE_MODES,
+    RUNNER_MODES,
     SlurmClient,
     SlurmError,
     SlurmJobObservation,
@@ -34,6 +36,7 @@ class AttemptClaim:
     step_id: int
     attempt_id: str
     submission: SlurmSubmission
+    status: str
 
 
 @dataclass(frozen=True)
@@ -67,72 +70,234 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_ACTIVE_ATTEMPT_STATUSES = frozenset(
+    {
+        "preparing",
+        "submitting",
+        "queued",
+        "running",
+        "awaiting_acceptance",
+        "cancelling",
+    }
+)
+
+
 class CompetitionReconciler:
     def __init__(
         self,
         *,
         slurm: SlurmClient,
         probe_script: Path,
+        vasp_script: Path | None = None,
         clock: Callable[[], datetime] = _utc_now,
         slurm_user: str | None = None,
     ) -> None:
         self.slurm = slurm
         self.probe_script = Path(probe_script).resolve()
+        self.vasp_script = Path(vasp_script).resolve() if vasp_script is not None else None
+        self._runner_scripts = {"probe": self.probe_script}
+        if self.vasp_script is not None:
+            self._runner_scripts["vasp"] = self.vasp_script
         self._clock = clock
         self.slurm_user = slurm_user
 
-    def claim_next_attempt(
+    def _validated_runner_script(
+        self,
+        *,
+        step_key: str,
+        runner_kind: str,
+        runner_mode: str,
+        script_path: Path,
+    ) -> Path:
+        if step_key not in FIXED_STEPS:
+            raise ReconcileError("invalid_step", "step is not part of the fixed workflow")
+        if (
+            runner_mode not in RUNNER_MODES.get(runner_kind, frozenset())
+            or (runner_kind == "probe" and step_key != "relax")
+            or (runner_kind == "vasp" and runner_mode != step_key)
+        ):
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "runner contract is not allowed",
+            )
+        expected_script = self._runner_scripts.get(runner_kind)
+        try:
+            resolved_script = Path(script_path).resolve()
+        except (OSError, TypeError, ValueError) as exc:
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "runner contract is not allowed",
+            ) from exc
+        if expected_script is None or resolved_script != expected_script:
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "runner contract is not allowed",
+            )
+        return expected_script
+
+    def _runner_contract_from_metadata(
+        self,
+        *,
+        step_key: str,
+        metadata: dict[str, object],
+    ) -> tuple[str, str, Path]:
+        runner_kind = metadata.get("runner_kind")
+        runner_mode = metadata.get("runner_mode")
+        script_path = metadata.get("script_path")
+        if not all(isinstance(value, str) for value in (runner_kind, runner_mode, script_path)):
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "runner contract is not allowed",
+            )
+        resolved_script = self._validated_runner_script(
+            step_key=step_key,
+            runner_kind=runner_kind,
+            runner_mode=runner_mode,
+            script_path=Path(script_path),
+        )
+        return runner_kind, runner_mode, resolved_script
+
+    @staticmethod
+    def _workload_scheduler_status(runner_kind: str, scheduler_status: str) -> str:
+        if runner_kind == "vasp" and scheduler_status == "succeeded":
+            return "awaiting_acceptance"
+        return scheduler_status
+
+    @staticmethod
+    def _active_attempt_exists(session: Session, workflow_id: str) -> bool:
+        return bool(
+            session.scalar(
+                select(func.count())
+                .select_from(WorkflowAttempt)
+                .join(WorkflowStep, WorkflowStep.id == WorkflowAttempt.step_id)
+                .where(
+                    WorkflowStep.workflow_id == workflow_id,
+                    WorkflowAttempt.status.in_(_ACTIVE_ATTEMPT_STATUSES),
+                )
+            )
+        )
+
+    def _raise_claim_rejected(
+        self,
+        session: Session,
+        *,
+        workflow_id: str,
+        step_key: str,
+        claimable_run_statuses: frozenset[str],
+    ) -> None:
+        if self._active_attempt_exists(session, workflow_id):
+            raise ReconcileError(
+                "workflow_has_active_attempt",
+                "workflow already has an active attempt",
+            )
+        run_status = session.scalar(
+            select(WorkflowRun.status).where(WorkflowRun.id == workflow_id)
+        )
+        if run_status not in claimable_run_statuses:
+            raise ReconcileError(
+                "workflow_not_claimable",
+                "workflow cannot be claimed for submission",
+            )
+        step_status = session.scalar(
+            select(WorkflowStep.status).where(
+                WorkflowStep.workflow_id == workflow_id,
+                WorkflowStep.step_key == step_key,
+            )
+        )
+        if step_status != "waiting":
+            raise ReconcileError(
+                "workflow_step_not_claimable",
+                "workflow step cannot be claimed for submission",
+            )
+        raise ReconcileError(
+            "workflow_not_claimable",
+            "workflow cannot be claimed for submission",
+        )
+
+    def claim_attempt(
         self,
         session: Session,
         workflow_id: str,
-        probe_mode: str,
+        *,
+        step_key: str,
+        runner_kind: str,
+        runner_mode: str,
+        script_path: Path,
+        claimable_run_statuses: frozenset[str],
     ) -> AttemptClaim:
-        if probe_mode not in PROBE_MODES:
-            raise ReconcileError("invalid_probe_mode", "probe mode is not allowed")
+        resolved_script = self._validated_runner_script(
+            step_key=step_key,
+            runner_kind=runner_kind,
+            runner_mode=runner_mode,
+            script_path=script_path,
+        )
+        if (
+            not isinstance(claimable_run_statuses, frozenset)
+            or not claimable_run_statuses
+            or any(not isinstance(status, str) or not status for status in claimable_run_statuses)
+        ):
+            raise ReconcileError(
+                "invalid_claim_contract",
+                "claimable run statuses are invalid",
+            )
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("clock must return an aware datetime")
 
         session.rollback()
         try:
-            claimed = session.execute(
-                update(WorkflowRun)
+            active_step = WorkflowStep.__table__.alias("active_step")
+            active_attempt_exists = (
+                select(WorkflowAttempt.id)
+                .select_from(
+                    WorkflowAttempt.__table__.join(
+                        active_step,
+                        active_step.c.id == WorkflowAttempt.step_id,
+                    )
+                )
+                .where(
+                    active_step.c.workflow_id == workflow_id,
+                    WorkflowAttempt.status.in_(_ACTIVE_ATTEMPT_STATUSES),
+                )
+                .exists()
+            )
+            claimable_run_exists = (
+                select(WorkflowRun.id)
                 .where(
                     WorkflowRun.id == workflow_id,
-                    WorkflowRun.status == "validated",
+                    WorkflowRun.status.in_(claimable_run_statuses),
                 )
-                .values(status="submitting", updated_at=now)
-                .execution_options(synchronize_session=False)
+                .exists()
             )
-            if claimed.rowcount != 1:
-                session.rollback()
-                raise ReconcileError(
-                    "workflow_not_claimable",
-                    "workflow cannot be claimed for submission",
-                )
-
-            step = session.scalar(
-                select(WorkflowStep)
-                .where(
-                    WorkflowStep.workflow_id == workflow_id,
-                    WorkflowStep.status == "waiting",
-                )
-                .order_by(WorkflowStep.position)
-                .limit(1)
-            )
-            if step is None:
-                raise RuntimeError("claimed workflow has no waiting step")
             step_claimed = session.execute(
                 update(WorkflowStep)
                 .where(
-                    WorkflowStep.id == step.id,
+                    WorkflowStep.workflow_id == workflow_id,
+                    WorkflowStep.step_key == step_key,
                     WorkflowStep.status == "waiting",
+                    claimable_run_exists,
+                    ~active_attempt_exists,
                 )
-                .values(status="submitting", updated_at=now)
+                .values(status="preparing", updated_at=now)
                 .execution_options(synchronize_session=False)
             )
             if step_claimed.rowcount != 1:
-                raise RuntimeError("workflow step claim was lost")
+                session.rollback()
+                self._raise_claim_rejected(
+                    session,
+                    workflow_id=workflow_id,
+                    step_key=step_key,
+                    claimable_run_statuses=claimable_run_statuses,
+                )
+            step = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == workflow_id,
+                    WorkflowStep.step_key == step_key,
+                    WorkflowStep.status == "preparing",
+                )
+            )
+            if step is None:
+                raise RuntimeError("claimed workflow step is unavailable")
 
             current_attempt = session.scalar(
                 select(func.max(WorkflowAttempt.attempt_number)).where(
@@ -151,21 +316,23 @@ class CompetitionReconciler:
                 step_key=step.step_key,
                 attempt_number=attempt_number,
                 attempt_directory=attempt_directory,
-                script_path=self.probe_script,
-                runner_kind="probe",
-                runner_mode=probe_mode,
+                script_path=resolved_script,
+                runner_kind=runner_kind,
+                runner_mode=runner_mode,
             )
             session.add(
                 WorkflowAttempt(
                     id=attempt_id,
                     step_id=step.id,
                     attempt_number=attempt_number,
-                    status="submitting",
+                    status="preparing",
                     working_directory=str(attempt_directory),
                     metadata_json={
                         "comment": submission.comment,
                         "job_name": submission.job_name,
-                        "probe_mode": probe_mode,
+                        "runner_kind": runner_kind,
+                        "runner_mode": runner_mode,
+                        "script_path": str(resolved_script),
                     },
                 )
             )
@@ -181,7 +348,85 @@ class CompetitionReconciler:
             step_id=step.id,
             attempt_id=attempt_id,
             submission=submission,
+            status="preparing",
         )
+
+    def _promote_probe_claim(
+        self,
+        session: Session,
+        claim: AttemptClaim,
+    ) -> AttemptClaim:
+        now = self._clock()
+        session.rollback()
+        attempt = session.execute(
+            update(WorkflowAttempt)
+            .where(
+                WorkflowAttempt.id == claim.attempt_id,
+                WorkflowAttempt.status == "preparing",
+                WorkflowAttempt.slurm_job_id.is_(None),
+            )
+            .values(status="submitting", updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        step = session.execute(
+            update(WorkflowStep)
+            .where(
+                WorkflowStep.id == claim.step_id,
+                WorkflowStep.status == "preparing",
+            )
+            .values(status="submitting", updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        run = session.execute(
+            update(WorkflowRun)
+            .where(
+                WorkflowRun.id == claim.workflow_id,
+                WorkflowRun.status == "validated",
+            )
+            .values(status="submitting", updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if (attempt.rowcount, step.rowcount, run.rowcount) != (1, 1, 1):
+            session.rollback()
+            raise ReconcileError(
+                "workflow_not_claimable",
+                "workflow cannot be claimed for submission",
+            )
+        session.commit()
+        return AttemptClaim(
+            workflow_id=claim.workflow_id,
+            step_id=claim.step_id,
+            attempt_id=claim.attempt_id,
+            submission=claim.submission,
+            status="submitting",
+        )
+
+    def claim_next_attempt(
+        self,
+        session: Session,
+        workflow_id: str,
+        probe_mode: str,
+    ) -> AttemptClaim:
+        if probe_mode not in PROBE_MODES:
+            raise ReconcileError("invalid_probe_mode", "probe mode is not allowed")
+        try:
+            claim = self.claim_attempt(
+                session,
+                workflow_id,
+                step_key="relax",
+                runner_kind="probe",
+                runner_mode=probe_mode,
+                script_path=self.probe_script,
+                claimable_run_statuses=frozenset({"validated"}),
+            )
+        except ReconcileError as exc:
+            if exc.code != "workflow_has_active_attempt":
+                raise
+            raise ReconcileError(
+                "workflow_not_claimable",
+                "workflow cannot be claimed for submission",
+            ) from exc
+        return self._promote_probe_claim(session, claim)
 
     def _record_submission_failed(
         self,
@@ -382,6 +627,17 @@ class CompetitionReconciler:
         if not isinstance(metadata, dict):
             raise ReconcileError("submission_not_recoverable", "submission cannot be recovered")
 
+        try:
+            runner_kind, runner_mode, script_path = self._runner_contract_from_metadata(
+                step_key=step.step_key,
+                metadata=metadata,
+            )
+        except ReconcileError as exc:
+            raise ReconcileError(
+                "submission_not_recoverable",
+                "submission cannot be recovered",
+            ) from exc
+
         job_id = self.slurm.read_job_receipt(run.id, attempt.id)
         observation = self.slurm.observe(job_id)
         expected_directory = str(
@@ -404,15 +660,16 @@ class CompetitionReconciler:
             step_key=step.step_key,
             attempt_number=attempt.attempt_number,
             attempt_directory=Path(expected_directory),
-            script_path=self.probe_script,
-            runner_kind="probe",
-            runner_mode=metadata.get("probe_mode"),
+            script_path=script_path,
+            runner_kind=runner_kind,
+            runner_mode=runner_mode,
         )
         claim = AttemptClaim(
             workflow_id=run.id,
             step_id=step.id,
             attempt_id=attempt.id,
             submission=submission,
+            status="submitting",
         )
         return self._record_submission_accepted(
             session,
@@ -506,9 +763,12 @@ class CompetitionReconciler:
         attempt.updated_at = now
         step.status = status
         step.updated_at = now
-        run.status = status
+        if status != "awaiting_acceptance":
+            run.status = status
         run.updated_at = now
-        if status in {"succeeded", "failed", "cancelled"}:
+        if status in {"succeeded", "failed", "cancelled"} or (
+            after is not None and after.state in {"succeeded", "failed", "cancelled"}
+        ):
             attempt.finished_at = (after.finished_at if after is not None else None) or now
         append_workflow_event(
             session,
@@ -607,6 +867,19 @@ class CompetitionReconciler:
             except (SlurmError, ValueError):
                 after = None
             if after is not None and after.state in {"succeeded", "failed", "cancelled"}:
+                metadata = self._decoded_attempt_metadata(attempt)
+                try:
+                    runner_kind, _runner_mode, _script_path = (
+                        self._runner_contract_from_metadata(
+                            step_key=step.step_key,
+                            metadata=metadata,
+                        )
+                    )
+                except ReconcileError as exc:
+                    raise ReconcileError(
+                        "cancellation_ownership_mismatch",
+                        "attempt ownership metadata is invalid",
+                    ) from exc
                 return self._persist_cancel_result(
                     session,
                     run=run,
@@ -614,7 +887,7 @@ class CompetitionReconciler:
                     attempt=attempt,
                     before=before,
                     after=after,
-                    status=after.state,
+                    status=self._workload_scheduler_status(runner_kind, after.state),
                     result="raced_terminal",
                     event_type="cancellation_raced_terminal",
                 )
@@ -711,6 +984,16 @@ class CompetitionReconciler:
                 )
 
         metadata = self._decoded_attempt_metadata(attempt)
+        try:
+            runner_kind, _runner_mode, _script_path = self._runner_contract_from_metadata(
+                step_key=step.step_key,
+                metadata=metadata,
+            )
+        except ReconcileError as exc:
+            raise ReconcileError(
+                "attempt_not_reconcilable",
+                "attempt runner contract is invalid",
+            ) from exc
         previous = metadata.get("scheduler_observation")
         evidence = self._observation_evidence(observation)
         state_changed = (
@@ -719,27 +1002,28 @@ class CompetitionReconciler:
             != self._observation_signature(evidence)
         )
         metadata["scheduler_observation"] = evidence
+        status = self._workload_scheduler_status(runner_kind, observation.state)
 
         now = self._clock()
         attempt.metadata_json = metadata
-        attempt.status = observation.state
+        attempt.status = status
         attempt.updated_at = now
         if observation.started_at is not None:
             attempt.started_at = observation.started_at
         if observation.state in {"succeeded", "failed", "cancelled"}:
             attempt.finished_at = observation.finished_at or observation.observed_at
 
-        step.status = observation.state
+        step.status = status
         step.updated_at = now
-        if observation.state == "succeeded":
+        if observation.state == "succeeded" and runner_kind == "probe":
             statuses = session.scalars(
                 select(WorkflowStep.status).where(WorkflowStep.workflow_id == run.id)
             ).all()
             run.status = "succeeded" if statuses and all(
                 status == "succeeded" for status in statuses
             ) else "running"
-        else:
-            run.status = observation.state
+        elif observation.state != "succeeded":
+            run.status = status
         run.updated_at = now
 
         if state_changed:
@@ -753,7 +1037,7 @@ class CompetitionReconciler:
                     "job_id": attempt.slurm_job_id,
                     "raw_state": observation.raw_state,
                     "stale": observation.stale,
-                    "status": observation.state,
+                    "status": status,
                 },
             )
         session.commit()
@@ -762,6 +1046,6 @@ class CompetitionReconciler:
             attempt_id=attempt.id,
             job_id=attempt.slurm_job_id,
             raw_state=observation.raw_state,
-            status=observation.state,
+            status=status,
             stale=observation.stale,
         )

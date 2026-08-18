@@ -410,12 +410,14 @@ class CompetitionReconcileTests(unittest.TestCase):
 
         self.script = self.root / "probe.slurm"
         self.script.write_text("#!/bin/bash\n", encoding="utf-8")
+        self.vasp_script = self.root / "vasp-stage.slurm"
+        self.vasp_script.write_text("#!/bin/bash\n", encoding="utf-8")
         self.executor = RecordingExecutor(stdout=b"41020\n")
         self.slurm = SlurmClient(
             binaries=fixed_binaries(),
             executor=self.executor,
             workflow_root=self.workflow_root,
-            allowed_scripts=(self.script,),
+            allowed_scripts=(self.script, self.vasp_script),
         )
         self.reconciler = CompetitionReconciler(
             slurm=self.slurm,
@@ -446,6 +448,209 @@ class CompetitionReconcileTests(unittest.TestCase):
                     }
                 ]
             }
+
+    def vasp_reconciler(self):
+        return CompetitionReconciler(
+            slurm=self.slurm,
+            probe_script=self.script,
+            vasp_script=self.vasp_script,
+        )
+
+    def claim_vasp(self, **overrides):
+        options = {
+            "step_key": "scf",
+            "runner_kind": "vasp",
+            "runner_mode": "scf",
+            "script_path": self.vasp_script,
+            "claimable_run_statuses": frozenset({"running"}),
+        }
+        options.update(overrides)
+        with Session(self.engine) as session:
+            return self.vasp_reconciler().claim_attempt(
+                session,
+                self.workflow_id,
+                **options,
+            )
+
+    def set_run_status(self, status):
+        with Session(self.engine) as session:
+            session.get(WorkflowRun, self.workflow_id).status = status
+            session.commit()
+
+    def test_vasp_claim_targets_only_the_requested_fixed_step(self):
+        self.set_run_status("running")
+
+        claim = self.claim_vasp()
+
+        self.assertEqual("scf", claim.submission.step_key)
+        self.assertEqual("preparing", claim.status)
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, claim.attempt_id)
+            step = session.get(WorkflowStep, claim.step_id)
+            metadata = json.loads(attempt.metadata_json)
+            self.assertEqual(("preparing", "preparing"), (attempt.status, step.status))
+            self.assertEqual("running", session.get(WorkflowRun, self.workflow_id).status)
+            self.assertEqual("vasp", metadata["runner_kind"])
+            self.assertEqual("scf", metadata["runner_mode"])
+            self.assertEqual(str(self.vasp_script.resolve()), metadata["script_path"])
+
+    def test_claim_rejects_a_non_fixed_step(self):
+        self.set_run_status("running")
+
+        with self.assertRaises(ReconcileError) as raised:
+            self.claim_vasp(step_key="postprocess", runner_mode="postprocess")
+
+        self.assertEqual("invalid_step", raised.exception.code)
+
+    def test_claim_rejects_a_runner_mode_that_does_not_match_the_vasp_step(self):
+        self.set_run_status("running")
+
+        with self.assertRaises(ReconcileError) as raised:
+            self.claim_vasp(runner_mode="dos")
+
+        self.assertEqual("invalid_runner_contract", raised.exception.code)
+
+    def test_claim_rejects_a_probe_runner_outside_the_fixed_stage6_step(self):
+        self.set_run_status("running")
+
+        with Session(self.engine) as session, self.assertRaises(ReconcileError) as raised:
+            self.reconciler.claim_attempt(
+                session,
+                self.workflow_id,
+                step_key="scf",
+                runner_kind="probe",
+                runner_mode="success",
+                script_path=self.script,
+                claimable_run_statuses=frozenset({"running"}),
+            )
+
+        self.assertEqual("invalid_runner_contract", raised.exception.code)
+
+    def test_claim_rejects_an_unconfigured_runner_or_script(self):
+        self.set_run_status("running")
+        foreign_script = self.root / "foreign.slurm"
+        foreign_script.write_text("#!/bin/bash\n", encoding="utf-8")
+
+        cases = (
+            {"runner_kind": "shell", "runner_mode": "scf"},
+            {"script_path": foreign_script},
+        )
+        for options in cases:
+            with self.subTest(options=options), self.assertRaises(ReconcileError) as raised:
+                self.claim_vasp(**options)
+            self.assertEqual("invalid_runner_contract", raised.exception.code)
+
+    def test_claim_rejects_a_step_that_is_not_waiting(self):
+        self.set_run_status("running")
+        with Session(self.engine) as session:
+            step = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "scf",
+                )
+            )
+            step.status = "succeeded"
+            session.commit()
+
+        with self.assertRaises(ReconcileError) as raised:
+            self.claim_vasp()
+
+        self.assertEqual("workflow_step_not_claimable", raised.exception.code)
+        with Session(self.engine) as session:
+            self.assertEqual(0, session.scalar(select(func.count()).select_from(WorkflowAttempt)))
+
+    def test_claim_rejects_an_unmet_run_status(self):
+        with self.assertRaises(ReconcileError) as raised:
+            self.claim_vasp()
+
+        self.assertEqual("workflow_not_claimable", raised.exception.code)
+        with Session(self.engine) as session:
+            scf = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "scf",
+                )
+            )
+            self.assertEqual("waiting", scf.status)
+            self.assertEqual(0, session.scalar(select(func.count()).select_from(WorkflowAttempt)))
+
+    def test_only_one_stale_session_claims_the_requested_step(self):
+        self.set_run_status("running")
+        first = Session(self.engine, expire_on_commit=False)
+        second = Session(self.engine, expire_on_commit=False)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        for session in (first, second):
+            self.assertEqual("running", session.get(WorkflowRun, self.workflow_id).status)
+            session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "scf",
+                )
+            )
+            session.commit()
+
+        options = {
+            "step_key": "scf",
+            "runner_kind": "vasp",
+            "runner_mode": "scf",
+            "script_path": self.vasp_script,
+            "claimable_run_statuses": frozenset({"running"}),
+        }
+        reconciler = self.vasp_reconciler()
+        claim = reconciler.claim_attempt(first, self.workflow_id, **options)
+        with self.assertRaises(ReconcileError) as denied:
+            reconciler.claim_attempt(second, self.workflow_id, **options)
+
+        self.assertEqual("workflow_has_active_attempt", denied.exception.code)
+        self.assertEqual("scf", claim.submission.step_key)
+        with Session(self.engine) as session:
+            attempts = session.scalars(select(WorkflowAttempt)).all()
+            self.assertEqual(1, len(attempts))
+            self.assertEqual("preparing", attempts[0].status)
+
+    def test_claim_rejects_every_other_active_attempt_status(self):
+        self.set_run_status("running")
+        active_statuses = (
+            "preparing",
+            "submitting",
+            "queued",
+            "running",
+            "awaiting_acceptance",
+            "cancelling",
+        )
+        with Session(self.engine) as session:
+            relax = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "relax",
+                )
+            )
+
+        for attempt_number, active_status in enumerate(active_statuses, start=1):
+            with self.subTest(active_status=active_status):
+                active_attempt_id = str(uuid.uuid4())
+                with Session(self.engine) as session:
+                    session.add(
+                        WorkflowAttempt(
+                            id=active_attempt_id,
+                            step_id=relax.id,
+                            attempt_number=attempt_number,
+                            status=active_status,
+                            metadata_json={},
+                        )
+                    )
+                    session.commit()
+                try:
+                    with self.assertRaises(ReconcileError) as raised:
+                        self.claim_vasp()
+                    self.assertEqual("workflow_has_active_attempt", raised.exception.code)
+                finally:
+                    with Session(self.engine) as session:
+                        attempt = session.get(WorkflowAttempt, active_attempt_id)
+                        if attempt is not None:
+                            session.delete(attempt)
+                            session.commit()
 
     def test_only_one_stale_session_claims_the_first_waiting_step(self):
         first = Session(self.engine, expire_on_commit=False)
@@ -563,14 +768,14 @@ class CompetitionReconcileTests(unittest.TestCase):
             original_commit = session.commit
             commit_calls = 0
 
-            def fail_second_commit():
+            def fail_finalize_commit():
                 nonlocal commit_calls
                 commit_calls += 1
-                if commit_calls == 2:
+                if commit_calls == 3:
                     raise RuntimeError("database finalize failed")
                 return original_commit()
 
-            with mock.patch.object(session, "commit", side_effect=fail_second_commit):
+            with mock.patch.object(session, "commit", side_effect=fail_finalize_commit):
                 with self.assertRaises(ReconcileError) as raised:
                     self.reconciler.submit_probe(session, self.workflow_id, "success")
 
@@ -831,6 +1036,69 @@ class CompetitionReconcileTests(unittest.TestCase):
         }
         return changed
 
+    def accepted_vasp_attempt(self):
+        attempt_id = str(uuid.uuid4())
+        attempt_directory = self.slurm.prepare_attempt_directory(
+            self.workflow_id,
+            attempt_id,
+        )
+        submission = SlurmSubmission(
+            workflow_id=self.workflow_id,
+            attempt_id=attempt_id,
+            step_key="scf",
+            attempt_number=1,
+            attempt_directory=attempt_directory,
+            script_path=self.vasp_script,
+            runner_kind="vasp",
+            runner_mode="scf",
+        )
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            step = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "scf",
+                )
+            )
+            run.status = "running"
+            step.status = "queued"
+            session.add(
+                WorkflowAttempt(
+                    id=attempt_id,
+                    step_id=step.id,
+                    attempt_number=1,
+                    status="queued",
+                    slurm_job_id="51020",
+                    working_directory=str(attempt_directory),
+                    metadata_json={
+                        "comment": submission.comment,
+                        "job_name": submission.job_name,
+                        "runner_kind": "vasp",
+                        "runner_mode": "scf",
+                        "script_path": str(self.vasp_script.resolve()),
+                    },
+                )
+            )
+            session.commit()
+        return attempt_id, {
+            "jobs": [
+                {
+                    "job_id": 51020,
+                    "name": submission.job_name,
+                    "job_state": ["RUNNING"],
+                    "exit_code": {
+                        "return_code": {"number": 0},
+                        "signal": {"id": {"number": 0}},
+                    },
+                    "state_reason": "None",
+                    "current_working_directory": str(attempt_directory),
+                    "comment": submission.comment,
+                    "user_name": "pb23030683",
+                    "nodes": "anode02",
+                }
+            ]
+        }
+
     def reconcile_with_payload(self, attempt_id, payload):
         reconciler = CompetitionReconciler(
             slurm=SlurmClient(
@@ -840,12 +1108,77 @@ class CompetitionReconcileTests(unittest.TestCase):
                 allowed_scripts=(self.script,),
             ),
             probe_script=self.script,
+            vasp_script=self.vasp_script,
             slurm_user="pb23030683",
         )
         with Session(self.engine) as session:
             return reconciler.reconcile_attempt(session, attempt_id)
 
-    def test_fresh_reconcilers_advance_queued_running_and_completed_states(self):
+    def test_completed_vasp_job_waits_for_scientific_acceptance(self):
+        attempt_id, payload = self.accepted_vasp_attempt()
+
+        result = self.reconcile_with_payload(
+            attempt_id,
+            self.payload_with_state(payload, "COMPLETED", "0:0"),
+        )
+
+        self.assertEqual("awaiting_acceptance", result.status)
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual("awaiting_acceptance", attempt.status)
+            self.assertEqual("awaiting_acceptance", step.status)
+            self.assertEqual("running", run.status)
+
+    def test_nonzero_vasp_slurm_result_is_scheduler_failed(self):
+        attempt_id, payload = self.accepted_vasp_attempt()
+
+        result = self.reconcile_with_payload(
+            attempt_id,
+            self.payload_with_state(payload, "COMPLETED", "1:0"),
+        )
+
+        self.assertEqual("failed", result.status)
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual(("failed", "failed", "failed"), (attempt.status, step.status, run.status))
+
+    def test_vasp_completion_race_after_cancel_waits_for_scientific_acceptance(self):
+        attempt_id, running = self.accepted_vasp_attempt()
+        completed = self.payload_with_state(running, "COMPLETED", "0:0")
+        executor = SequenceExecutor(
+            response(stdout=json.dumps(running).encode()),
+            response(stderr=b"already completing", returncode=1),
+            response(stdout=json.dumps(completed).encode()),
+        )
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script, self.vasp_script),
+            ),
+            probe_script=self.script,
+            vasp_script=self.vasp_script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session:
+            result = reconciler.cancel_attempt(session, self.workflow_id, attempt_id)
+
+        self.assertEqual("awaiting_acceptance", result.status)
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual("awaiting_acceptance", attempt.status)
+            self.assertEqual("awaiting_acceptance", step.status)
+            self.assertEqual("running", run.status)
+
+    def test_fresh_probe_reconcilers_advance_queued_running_and_completed_states(self):
         outcome, base = self.accepted_attempt()
         observed = []
         for raw_state, expected in (
