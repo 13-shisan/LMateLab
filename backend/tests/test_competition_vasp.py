@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from services.competition_vasp import (
     DEFAULT_POTCAR_CONTRACT,
@@ -78,6 +79,47 @@ class PotcarPolicyTests(unittest.TestCase):
         )
         self.assertEqual(("Mo_sv", "S"), DEFAULT_POTCAR_CONTRACT.symbols)
         self.assertEqual("1.5.1", DEFAULT_POTCAR_CONTRACT.vaspkit_version)
+
+    def test_fixed_stage_output_mapping_is_immutable(self):
+        with self.assertRaises(TypeError):
+            STAGE_REQUIRED_OUTPUTS["relax"] = ()
+
+    def test_contract_owns_mutable_injected_sequences(self):
+        symbols = ["Mo_sv", "S"]
+        titles = ["PAW_PBE Mo_sv", "PAW_PBE S"]
+        source_hashes = ["a" * 64, "b" * 64]
+        contract = PotcarContract(
+            symbols=symbols,
+            titles=titles,
+            source_sha256=source_hashes,
+            combined_sha256=hashlib.sha256(self.potcar).hexdigest(),
+            vaspkit_version="1.5.1",
+        )
+        symbols[0] = "changed"
+        titles[0] = "changed"
+        source_hashes[0] = "c" * 64
+
+        self.assertEqual(("Mo_sv", "S"), contract.symbols)
+        self.assertEqual(("PAW_PBE Mo_sv", "PAW_PBE S"), contract.titles)
+        self.assertEqual(("a" * 64, "b" * 64), contract.source_sha256)
+
+    def test_contract_rejects_string_and_non_sequence_fields(self):
+        with self.assertRaises(ValueError):
+            PotcarContract(
+                symbols="Mo",
+                titles=("PAW_PBE M", "PAW_PBE o"),
+                source_sha256=("a" * 64, "b" * 64),
+                combined_sha256=hashlib.sha256(self.potcar).hexdigest(),
+                vaspkit_version="1.5.1",
+            )
+        with self.assertRaises(ValueError):
+            PotcarContract(
+                symbols=object(),
+                titles=("PAW_PBE Mo_sv", "PAW_PBE S"),
+                source_sha256=("a" * 64, "b" * 64),
+                combined_sha256=hashlib.sha256(self.potcar).hexdigest(),
+                vaspkit_version="1.5.1",
+            )
 
     def test_potcar_uses_the_injected_contract_title_prefixes(self):
         potcar = b"TITEL = PAW_PBE C 08Apr2002\nTITEL = PAW_PBE X 08Apr2002\n"
@@ -174,6 +216,17 @@ class PotcarPolicyTests(unittest.TestCase):
 
         self.assert_policy_error("vaspkit_version_invalid")
 
+    def test_potcar_rejects_non_banner_or_multiple_vaspkit_identities(self):
+        self.write_valid_inputs()
+        for content in (
+            b"NOTVASPKIT 1.5.1\n",
+            b"VASPKIT Standard Edition 1.5.1 synthetic\n",
+            b"VASPKIT Standard Edition 1.5.1\nVASPKIT Standard Edition 1.5.1\n",
+        ):
+            with self.subTest(content=content):
+                self.write("vaspkit-version.txt", content)
+                self.assert_policy_error("vaspkit_version_invalid")
+
     def test_potcar_rejects_non_regular_required_file(self):
         self.write_valid_inputs()
         (self.root / "POTCAR").unlink()
@@ -198,6 +251,21 @@ class PotcarPolicyTests(unittest.TestCase):
 
         self.assertNotIn(str(self.root), str(error))
         self.assertNotIn(secret.decode(), str(error))
+
+    def test_potcar_stat_failure_is_sanitized(self):
+        self.write_valid_inputs()
+        raw_error = OSError(f"synthetic stat failure at {self.root}")
+        original_stat = Path.stat
+
+        def fail_only_potcar_stat(path, *args, **kwargs):
+            if path.name == "POTCAR" and kwargs.get("follow_symlinks", True):
+                raise raw_error
+            return original_stat(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "stat", autospec=True, side_effect=fail_only_potcar_stat):
+            error = self.assert_policy_error("potcar_file_invalid")
+
+        self.assertNotIn(str(self.root), str(error))
 
     def test_contract_rejects_malformed_injected_values(self):
         with self.assertRaises(ValueError):

@@ -3,18 +3,20 @@ from __future__ import annotations
 import hashlib
 import re
 import stat
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final
 
 
 FIXED_STAGE_ORDER: Final = ("relax", "scf", "band", "dos")
-STAGE_REQUIRED_OUTPUTS: Final = {
+STAGE_REQUIRED_OUTPUTS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType({
     "relax": ("OUTCAR", "vasprun.xml", "OSZICAR", "CONTCAR"),
     "scf": ("OUTCAR", "vasprun.xml", "CHGCAR", "WAVECAR"),
     "band": ("OUTCAR", "vasprun.xml", "EIGENVAL"),
     "dos": ("OUTCAR", "vasprun.xml", "DOSCAR"),
-}
+})
 
 _REQUIRED_FILES: Final = (
     "POTCAR.spec",
@@ -48,6 +50,8 @@ class PotcarContract:
     vaspkit_version: str
 
     def __post_init__(self) -> None:
+        for field_name in ("symbols", "titles", "source_sha256"):
+            object.__setattr__(self, field_name, _owned_string_tuple(field_name, getattr(self, field_name)))
         expected_count = len(self.symbols)
         if expected_count == 0 or any(
             len(values) != expected_count
@@ -60,10 +64,19 @@ class PotcarContract:
             raise ValueError("POTCAR contract titles are invalid")
         if any(not _SHA256_RE.fullmatch(digest) for digest in self.source_sha256):
             raise ValueError("POTCAR source SHA-256 values are invalid")
-        if not _SHA256_RE.fullmatch(self.combined_sha256):
+        if not isinstance(self.combined_sha256, str) or not _SHA256_RE.fullmatch(self.combined_sha256):
             raise ValueError("POTCAR combined SHA-256 is invalid")
-        if not _VERSION_RE.fullmatch(self.vaspkit_version):
+        if not isinstance(self.vaspkit_version, str) or not _VERSION_RE.fullmatch(self.vaspkit_version):
             raise ValueError("VASPKIT version is invalid")
+
+
+def _owned_string_tuple(field_name: str, value: object) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
+        raise ValueError(f"POTCAR contract {field_name} must be a sequence of strings")
+    owned = tuple(value)
+    if any(not isinstance(item, str) for item in owned):
+        raise ValueError(f"POTCAR contract {field_name} must be a sequence of strings")
+    return owned
 
 
 DEFAULT_POTCAR_CONTRACT = PotcarContract(
@@ -104,12 +117,15 @@ def validate_potcar(
         )
 
     vaspkit_text = _decode_metadata(_read_metadata(files["vaspkit-version.txt"]))
-    versions = _VERSION_RE.findall(vaspkit_text)
-    if "VASPKIT" not in vaspkit_text or versions != [contract.vaspkit_version]:
+    expected_banner = f"VASPKIT Standard Edition {contract.vaspkit_version}"
+    if vaspkit_text.splitlines() != [expected_banner]:
         raise VaspPolicyError("vaspkit_version_invalid", "VASPKIT version does not match policy")
 
     potcar_path = files["POTCAR"]
-    size_bytes = potcar_path.stat().st_size
+    try:
+        size_bytes = potcar_path.stat().st_size
+    except OSError as error:
+        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from error
     if size_bytes == 0:
         raise VaspPolicyError("potcar_empty", "POTCAR is empty")
     titles = _extract_titles(potcar_path, contract.titles)
