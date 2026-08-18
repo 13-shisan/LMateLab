@@ -21,6 +21,7 @@ from services.competition_reconcile import CompetitionReconciler, ReconcileError
 from services.competition_slurm import (
     SlurmBinaries,
     SlurmClient,
+    SlurmCommandError,
     SlurmCommandTimeout,
     SlurmOutputTooLarge,
     SlurmSubmission,
@@ -129,8 +130,9 @@ class SlurmCommandContractTests(unittest.TestCase):
     def test_test_only_builds_fixed_argv_without_a_shell(self):
         executor = RecordingExecutor(stdout=b"sbatch: Job 123 to start later\n")
         client = self.client(executor)
+        submission = self.submission()
 
-        result = client.test_submission(self.submission())
+        result = client.test_submission(submission)
 
         self.assertEqual("sbatch: Job 123 to start later", result.stdout)
         self.assertEqual(1, len(executor.calls))
@@ -141,17 +143,22 @@ class SlurmCommandContractTests(unittest.TestCase):
         self.assertIn(f"--chdir={self.attempt_dir}", argv)
         self.assertIn(f"--output={self.attempt_dir / 'stdout.log'}", argv)
         self.assertIn(f"--error={self.attempt_dir / 'stderr.log'}", argv)
-        self.assertIn(f"--comment={self.submission().comment}", argv)
+        self.assertIn(f"--comment={submission.comment}", argv)
         self.assertIn("--job-name=lmatelab-", " ".join(argv))
         self.assertEqual(
-            [str(self.script), "success", self.workflow_id, self.attempt_id],
-            argv[-4:],
+            ["success", self.workflow_id, self.attempt_id],
+            argv[-3:],
         )
+        pass_fds = kwargs.get("pass_fds", ())
+        self.assertEqual(1, len(pass_fds))
+        self.assertEqual(f"/proc/self/fd/{pass_fds[0]}", argv[-4])
         self.assertIs(False, kwargs["shell"])
         self.assertIs(False, kwargs["check"])
         self.assertEqual(subprocess.PIPE, kwargs["stdout"])
         self.assertEqual(subprocess.PIPE, kwargs["stderr"])
         self.assertEqual(3.0, kwargs["timeout"])
+        with self.assertRaises(OSError):
+            os.fstat(pass_fds[0])
 
     def test_submission_accepts_only_fixed_runner_mode_pairs(self):
         probe = self.submission(runner_kind="probe", runner_mode="success")
@@ -185,6 +192,113 @@ class SlurmCommandContractTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             client.submit(submission)
+
+        self.assertEqual([], executor.calls)
+
+    def test_submit_consumes_pinned_descriptor_when_source_path_is_replaced(self):
+        original = self.script.read_bytes()
+        replacement = b"#!/bin/bash\necho replaced\n"
+
+        class ReplacingExecutor:
+            def __init__(inner_self):
+                inner_self.calls = []
+                inner_self.consumed = None
+                inner_self.emulated_windows_replace = False
+
+            def __call__(inner_self, argv, **kwargs):
+                inner_self.calls.append((list(argv), dict(kwargs)))
+                replacement_path = self.script.with_suffix(".replacement")
+                replacement_path.write_bytes(replacement)
+                try:
+                    os.replace(replacement_path, self.script)
+                except PermissionError:
+                    inner_self.emulated_windows_replace = True
+                    replacement_path.unlink()
+
+                script_argument = argv[-4]
+                if script_argument.startswith("/proc/self/fd/"):
+                    descriptor = int(script_argument.rsplit("/", 1)[1])
+                    duplicate = os.dup(descriptor)
+                    try:
+                        os.lseek(duplicate, 0, os.SEEK_SET)
+                        chunks = []
+                        while chunk := os.read(duplicate, 64 * 1024):
+                            chunks.append(chunk)
+                        inner_self.consumed = b"".join(chunks)
+                    finally:
+                        os.close(duplicate)
+                else:
+                    inner_self.consumed = (
+                        replacement
+                        if inner_self.emulated_windows_replace
+                        else Path(script_argument).read_bytes()
+                    )
+                return subprocess.CompletedProcess(argv, 0, b"12345\n", b"")
+
+        executor = ReplacingExecutor()
+        client = self.client(executor)
+        submission = self.submission()
+
+        self.assertEqual("12345", client.submit(submission))
+
+        self.assertEqual(original, executor.consumed)
+        argv, kwargs = executor.calls[0]
+        pass_fds = kwargs.get("pass_fds", ())
+        self.assertEqual(1, len(pass_fds))
+        self.assertEqual(f"/proc/self/fd/{pass_fds[0]}", argv[-4])
+        self.assertIs(False, kwargs["shell"])
+        with self.assertRaises(OSError):
+            os.fstat(pass_fds[0])
+
+    def test_submission_descriptor_closes_after_command_error(self):
+        executor = RecordingExecutor(stderr=b"private scheduler detail", returncode=1)
+        client = self.client(executor)
+
+        with self.assertRaises(SlurmCommandError):
+            client.submit(self.submission())
+
+        pass_fds = executor.calls[0][1].get("pass_fds", ())
+        self.assertEqual(1, len(pass_fds))
+        with self.assertRaises(OSError):
+            os.fstat(pass_fds[0])
+
+    def test_submission_descriptor_closes_after_timeout(self):
+        class TimeoutExecutor:
+            def __init__(inner_self):
+                inner_self.calls = []
+
+            def __call__(inner_self, argv, **kwargs):
+                inner_self.calls.append((list(argv), dict(kwargs)))
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+        executor = TimeoutExecutor()
+        client = self.client(executor)
+
+        with self.assertRaises(SlurmCommandTimeout):
+            client.submit(self.submission())
+
+        pass_fds = executor.calls[0][1].get("pass_fds", ())
+        self.assertEqual(1, len(pass_fds))
+        with self.assertRaises(OSError):
+            os.fstat(pass_fds[0])
+
+    def test_submission_rejects_a_script_outside_the_allowlist(self):
+        foreign_script = self.root / "foreign.slurm"
+        foreign_script.write_text("#!/bin/bash\n", encoding="utf-8")
+        submission = SlurmSubmission(
+            workflow_id=self.workflow_id,
+            attempt_id=self.attempt_id,
+            step_key="relax",
+            attempt_number=1,
+            attempt_directory=self.attempt_dir,
+            script_path=foreign_script,
+            runner_kind="probe",
+            runner_mode="success",
+        )
+        executor = RecordingExecutor(stdout=b"12345\n")
+
+        with self.assertRaises(ValueError):
+            self.client(executor).submit(submission)
 
         self.assertEqual([], executor.calls)
 
