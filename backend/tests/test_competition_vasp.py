@@ -561,24 +561,24 @@ class ScientificAcceptanceTests(unittest.TestCase):
         return report
 
     def test_acceptance_report_is_deeply_immutable_and_as_dict_has_no_aliases(self):
-        checks = [{"name": "scheduler_state", "passed": True, "details": {"state": "COMPLETED"}}]
-        measurements = {"versions": {"vasp": "6.4.3"}}
+        checks = [{"name": "scheduler_state", "passed": True}]
+        measurements = {"vasp_version": "6.4.3"}
         artifacts = [{"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 1}]
         report = AcceptanceReport(True, None, checks, measurements, artifacts)
-        checks[0]["passed"] = False
-        measurements["versions"]["vasp"] = "changed"
+        checks[0]["name"] = "stage"
+        measurements["vasp_version"] = "9.9.9"
         artifacts[0]["name"] = "changed"
 
         first = report.as_dict()
-        first["checks"][0]["details"]["state"] = "changed"
-        first["measurements"]["versions"]["vasp"] = "changed"
+        first["checks"][0]["name"] = "stage"
+        first["measurements"]["vasp_version"] = "9.9.9"
         first["artifacts"][0]["name"] = "changed"
 
         self.assertEqual(report.as_dict(), {
             "accepted": True,
             "reason_code": None,
-            "checks": [{"details": {"state": "COMPLETED"}, "name": "scheduler_state", "passed": True}],
-            "measurements": {"versions": {"vasp": "6.4.3"}},
+            "checks": [{"name": "scheduler_state", "passed": True}],
+            "measurements": {"vasp_version": "6.4.3"},
             "artifacts": [{"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 1}],
         })
         with self.assertRaises(TypeError):
@@ -586,10 +586,10 @@ class ScientificAcceptanceTests(unittest.TestCase):
 
     def test_acceptance_report_rejects_inconsistent_success_or_failure(self):
         for accepted, reason_code, checks in (
-            (True, "failure", ({"name": "x", "passed": False},)),
-            (False, None, ({"name": "x", "passed": False},)),
+            (True, "failure", ({"name": "stage", "passed": False},)),
+            (False, None, ({"name": "stage", "passed": False},)),
             (False, "failure", ()),
-            (False, "failure", ({"name": "x", "passed": True},)),
+            (False, "failure", ({"name": "stage", "passed": True},)),
         ):
             with self.subTest(accepted=accepted, reason_code=reason_code, checks=checks):
                 with self.assertRaises(ValueError):
@@ -599,14 +599,14 @@ class ScientificAcceptanceTests(unittest.TestCase):
         class CustomReason(str):
             pass
 
-        failed_checks = ({"name": "x", "passed": False, "reason_code": "failure"},)
+        failed_checks = ({"name": "stage", "passed": False, "reason_code": "failure"},)
         with self.assertRaises(ValueError):
             AcceptanceReport(False, CustomReason("failure"), failed_checks, {}, ())
 
         accepted = AcceptanceReport(
             True,
             None,
-            ({"name": "x", "passed": True},),
+            ({"name": "stage", "passed": True},),
             {},
             (self.valid_artifact(),),
         )
@@ -630,7 +630,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
                     AcceptanceReport(
                         False,
                         reason_code,
-                        ({"name": "x", "passed": False, "reason_code": reason_code},),
+                        ({"name": "stage", "passed": False, "reason_code": reason_code},),
                         {},
                         (),
                     )
@@ -650,48 +650,256 @@ class ScientificAcceptanceTests(unittest.TestCase):
                         "first_failure",
                         (
                             {
-                                "name": "first",
+                                "name": "stage",
                                 "passed": False,
                                 "reason_code": "first_failure",
                             },
-                            {"name": "second", "passed": False, "reason_code": reason_code},
+                            {
+                                "name": "scheduler_state",
+                                "passed": False,
+                                "reason_code": reason_code,
+                            },
                         ),
                         {},
                         (),
                     )
 
-    def test_acceptance_report_rejects_sensitive_check_and_measurement_strings(self):
-        sensitive_strings = (
-            "C:\\licensed\\POTCAR",
-            "/licensed/POTCAR",
-            "TITEL  = PAW_PBE Mo_sv 02Feb2006\nTITEL  = PAW_PBE S 06Sep2000",
+    def test_acceptance_report_rejects_every_sensitive_string_carrier_repro(self):
+        carrier_strings = (
+            "../licensed/POTCAR",
+            "C:licensed\\POTCAR",
+            "\\licensed\\POTCAR",
+            "file:///licensed/POTCAR",
+            "PAW_PBE Mo_sv 02Feb2006 TITEL = licensed POTCAR body",
         )
         artifact = (self.valid_artifact("POTCAR"),)
-        for sensitive in sensitive_strings:
+        for sensitive in carrier_strings:
             for field in ("check", "measurement"):
                 with self.subTest(sensitive=sensitive, field=field):
                     checks = (
                         {
                             "name": "artifact:POTCAR",
                             "passed": True,
-                            "details": {"value": sensitive if field == "check" else "POTCAR"},
+                            **({"details": sensitive} if field == "check" else {}),
                         },
                     )
                     measurements = {
-                        "vasp_version": sensitive if field == "measurement" else "6.4.3",
-                        "vaspkit_version": "1.5.1",
+                        "vasp_version": sensitive if field == "measurement" else "6.4.3"
                     }
                     with self.assertRaises(ValueError):
                         AcceptanceReport(True, None, checks, measurements, artifact)
 
+    def test_acceptance_report_check_schema_is_closed(self):
+        malformed_checks = (
+            ({"name": "stage", "passed": True, "details": "benign"},),
+            ({"name": "stage", "passed": True, "extra": None},),
+            (
+                {
+                    "name": "stage",
+                    "passed": False,
+                    "reason_code": "failure",
+                    "details": "benign",
+                },
+            ),
+        )
+        for checks in malformed_checks:
+            with self.subTest(checks=checks):
+                accepted = checks[0]["passed"]
+                reason_code = None if accepted else "failure"
+                artifacts = (self.valid_artifact(),) if accepted else ()
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(accepted, reason_code, checks, {}, artifacts)
+
+    def test_acceptance_report_check_names_are_the_fixed_acceptance_vocabulary(self):
+        fixed_names = {
+            "stage",
+            "scheduler_state",
+            "scheduler_exit_code",
+            "attempt_directory",
+            "vasp_exit_code",
+            "vaspkit_version",
+            "potcar",
+            "runtime_evidence",
+            "outcar",
+            "parser_snapshot",
+            "vasprun",
+            "electronic_convergence",
+            "ionic_convergence",
+            "contcar",
+            "scf_efermi",
+            "band_kpoints",
+            "dos_kpoints",
+            "dos_nedos",
+            "evidence_stability",
+        }
+        artifact_names = set().union(
+            *STAGE_REQUIRED_OUTPUTS.values(),
+            {
+                "vasp-exit-code.txt",
+                "runtime-time.txt",
+                "vaspkit-version.txt",
+                "POTCAR.spec",
+                "POTCAR",
+                "potcar-source-sha256.txt",
+                "KPOINTS",
+                "INCAR",
+            },
+        )
+        allowed_names = fixed_names | {f"artifact:{name}" for name in artifact_names}
+        artifact = (self.valid_artifact(),)
+        for name in allowed_names:
+            with self.subTest(name=name):
+                report = AcceptanceReport(
+                    True, None, ({"name": name, "passed": True},), {}, artifact
+                )
+                self.assertEqual(name, report.checks[0]["name"])
+
+        rejected_names = (
+            "external",
+            "../licensed/POTCAR",
+            "C:licensed\\POTCAR",
+            "\\licensed\\POTCAR",
+            "file:///licensed/POTCAR",
+            "artifact:external.dat",
+            "artifact:../POTCAR",
+        )
+        for name in rejected_names:
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        False,
+                        "failure",
+                        ({"name": name, "passed": False, "reason_code": "failure"},),
+                        {},
+                        (),
+                    )
+
+    def test_acceptance_report_measurement_schema_is_closed_and_flat(self):
+        invalid_measurements = (
+            {"unknown": 1},
+            {"unknown": {"nested": "value"}},
+            {"vasp_version": {"nested": "6.4.3"}},
+            {"vasp_version": ["6.4.3"]},
+        )
+        for measurements in invalid_measurements:
+            with self.subTest(measurements=measurements):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        True,
+                        None,
+                        ({"name": "stage", "passed": True},),
+                        measurements,
+                        (self.valid_artifact(),),
+                    )
+
+    def test_acceptance_report_measurements_require_exact_types_and_safe_domains(self):
+        class CustomInt(int):
+            pass
+
+        class CustomFloat(float):
+            pass
+
+        class CustomString(str):
+            pass
+
+        invalid_measurements = (
+            {"vasp_exit_code": -1},
+            {"vasp_exit_code": True},
+            {"vasp_exit_code": 0.0},
+            {"vasp_exit_code": CustomInt(0)},
+            {"vaspkit_version": 151},
+            {"vaspkit_version": "1.5"},
+            {"vaspkit_version": "1.5.1 extra"},
+            {"vaspkit_version": "\u0661.\u0665.\u0661"},
+            {"vaspkit_version": CustomString("1.5.1")},
+            {"elapsed_wall_seconds": -0.1},
+            {"elapsed_wall_seconds": 0},
+            {"elapsed_wall_seconds": True},
+            {"elapsed_wall_seconds": math.nan},
+            {"elapsed_wall_seconds": math.inf},
+            {"elapsed_wall_seconds": CustomFloat(0.0)},
+            {"process_tree_peak_rss_kbytes": -1},
+            {"process_tree_peak_rss_kbytes": 1.0},
+            {"process_tree_peak_rss_kbytes": True},
+            {"process_tree_peak_rss_kbytes": CustomInt(0)},
+            {"vasp_version": 643},
+            {"vasp_version": "6.4"},
+            {"vasp_version": "vasp.6.4.3"},
+            {"vasp_version": CustomString("6.4.3")},
+            {"efermi_ev": True},
+            {"efermi_ev": "1.25"},
+            {"efermi_ev": math.nan},
+            {"efermi_ev": math.inf},
+            {"efermi_ev": CustomFloat(1.25)},
+            {"kpoints_sha256": "A" * 64},
+            {"kpoints_sha256": "a" * 63},
+            {"kpoints_sha256": 1},
+            {"kpoints_sha256": CustomString("a" * 64)},
+            {"nedos": 99},
+            {"nedos": 10001},
+            {"nedos": 100.0},
+            {"nedos": True},
+            {"nedos": CustomInt(100)},
+        )
+        for measurements in invalid_measurements:
+            with self.subTest(measurements=measurements):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        True,
+                        None,
+                        ({"name": "stage", "passed": True},),
+                        measurements,
+                        (self.valid_artifact(),),
+                    )
+
         report = AcceptanceReport(
             True,
             None,
-            ({"name": "artifact:POTCAR", "passed": True},),
-            {"vasp_version": "6.4.3", "vaspkit_version": "1.5.1"},
-            artifact,
+            ({"name": "stage", "passed": True},),
+            {
+                "vasp_exit_code": 17,
+                "vaspkit_version": "1.5.1",
+                "elapsed_wall_seconds": 0.0,
+                "process_tree_peak_rss_kbytes": 0,
+                "vasp_version": "6.4.2",
+                "efermi_ev": -2,
+                "kpoints_sha256": "a" * 64,
+                "nedos": 10000,
+            },
+            (self.valid_artifact(),),
         )
-        self.assertTrue(report.accepted)
+        self.assertEqual(17, report.measurements["vasp_exit_code"])
+        self.assertEqual(-2, report.measurements["efermi_ev"])
+
+    def test_generated_reports_round_trip_through_the_closed_schema(self):
+        reports = [
+            self.accept("external"),
+            self.accept("scf", scheduler_state="FAILED"),
+        ]
+        self.write_complete_outputs("scf")
+        self.write("vasp-exit-code.txt", b"17\n")
+        reports.append(self.accept("scf"))
+
+        for stage in FIXED_STAGE_ORDER:
+            self.write_complete_outputs(stage)
+            reports.append(self.accept(stage))
+
+        self.assertEqual({}, reports[0].as_dict()["measurements"])
+        self.assertEqual({}, reports[1].as_dict()["measurements"])
+        self.assertEqual(
+            {"vasp_exit_code": 17}, reports[2].as_dict()["measurements"]
+        )
+        for report in reports:
+            with self.subTest(report=report.as_dict()):
+                payload = report.as_dict()
+                reconstructed = AcceptanceReport(
+                    payload["accepted"],
+                    payload["reason_code"],
+                    tuple(payload["checks"]),
+                    payload["measurements"],
+                    tuple(payload["artifacts"]),
+                )
+                self.assertEqual(payload, reconstructed.as_dict())
 
     def test_acceptance_report_rejects_values_outside_canonical_json_domain(self):
         class MutableBox:
@@ -716,23 +924,26 @@ class ScientificAcceptanceTests(unittest.TestCase):
                     AcceptanceReport(
                         True,
                         None,
-                        ({"name": "valid", "passed": True},),
-                        {"hostile": value},
-                        (),
+                        ({"name": "stage", "passed": True},),
+                        {"vasp_exit_code": value},
+                        (self.valid_artifact(),),
                     )
 
     def test_acceptance_report_valid_domain_is_deterministic_json(self):
-        mutable_array = [{"z": 2, "a": [True, None, 1, 1.5, "text"]}]
+        measurements = {
+            "vasp_version": "6.4.3",
+            "vasp_exit_code": 0,
+            "elapsed_wall_seconds": 1.5,
+        }
         report = AcceptanceReport(
             True,
             None,
-            ({"name": "valid", "passed": True},),
-            {"nested": mutable_array},
+            ({"name": "stage", "passed": True},),
+            measurements,
             (self.valid_artifact(),),
         )
         expected = report.as_dict()
-        mutable_array[0]["z"] = 99
-        mutable_array[0]["a"].append("changed")
+        measurements["vasp_version"] = "9.9.9"
 
         self.assertEqual(expected, report.as_dict())
         self.assertEqual(
@@ -748,34 +959,43 @@ class ScientificAcceptanceTests(unittest.TestCase):
         malformed = (
             (True, None, (), artifact),
             (True, None, ({"name": "", "passed": True},), artifact),
-            (True, None, ({"name": CustomString("x"), "passed": True},), artifact),
+            (True, None, ({"name": CustomString("stage"), "passed": True},), artifact),
             (True, None, ({"name": 1, "passed": True},), artifact),
-            (True, None, ({"name": "x"},), artifact),
-            (True, None, ({"name": "x", "passed": 1},), artifact),
-            (True, None, ({"name": "x", "passed": True, "reason_code": "bad"},), artifact),
+            (True, None, ({"name": "stage"},), artifact),
+            (True, None, ({"name": "stage", "passed": 1},), artifact),
+            (True, None, ({"name": "stage", "passed": True, "reason_code": "bad"},), artifact),
             (
                 True,
                 None,
-                ({"name": "x", "passed": True}, {"name": "x", "passed": True}),
+                (
+                    {"name": "stage", "passed": True},
+                    {"name": "stage", "passed": True},
+                ),
                 artifact,
             ),
-            (False, "failure", ({"name": "x", "passed": False},), ()),
+            (False, "failure", ({"name": "stage", "passed": False},), ()),
             (
                 False,
                 "failure",
-                ({"name": "x", "passed": False, "reason_code": ""},),
+                ({"name": "stage", "passed": False, "reason_code": ""},),
                 (),
             ),
             (
                 False,
                 "failure",
-                ({"name": "x", "passed": False, "reason_code": CustomString("failure")},),
+                (
+                    {
+                        "name": "stage",
+                        "passed": False,
+                        "reason_code": CustomString("failure"),
+                    },
+                ),
                 (),
             ),
             (
                 False,
                 "first",
-                ({"name": "x", "passed": False, "reason_code": "second"},),
+                ({"name": "stage", "passed": False, "reason_code": "second"},),
                 (),
             ),
         )
@@ -787,14 +1007,14 @@ class ScientificAcceptanceTests(unittest.TestCase):
         partial = AcceptanceReport(
             False,
             "failure",
-            ({"name": "x", "passed": False, "reason_code": "failure"},),
+            ({"name": "stage", "passed": False, "reason_code": "failure"},),
             {},
             (),
         )
         self.assertFalse(partial.accepted)
 
     def test_acceptance_report_enforces_canonical_artifact_schema_and_order(self):
-        checks = ({"name": "x", "passed": True},)
+        checks = ({"name": "stage", "passed": True},)
         malformed_artifacts = (
             (),
             ({"name": "", "sha256": "a" * 64, "size_bytes": 1},),

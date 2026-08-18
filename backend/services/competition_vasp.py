@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from numbers import Real
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from typing import BinaryIO, Callable, Final
@@ -33,8 +33,7 @@ _REQUIRED_FILES: Final = (
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _SYMBOL_RE: Final = re.compile(r"^[A-Za-z0-9_]+$")
 _REASON_CODE_RE: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$", re.ASCII)
-_POTCAR_CONTENT_RE: Final = re.compile(r"(?:^|[\r\n])\s*TITEL\s*=", re.IGNORECASE)
-_VERSION_RE: Final = re.compile(r"(?<![0-9.])(\d+\.\d+\.\d+)(?![0-9.])")
+_VERSION_RE: Final = re.compile(r"(?<![0-9.])([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])")
 _VASPKIT_BANNER_RE: Final = re.compile(
     r"^VASPKIT Standard Edition (?P<version>\d+\.\d+\.\d+)$"
 )
@@ -73,6 +72,51 @@ _POTCAR_ACCEPTANCE_EVIDENCE: Final = (
     "POTCAR.spec",
     "POTCAR",
     "potcar-source-sha256.txt",
+)
+_FIXED_ACCEPTANCE_CHECK_NAMES: Final = frozenset(
+    {
+        "stage",
+        "scheduler_state",
+        "scheduler_exit_code",
+        "attempt_directory",
+        "vasp_exit_code",
+        "vaspkit_version",
+        "potcar",
+        "runtime_evidence",
+        "outcar",
+        "parser_snapshot",
+        "vasprun",
+        "electronic_convergence",
+        "ionic_convergence",
+        "contcar",
+        "scf_efermi",
+        "band_kpoints",
+        "dos_kpoints",
+        "dos_nedos",
+        "evidence_stability",
+    }
+)
+_ACCEPTANCE_ARTIFACT_NAMES: Final = frozenset(
+    name
+    for required_outputs in STAGE_REQUIRED_OUTPUTS.values()
+    for name in required_outputs
+) | frozenset(
+    (*_COMMON_ACCEPTANCE_EVIDENCE, *_POTCAR_ACCEPTANCE_EVIDENCE, "KPOINTS", "INCAR")
+)
+_ACCEPTANCE_CHECK_NAMES: Final = _FIXED_ACCEPTANCE_CHECK_NAMES | frozenset(
+    f"artifact:{name}" for name in _ACCEPTANCE_ARTIFACT_NAMES
+)
+_ACCEPTANCE_MEASUREMENT_NAMES: Final = frozenset(
+    {
+        "vasp_exit_code",
+        "vaspkit_version",
+        "elapsed_wall_seconds",
+        "process_tree_peak_rss_kbytes",
+        "vasp_version",
+        "efermi_ev",
+        "kpoints_sha256",
+        "nedos",
+    }
 )
 _O_BINARY: Final = getattr(os, "O_BINARY", 0)
 _O_CLOEXEC: Final = getattr(os, "O_CLOEXEC", 0)
@@ -116,26 +160,33 @@ def _deep_thaw(value: object) -> object:
     return value
 
 
-def _validate_report_strings(value: object) -> None:
-    if isinstance(value, Mapping):
-        for key, item in value.items():
-            _validate_report_strings(key)
-            _validate_report_strings(item)
-        return
-    if isinstance(value, tuple):
-        for item in value:
-            _validate_report_strings(item)
-        return
-    if type(value) is str and (
-        PurePosixPath(value).is_absolute()
-        or PureWindowsPath(value).is_absolute()
-        or _POTCAR_CONTENT_RE.search(value) is not None
-    ):
-        raise ValueError("reports cannot contain absolute paths or POTCAR content")
-
-
 def _valid_reason_code(value: object) -> bool:
     return type(value) is str and _REASON_CODE_RE.fullmatch(value) is not None
+
+
+def _validate_acceptance_measurements(measurements: Mapping[str, object]) -> None:
+    if not set(measurements).issubset(_ACCEPTANCE_MEASUREMENT_NAMES):
+        raise ValueError("measurements require the canonical schema")
+    for name, value in measurements.items():
+        valid = False
+        if name == "vasp_exit_code":
+            valid = type(value) is int and value >= 0
+        elif name in {"vaspkit_version", "vasp_version"}:
+            valid = type(value) is str and _VERSION_RE.fullmatch(value) is not None
+        elif name == "elapsed_wall_seconds":
+            valid = type(value) is float and math.isfinite(value) and value >= 0
+        elif name == "process_tree_peak_rss_kbytes":
+            valid = type(value) is int and value >= 0
+        elif name == "efermi_ev":
+            valid = type(value) is int or (
+                type(value) is float and math.isfinite(value)
+            )
+        elif name == "kpoints_sha256":
+            valid = type(value) is str and _SHA256_RE.fullmatch(value) is not None
+        elif name == "nedos":
+            valid = type(value) is int and 100 <= value <= 10000
+        if not valid:
+            raise ValueError("measurement value is outside the canonical schema")
 
 
 @dataclass(frozen=True)
@@ -152,14 +203,13 @@ class AcceptanceReport:
         frozen_checks = _deep_freeze(self.checks)
         frozen_measurements = _deep_freeze(self.measurements)
         frozen_artifacts = _deep_freeze(self.artifacts)
-        _validate_report_strings(frozen_checks)
-        _validate_report_strings(frozen_measurements)
         if not isinstance(frozen_checks, tuple) or not all(
             isinstance(check, Mapping) for check in frozen_checks
         ):
             raise ValueError("checks must be a sequence of mappings")
         if not isinstance(frozen_measurements, Mapping):
             raise ValueError("measurements must be a mapping")
+        _validate_acceptance_measurements(frozen_measurements)
         if not isinstance(frozen_artifacts, tuple) or not all(
             isinstance(artifact, Mapping) for artifact in frozen_artifacts
         ):
@@ -176,10 +226,17 @@ class AcceptanceReport:
                 raise ValueError("check names must be unique nonempty strings")
             if type(passed) is not bool:
                 raise ValueError("check passed values must be boolean")
+            expected_keys = (
+                {"name", "passed"}
+                if passed
+                else {"name", "passed", "reason_code"}
+            )
+            if set(check) != expected_keys:
+                raise ValueError("checks require the canonical schema")
+            if name not in _ACCEPTANCE_CHECK_NAMES:
+                raise ValueError("check name is outside the acceptance vocabulary")
             check_names.add(name)
             if passed:
-                if "reason_code" in check:
-                    raise ValueError("passed checks cannot contain a reason")
                 continue
             check_reason = check.get("reason_code")
             if not _valid_reason_code(check_reason):
