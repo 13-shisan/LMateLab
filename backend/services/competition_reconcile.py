@@ -902,7 +902,25 @@ class CompetitionReconciler:
                 "submission cannot be recovered",
             ) from exc
 
-        job_id = self.slurm.read_job_receipt(run.id, attempt.id)
+        claim = AttemptClaim(
+            workflow_id=run.id,
+            step_id=step.id,
+            attempt_id=attempt.id,
+            submission=contract.submission,
+            status="submitting",
+        )
+        try:
+            job_id = self.slurm.read_job_receipt(run.id, attempt.id)
+        except ValueError as exc:
+            self._record_submission_failed(
+                session,
+                claim,
+                reason_code="submission_receipt_missing",
+            )
+            raise ReconcileError(
+                "submission_recovery_failed",
+                "submission cannot be recovered without a job receipt",
+            ) from exc
         observation = self.slurm.observe(job_id)
         expected_directory = str(
             self.slurm.prepare_attempt_directory(run.id, attempt.id).resolve()
@@ -919,13 +937,6 @@ class CompetitionReconciler:
                 "scheduler ownership evidence did not match the submission",
             )
 
-        claim = AttemptClaim(
-            workflow_id=run.id,
-            step_id=step.id,
-            attempt_id=attempt.id,
-            submission=contract.submission,
-            status="submitting",
-        )
         return self._record_submission_accepted(
             session,
             claim,

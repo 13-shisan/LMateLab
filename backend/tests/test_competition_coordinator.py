@@ -28,6 +28,7 @@ from services.competition_coordinator import (
     CoordinatorError,
     next_eligible_step,
 )
+from services.competition_attempt_inputs import prepare_attempt_inputs
 from services.competition_reconcile import CompetitionReconciler
 from services.competition_slurm import SlurmJobObservation
 from services.competition_vasp import AcceptanceReport
@@ -188,6 +189,8 @@ class FakeAcceptancePolicy:
             "band": "EIGENVAL",
             "dos": "DOSCAR",
         }[stage]
+        output_bytes = f"{stage}:{output_name}\n".encode("ascii")
+        (Path(attempt_directory) / output_name).write_bytes(output_bytes)
         return AcceptanceReport(
             accepted=True,
             reason_code=None,
@@ -199,10 +202,8 @@ class FakeAcceptancePolicy:
             artifacts=(
                 {
                     "name": output_name,
-                    "sha256": hashlib.sha256(
-                        f"{stage}:{output_name}".encode("ascii")
-                    ).hexdigest(),
-                    "size_bytes": len(stage) + len(output_name),
+                    "sha256": hashlib.sha256(output_bytes).hexdigest(),
+                    "size_bytes": len(output_bytes),
                 },
             ),
         )
@@ -266,7 +267,14 @@ class CompetitionCoordinatorTests(unittest.TestCase):
                 status=status,
                 input_sha256="a" * 64,
                 release_commit="b" * 40,
-                metadata_json={},
+                metadata_json={
+                    "normalized_payload": {
+                        "parameters": {},
+                        "source_kind": "builtin",
+                        "steps": list(FIXED_STEPS),
+                        "template_version": "mos2_v1",
+                    }
+                },
             )
             session.add(run)
             session.flush()
@@ -297,16 +305,49 @@ class CompetitionCoordinatorTests(unittest.TestCase):
             values["workflow_id"], values["attempt_id"]
         )
 
-    def new_coordinator(self, *, acceptance=None):
+    def new_coordinator(self, *, acceptance=None, prepare_inputs=None):
         return CompetitionCoordinator(
             session_factory=self.SessionLocal,
             reconciler=self.reconciler,
             workflow_root=self.workflow_root,
             vasp_script=self.vasp_script,
-            prepare_inputs=self.prepare_inputs,
+            prepare_inputs=prepare_inputs or self.prepare_inputs,
             accept_attempt=acceptance or self.acceptance,
             batch_limit=16,
         )
+
+    def seed_stage5_inputs(self):
+        names = {
+            "relax": ("INCAR", "KPOINTS", "POSCAR", "POTCAR.spec"),
+            "scf": ("INCAR", "KPOINTS", "POTCAR.spec"),
+            "band": ("INCAR", "KPOINTS", "POTCAR.spec"),
+            "dos": ("INCAR", "KPOINTS", "POTCAR.spec"),
+        }
+        with self.SessionLocal() as session:
+            for step_key, filenames in names.items():
+                for filename in filenames:
+                    content = f"{step_key}:{filename}\n".encode("ascii")
+                    relative_path = f"{self.workflow_id}/generated/{step_key}/{filename}"
+                    path = self.workflow_root / relative_path
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(content)
+                    session.add(
+                        WorkflowFile(
+                            id=str(uuid.uuid4()),
+                            workflow_id=self.workflow_id,
+                            attempt_id=None,
+                            owner_id=self.owner_id,
+                            relative_path=relative_path,
+                            size_bytes=len(content),
+                            sha256=hashlib.sha256(content).hexdigest(),
+                            source_kind="generated",
+                            metadata_json={
+                                "logical_path": f"{step_key}/{filename}",
+                                "step_key": step_key,
+                            },
+                        )
+                    )
+            session.commit()
 
     def latest_attempt(self, step_key, workflow_id=None):
         workflow_id = workflow_id or self.workflow_id
@@ -445,6 +486,57 @@ class CompetitionCoordinatorTests(unittest.TestCase):
             ]
             self.assertEqual(4, len(accepted))
 
+    def test_accepted_outputs_feed_real_scf_band_and_dos_input_preparation(self):
+        self.seed_stage5_inputs()
+        coordinator = self.new_coordinator(prepare_inputs=prepare_attempt_inputs)
+        coordinator.start(self.workflow_id, self.owner_id)
+
+        relax = self.latest_attempt("relax")
+        self.slurm.set_state(
+            relax.id,
+            "succeeded",
+            raw_state="COMPLETED",
+            exit_code="0:0",
+        )
+        first_tick = coordinator.tick_once()
+        with self.SessionLocal() as session:
+            output = session.scalar(
+                select(WorkflowFile).where(
+                    WorkflowFile.attempt_id == relax.id,
+                    WorkflowFile.source_kind == "attempt_output",
+                )
+            )
+            self.assertIs(json.loads(output.metadata_json).get("accepted"), True)
+        self.assertEqual(0, first_tick.failures)
+        scf = self.latest_attempt("scf")
+        relax_contcar = Path(relax.working_directory) / "CONTCAR"
+        self.assertEqual(relax_contcar.read_bytes(), (Path(scf.working_directory) / "POSCAR").read_bytes())
+
+        self.slurm.set_state(
+            scf.id,
+            "succeeded",
+            raw_state="COMPLETED",
+            exit_code="0:0",
+        )
+        self.assertEqual(0, coordinator.tick_once().failures)
+        band = self.latest_attempt("band")
+        scf_directory = Path(scf.working_directory)
+        band_directory = Path(band.working_directory)
+        self.assertEqual((scf_directory / "POSCAR").read_bytes(), (band_directory / "POSCAR").read_bytes())
+        self.assertEqual((scf_directory / "CHGCAR").read_bytes(), (band_directory / "CHGCAR").read_bytes())
+
+        self.slurm.set_state(
+            band.id,
+            "succeeded",
+            raw_state="COMPLETED",
+            exit_code="0:0",
+        )
+        self.assertEqual(0, coordinator.tick_once().failures)
+        dos = self.latest_attempt("dos")
+        dos_directory = Path(dos.working_directory)
+        self.assertEqual((scf_directory / "POSCAR").read_bytes(), (dos_directory / "POSCAR").read_bytes())
+        self.assertEqual((scf_directory / "CHGCAR").read_bytes(), (dos_directory / "CHGCAR").read_bytes())
+
     def test_scf_scientific_failure_blocks_band_and_dos_without_artifacts(self):
         self.start()
         self.complete("relax")
@@ -517,7 +609,7 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         self.assertEqual(1, self.attempt_count())
         self.assertEqual("cancelled", self.run_status())
 
-    def test_cancel_completion_race_is_accepted_but_never_advances(self):
+    def test_committed_cancellation_intent_blocks_acceptance_and_advance(self):
         self.start()
         relax = self.latest_attempt("relax")
         self.slurm.set_state(
@@ -532,7 +624,7 @@ class CompetitionCoordinatorTests(unittest.TestCase):
             attempt = session.get(WorkflowAttempt, relax.id)
             metadata = json.loads(attempt.metadata_json)
             metadata["cancel_result"] = {
-                "result": "raced_terminal",
+                "result": "requested",
                 "observed_at": datetime.now(timezone.utc).isoformat(),
             }
             attempt.metadata_json = metadata
@@ -540,10 +632,31 @@ class CompetitionCoordinatorTests(unittest.TestCase):
 
         self.coordinator.tick_once()
 
-        self.assertEqual("succeeded", self.latest_attempt("relax").status)
+        self.assertEqual("cancelled", self.latest_attempt("relax").status)
+        self.assertEqual([], self.acceptance.calls)
         self.assertEqual(["relax"], self.slurm.submitted_steps)
         self.assertEqual(0, self.attempt_count("scf"))
         self.assertEqual("cancelled", self.run_status())
+        with self.SessionLocal() as session:
+            self.assertEqual(
+                0,
+                session.scalar(
+                    select(func.count())
+                    .select_from(WorkflowFile)
+                    .where(WorkflowFile.attempt_id == relax.id)
+                ),
+            )
+            self.assertEqual(
+                0,
+                session.scalar(
+                    select(func.count())
+                    .select_from(WorkflowEvent)
+                    .where(
+                        WorkflowEvent.workflow_id == self.workflow_id,
+                        WorkflowEvent.event_type == "scientific_acceptance_completed",
+                    )
+                ),
+            )
 
     def test_concurrent_cancel_commit_wins_over_stale_reconciliation(self):
         self.start()
@@ -757,6 +870,61 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         recovered = self.latest_attempt("relax")
         self.assertEqual(("queued", job_id), (recovered.status, recovered.slurm_job_id))
 
+    def test_restart_fails_closed_when_submitting_has_no_job_receipt(self):
+        with self.SessionLocal() as session:
+            claim = self.reconciler.claim_attempt(
+                session,
+                self.workflow_id,
+                step_key="relax",
+                runner_kind="vasp",
+                runner_mode="relax",
+                script_path=self.vasp_script,
+                claimable_run_statuses=frozenset({"validated"}),
+            )
+            self.prepare_inputs(
+                session,
+                self.workflow_root,
+                owner_id=self.owner_id,
+                workflow_id=self.workflow_id,
+                step_key="relax",
+                attempt_id=claim.attempt_id,
+                template_version="mos2_v1",
+                release_commit="b" * 40,
+            )
+            promoted = self.reconciler.promote_claim(
+                session,
+                claim,
+                claimable_run_statuses=frozenset({"validated"}),
+                event_type="submission_started",
+            )
+        self.assertEqual("submitting", promoted.status)
+        self.assertEqual([], self.slurm.submitted_steps)
+        self.assertFalse((promoted.submission.attempt_directory / "job-id.receipt").exists())
+
+        first_tick = self.new_coordinator().tick_once()
+        second_tick = self.new_coordinator().tick_once()
+
+        self.assertEqual(1, first_tick.failures)
+        self.assertEqual(0, second_tick.failures)
+        self.assertEqual([], self.slurm.submitted_steps)
+        with self.SessionLocal() as session:
+            attempt = session.get(WorkflowAttempt, promoted.attempt_id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.assertEqual(
+                ("submission_failed", "failed", "failed"),
+                (attempt.status, step.status, run.status),
+            )
+            event_row = session.scalar(
+                select(WorkflowEvent)
+                .where(WorkflowEvent.event_type == "submission_failed")
+                .order_by(WorkflowEvent.sequence.desc())
+            )
+            self.assertEqual(
+                "submission_receipt_missing",
+                json.loads(event_row.payload_json)["reason_code"],
+            )
+
     def test_restart_reconciles_queued_and_running_attempts(self):
         for desired_state in ("queued", "running"):
             with self.subTest(desired_state=desired_state):
@@ -848,6 +1016,29 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         with self.assertRaises(CoordinatorError) as unvalidated:
             self.coordinator.start(invalid, self.owner_id)
         self.assertEqual("workflow_not_startable", unvalidated.exception.code)
+
+    def test_start_revalidates_fixed_material_template_and_source_provenance(self):
+        cases = (
+            ("material", "MoSe2"),
+            ("template_version", "foreign_v1"),
+            ("source_kind", "upload"),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                workflow_id = self.create_workflow()
+                with self.SessionLocal() as session:
+                    run = session.get(WorkflowRun, workflow_id)
+                    setattr(run, field, value)
+                    session.commit()
+
+                with self.assertRaises(CoordinatorError) as raised:
+                    self.coordinator.start(workflow_id, self.owner_id)
+
+                self.assertEqual("workflow_scope_invalid", raised.exception.code)
+                self.assertEqual(0, self.attempt_count(workflow_id=workflow_id))
+        self.assertEqual([], self.slurm.submitted_steps)
+        self.assertEqual([], self.prepared_steps)
+        self.assertEqual([], list(self.workflow_root.rglob("attempts")))
 
 
 if __name__ == "__main__":

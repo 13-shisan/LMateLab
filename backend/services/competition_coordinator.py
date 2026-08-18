@@ -19,6 +19,12 @@ from models_workflow import (
     canonical_json,
 )
 from services.competition_attempt_inputs import prepare_attempt_inputs
+from services.competition_inputs import (
+    InputValidationError,
+    TEMPLATE_VERSION,
+    load_template,
+    validate_draft_payload,
+)
 from services.competition_reconcile import CompetitionReconciler, ReconcileError
 from services.competition_vasp import (
     AcceptanceReport,
@@ -157,6 +163,34 @@ class CompetitionCoordinator:
         )
 
     @staticmethod
+    def _validate_execution_scope(run: WorkflowRun) -> None:
+        try:
+            template = load_template(TEMPLATE_VERSION)
+            metadata = json.loads(run.metadata_json)
+            normalized_payload = metadata.get("normalized_payload")
+            validated = validate_draft_payload(normalized_payload)
+        except (
+            AttributeError,
+            InputValidationError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise CoordinatorError(
+                "workflow_scope_invalid",
+                "workflow is outside the fixed execution scope",
+            ) from exc
+        if (
+            run.template_version != TEMPLATE_VERSION
+            or run.material != template.get("material")
+            or validated["template_version"] != run.template_version
+            or validated["source_kind"] != run.source_kind
+        ):
+            raise CoordinatorError(
+                "workflow_scope_invalid",
+                "workflow is outside the fixed execution scope",
+            )
+
+    @staticmethod
     def _has_cancellation_intent(session: Session, workflow_id: str) -> bool:
         metadata_values = session.scalars(
             select(WorkflowAttempt.metadata_json)
@@ -213,6 +247,7 @@ class CompetitionCoordinator:
             run = session.get(WorkflowRun, workflow_id)
             if run is None or run.owner_id != owner_id:
                 raise CoordinatorError("workflow_not_found", "workflow was not found")
+            self._validate_execution_scope(run)
             self._step_statuses(session, workflow_id)
             existing = self._latest_attempt(session, workflow_id)
             if existing is not None:
@@ -387,6 +422,55 @@ class CompetitionCoordinator:
                     "acceptance_ledger_invalid",
                     "attempt cannot be scientifically accepted",
                 ) from exc
+            cancel_result = metadata.get("cancel_result")
+            if (
+                isinstance(cancel_result, dict)
+                and cancel_result.get("result") in _CANCELLATION_RESULTS
+            ):
+                attempt_cancelled = session.execute(
+                    update(WorkflowAttempt)
+                    .where(
+                        WorkflowAttempt.id == attempt.id,
+                        WorkflowAttempt.status == "awaiting_acceptance",
+                        WorkflowAttempt.slurm_job_id == attempt.slurm_job_id,
+                        WorkflowAttempt.metadata_json == attempt.metadata_json,
+                    )
+                    .values(status="cancelled")
+                    .execution_options(synchronize_session=False)
+                )
+                step_cancelled = session.execute(
+                    update(WorkflowStep)
+                    .where(
+                        WorkflowStep.id == step.id,
+                        WorkflowStep.status == "awaiting_acceptance",
+                    )
+                    .values(status="cancelled")
+                    .execution_options(synchronize_session=False)
+                )
+                run_cancelled = session.execute(
+                    update(WorkflowRun)
+                    .where(
+                        WorkflowRun.id == run.id,
+                        WorkflowRun.status == run.status,
+                    )
+                    .values(status="cancelled")
+                    .execution_options(synchronize_session=False)
+                )
+                if (
+                    attempt_cancelled.rowcount,
+                    step_cancelled.rowcount,
+                    run_cancelled.rowcount,
+                ) != (1, 1, 1):
+                    session.rollback()
+                    return False
+                append_workflow_event(
+                    session,
+                    workflow_id=run.id,
+                    event_type="workflow_status_changed",
+                    payload={"status": "cancelled"},
+                )
+                session.commit()
+                return False
             observation = metadata.get("scheduler_observation")
             if (
                 not isinstance(observation, dict)
@@ -505,6 +589,7 @@ class CompetitionCoordinator:
                         sha256=artifact["sha256"],
                         source_kind="attempt_output",
                         metadata_json={
+                            "accepted": True,
                             "logical_path": name,
                             "step_key": step.step_key,
                             "output_role": "scientific_acceptance_evidence",
