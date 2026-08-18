@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from numbers import Real
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from typing import BinaryIO, Callable, Final
@@ -32,6 +32,8 @@ _REQUIRED_FILES: Final = (
 )
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _SYMBOL_RE: Final = re.compile(r"^[A-Za-z0-9_]+$")
+_REASON_CODE_RE: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$", re.ASCII)
+_POTCAR_CONTENT_RE: Final = re.compile(r"(?:^|[\r\n])\s*TITEL\s*=", re.IGNORECASE)
 _VERSION_RE: Final = re.compile(r"(?<![0-9.])(\d+\.\d+\.\d+)(?![0-9.])")
 _VASPKIT_BANNER_RE: Final = re.compile(
     r"^VASPKIT Standard Edition (?P<version>\d+\.\d+\.\d+)$"
@@ -114,6 +116,28 @@ def _deep_thaw(value: object) -> object:
     return value
 
 
+def _validate_report_strings(value: object) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _validate_report_strings(key)
+            _validate_report_strings(item)
+        return
+    if isinstance(value, tuple):
+        for item in value:
+            _validate_report_strings(item)
+        return
+    if type(value) is str and (
+        PurePosixPath(value).is_absolute()
+        or PureWindowsPath(value).is_absolute()
+        or _POTCAR_CONTENT_RE.search(value) is not None
+    ):
+        raise ValueError("reports cannot contain absolute paths or POTCAR content")
+
+
+def _valid_reason_code(value: object) -> bool:
+    return type(value) is str and _REASON_CODE_RE.fullmatch(value) is not None
+
+
 @dataclass(frozen=True)
 class AcceptanceReport:
     accepted: bool
@@ -128,6 +152,8 @@ class AcceptanceReport:
         frozen_checks = _deep_freeze(self.checks)
         frozen_measurements = _deep_freeze(self.measurements)
         frozen_artifacts = _deep_freeze(self.artifacts)
+        _validate_report_strings(frozen_checks)
+        _validate_report_strings(frozen_measurements)
         if not isinstance(frozen_checks, tuple) or not all(
             isinstance(check, Mapping) for check in frozen_checks
         ):
@@ -156,7 +182,7 @@ class AcceptanceReport:
                     raise ValueError("passed checks cannot contain a reason")
                 continue
             check_reason = check.get("reason_code")
-            if type(check_reason) is not str or not check_reason:
+            if not _valid_reason_code(check_reason):
                 raise ValueError("failed checks require a reason")
             failed_checks.append(check)
 
@@ -166,8 +192,7 @@ class AcceptanceReport:
             if not frozen_artifacts:
                 raise ValueError("accepted reports require artifacts")
         elif (
-            type(self.reason_code) is not str
-            or not self.reason_code
+            not _valid_reason_code(self.reason_code)
             or not failed_checks
             or failed_checks[0]["reason_code"] != self.reason_code
         ):
@@ -269,6 +294,24 @@ class _OpenedAcceptanceEvidence:
     @property
     def size_bytes(self) -> int:
         return self.identity.st_size
+
+
+@dataclass(frozen=True)
+class _OpenedParserSnapshot:
+    path: Path
+    handle: BinaryIO
+    identity: os.stat_result
+    path_identity: os.stat_result
+    sha256: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class _OpenedParserSnapshotDirectory:
+    path: Path
+    descriptor: int | None
+    identity: os.stat_result | None
+    path_identity: os.stat_result
 
 
 DEFAULT_POTCAR_CONTRACT = PotcarContract(
@@ -595,7 +638,8 @@ def _snapshot_opened_evidence(
     opened: _OpenedAcceptanceEvidence,
     expected_artifact: Mapping[str, object],
     snapshot_directory: Path,
-) -> Path:
+    resources: ExitStack,
+) -> _OpenedParserSnapshot:
     _verify_evidence_unchanged(opened)
     expected_size = opened.identity.st_size
     if expected_size <= 0 or expected_size > opened.maximum_bytes:
@@ -629,7 +673,7 @@ def _snapshot_opened_evidence(
             raise VaspPolicyError("evidence_changed", "required evidence changed")
         snapshot_handle.close()
         snapshot_handle = None
-        snapshot_path.chmod(0o600)
+        snapshot_path.chmod(0o400)
         snapshot_identity = snapshot_path.lstat()
     except VaspPolicyError:
         raise
@@ -655,7 +699,203 @@ def _snapshot_opened_evidence(
         or snapshot_identity.st_size != expected_size
     ):
         raise VaspPolicyError("evidence_changed", "required evidence changed")
-    return snapshot_path
+    descriptor = None
+    snapshot_handle = None
+    try:
+        descriptor = os.open(
+            snapshot_path,
+            os.O_RDONLY | _O_BINARY | _O_CLOEXEC | _O_NONBLOCK | _O_NOFOLLOW,
+        )
+        descriptor_identity = os.fstat(descriptor)
+        if (
+            stat.S_ISLNK(snapshot_identity.st_mode)
+            or not stat.S_ISREG(descriptor_identity.st_mode)
+            or not _same_file_identity(snapshot_identity, descriptor_identity)
+            or not _private_evidence_mode(descriptor_identity)
+        ):
+            raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed")
+        snapshot_handle = os.fdopen(descriptor, "rb", closefd=True)
+        descriptor = None
+    except VaspPolicyError:
+        _close_handle(snapshot_handle)
+        _close_descriptor(descriptor)
+        raise
+    except (OSError, ValueError):
+        _close_handle(snapshot_handle)
+        _close_descriptor(descriptor)
+        raise VaspPolicyError(
+            "evidence_snapshot_failed", "parser evidence snapshot could not be opened"
+        ) from None
+    resources.callback(_close_handle, snapshot_handle)
+    return _OpenedParserSnapshot(
+        path=snapshot_path,
+        handle=snapshot_handle,
+        identity=descriptor_identity,
+        path_identity=snapshot_identity,
+        sha256=copied_artifact["sha256"],
+        size_bytes=copied_size,
+    )
+
+
+def _parser_snapshot_directory_signature(
+    identity: os.stat_result,
+) -> tuple[int, int, int, int, int, int]:
+    return (
+        identity.st_dev,
+        identity.st_ino,
+        identity.st_mode,
+        identity.st_size,
+        identity.st_mtime_ns,
+        identity.st_ctime_ns,
+    )
+
+
+def _restore_parser_snapshot_permissions(
+    directory_descriptor: int,
+    snapshots: tuple[_OpenedParserSnapshot, ...],
+) -> None:
+    for snapshot in snapshots:
+        try:
+            os.fchmod(snapshot.handle.fileno(), 0o600)
+        except (OSError, ValueError):
+            pass
+    try:
+        os.fchmod(directory_descriptor, 0o700)
+    except OSError:
+        pass
+
+
+def _seal_parser_snapshot_directory(
+    snapshot_directory: Path,
+    snapshots: tuple[_OpenedParserSnapshot, ...],
+    resources: ExitStack,
+) -> _OpenedParserSnapshotDirectory:
+    if os.name == "nt":
+        try:
+            path_identity = snapshot_directory.lstat()
+        except OSError:
+            raise VaspPolicyError(
+                "evidence_snapshot_failed", "parser evidence snapshot could not be sealed"
+            ) from None
+        if not stat.S_ISDIR(path_identity.st_mode):
+            raise VaspPolicyError(
+                "evidence_snapshot_failed", "parser evidence snapshot is not private"
+            )
+        return _OpenedParserSnapshotDirectory(
+            path=snapshot_directory,
+            descriptor=None,
+            identity=None,
+            path_identity=path_identity,
+        )
+
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            snapshot_directory,
+            os.O_RDONLY | _O_BINARY | _O_CLOEXEC | _O_DIRECTORY | _O_NOFOLLOW,
+        )
+        descriptor_identity = os.fstat(descriptor)
+        path_identity = snapshot_directory.lstat()
+        if (
+            stat.S_ISLNK(path_identity.st_mode)
+            or not stat.S_ISDIR(path_identity.st_mode)
+            or not stat.S_ISDIR(descriptor_identity.st_mode)
+            or not _same_file_identity(path_identity, descriptor_identity)
+            or not _private_evidence_mode(path_identity)
+            or not _private_evidence_mode(descriptor_identity)
+        ):
+            raise VaspPolicyError(
+                "evidence_snapshot_failed", "parser evidence snapshot is not private"
+            )
+        os.fchmod(descriptor, 0o500)
+        sealed_path_identity = snapshot_directory.lstat()
+        sealed_descriptor_identity = os.fstat(descriptor)
+        if not _same_file_identity(sealed_path_identity, sealed_descriptor_identity):
+            raise VaspPolicyError(
+                "evidence_snapshot_failed", "parser evidence snapshot could not be sealed"
+            )
+    except VaspPolicyError:
+        _close_descriptor(descriptor)
+        raise
+    except OSError:
+        _close_descriptor(descriptor)
+        raise VaspPolicyError(
+            "evidence_snapshot_failed", "parser evidence snapshot could not be sealed"
+        ) from None
+    resources.callback(_close_descriptor, descriptor)
+    resources.callback(
+        _restore_parser_snapshot_permissions, descriptor, snapshots
+    )
+    return _OpenedParserSnapshotDirectory(
+        path=snapshot_directory,
+        descriptor=descriptor,
+        identity=sealed_descriptor_identity,
+        path_identity=sealed_path_identity,
+    )
+
+
+def _verify_parser_snapshot(
+    snapshot: _OpenedParserSnapshot,
+    directory: _OpenedParserSnapshotDirectory,
+) -> None:
+    def verify_identity() -> None:
+        try:
+            descriptor_identity = os.fstat(snapshot.handle.fileno())
+            path_identity = snapshot.path.lstat()
+            directory_path_identity = directory.path.lstat()
+            directory_descriptor_identity = (
+                os.fstat(directory.descriptor)
+                if directory.descriptor is not None
+                else None
+            )
+        except (OSError, ValueError):
+            raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed") from None
+        if (
+            stat.S_ISLNK(path_identity.st_mode)
+            or not stat.S_ISREG(path_identity.st_mode)
+            or not stat.S_ISREG(descriptor_identity.st_mode)
+            or not stat.S_ISDIR(directory_path_identity.st_mode)
+            or not _same_file_identity(snapshot.identity, descriptor_identity)
+            or not _same_file_identity(snapshot.path_identity, path_identity)
+            or not _same_file_identity(directory.path_identity, directory_path_identity)
+            or _evidence_signature(snapshot.identity) != _evidence_signature(descriptor_identity)
+            or _evidence_signature(snapshot.path_identity) != _evidence_signature(path_identity)
+            or _parser_snapshot_directory_signature(directory.path_identity)
+            != _parser_snapshot_directory_signature(directory_path_identity)
+            or (
+                directory.identity is not None
+                and directory_descriptor_identity is not None
+                and (
+                    not stat.S_ISDIR(directory_descriptor_identity.st_mode)
+                    or not _same_file_identity(
+                        directory.identity, directory_descriptor_identity
+                    )
+                    or _parser_snapshot_directory_signature(directory.identity)
+                    != _parser_snapshot_directory_signature(
+                        directory_descriptor_identity
+                    )
+                )
+            )
+        ):
+            raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed")
+
+    verify_identity()
+    digest = hashlib.sha256()
+    size_bytes = 0
+    try:
+        snapshot.handle.seek(0)
+        while chunk := snapshot.handle.read(_HASH_CHUNK_BYTES):
+            size_bytes += len(chunk)
+            if size_bytes > snapshot.size_bytes:
+                raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed")
+            digest.update(chunk)
+    except VaspPolicyError:
+        raise
+    except (OSError, ValueError, MemoryError):
+        raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed") from None
+    verify_identity()
+    if size_bytes != snapshot.size_bytes or digest.hexdigest() != snapshot.sha256:
+        raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed")
 
 
 def _read_acceptance_metadata(opened: _OpenedAcceptanceEvidence) -> bytes:
@@ -777,38 +1017,56 @@ def _parse_outcar(opened: _OpenedAcceptanceEvidence) -> str:
     return versions[0]
 
 
-def _parse_vasprun_xml(snapshot_path: Path) -> None:
+def _parse_vasprun_xml(
+    snapshot: _OpenedParserSnapshot,
+    directory: _OpenedParserSnapshotDirectory,
+) -> None:
+    _verify_parser_snapshot(snapshot, directory)
     try:
-        for _event, element in ElementTree.iterparse(snapshot_path, events=("end",)):
+        for _event, element in ElementTree.iterparse(snapshot.path, events=("end",)):
             element.clear()
     except (ElementTree.ParseError, OSError, ValueError, MemoryError):
+        _verify_parser_snapshot(snapshot, directory)
         raise VaspPolicyError("vasprun_unparseable", "vasprun.xml is incomplete or invalid") from None
+    _verify_parser_snapshot(snapshot, directory)
 
 
 def _load_vasprun(
     opened: _OpenedAcceptanceEvidence,
-    snapshot_path: Path,
+    snapshot: _OpenedParserSnapshot,
+    directory: _OpenedParserSnapshotDirectory,
     loader: Callable[[Path], object],
 ) -> object:
     _verify_evidence_unchanged(opened)
+    _verify_parser_snapshot(snapshot, directory)
     try:
-        parsed = loader(snapshot_path)
-    except (Exception, MemoryError):
+        parsed = loader(snapshot.path)
+    except (Exception, MemoryError) as error:
+        _verify_parser_snapshot(snapshot, directory)
+        if isinstance(error, PermissionError):
+            raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed") from None
         raise VaspPolicyError("vasprun_unparseable", "vasprun.xml could not be parsed") from None
+    _verify_parser_snapshot(snapshot, directory)
     _verify_evidence_unchanged(opened)
     return parsed
 
 
 def _load_contcar(
     opened: _OpenedAcceptanceEvidence,
-    snapshot_path: Path,
+    snapshot: _OpenedParserSnapshot,
+    directory: _OpenedParserSnapshotDirectory,
     loader: Callable[[Path], object],
 ) -> None:
     _verify_evidence_unchanged(opened)
+    _verify_parser_snapshot(snapshot, directory)
     try:
-        loader(snapshot_path)
-    except Exception:
+        loader(snapshot.path)
+    except Exception as error:
+        _verify_parser_snapshot(snapshot, directory)
+        if isinstance(error, PermissionError):
+            raise VaspPolicyError("evidence_changed", "parser evidence snapshot changed") from None
         raise VaspPolicyError("contcar_unparseable", "CONTCAR could not be parsed") from None
+    _verify_parser_snapshot(snapshot, directory)
     _verify_evidence_unchanged(opened)
 
 
@@ -972,10 +1230,13 @@ def accept_vasp_attempt(
             )
             parser_snapshots = {
                 name: _snapshot_opened_evidence(
-                    opened_files[name], artifacts_by_name[name], snapshot_directory
+                    opened_files[name], artifacts_by_name[name], snapshot_directory, resources
                 )
                 for name in parser_snapshot_names
             }
+            parser_snapshot_directory = _seal_parser_snapshot_directory(
+                snapshot_directory, tuple(parser_snapshots.values()), resources
+            )
         except VaspPolicyError as error:
             return _failed_acceptance(
                 check_name="parser_snapshot", reason_code=error.code, checks=checks,
@@ -983,10 +1244,13 @@ def accept_vasp_attempt(
             )
 
         try:
-            _parse_vasprun_xml(parser_snapshots["vasprun.xml"])
+            _parse_vasprun_xml(
+                parser_snapshots["vasprun.xml"], parser_snapshot_directory
+            )
             vasprun = _load_vasprun(
                 opened_files["vasprun.xml"],
                 parser_snapshots["vasprun.xml"],
+                parser_snapshot_directory,
                 vasprun_loader or _default_vasprun_loader,
             )
         except VaspPolicyError as error:
@@ -1014,6 +1278,7 @@ def accept_vasp_attempt(
                 _load_contcar(
                     opened_files["CONTCAR"],
                     parser_snapshots["CONTCAR"],
+                    parser_snapshot_directory,
                     structure_loader or _default_structure_loader,
                 )
             except VaspPolicyError as error:

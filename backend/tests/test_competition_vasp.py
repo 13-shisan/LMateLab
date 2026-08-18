@@ -613,6 +613,86 @@ class ScientificAcceptanceTests(unittest.TestCase):
         self.assertTrue(accepted.accepted)
         self.assertIsNone(accepted.reason_code)
 
+    def test_acceptance_report_reason_codes_are_bounded_stable_tokens(self):
+        invalid_reason_codes = (
+            "C:\\licensed\\POTCAR",
+            "/licensed/POTCAR",
+            "../POTCAR",
+            "TITEL = PAW_PBE Mo_sv 02Feb2006",
+            "Uppercase",
+            "contains whitespace",
+            "colon:content",
+            "x" * 65,
+        )
+        for reason_code in invalid_reason_codes:
+            with self.subTest(reason_code=reason_code):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        False,
+                        reason_code,
+                        ({"name": "x", "passed": False, "reason_code": reason_code},),
+                        {},
+                        (),
+                    )
+
+    def test_acceptance_report_validates_every_failed_check_reason_code(self):
+        invalid_reason_codes = (
+            "C:\\licensed\\POTCAR",
+            "/licensed/POTCAR",
+            "../POTCAR",
+            "TITEL = PAW_PBE Mo_sv 02Feb2006",
+        )
+        for reason_code in invalid_reason_codes:
+            with self.subTest(reason_code=reason_code):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        False,
+                        "first_failure",
+                        (
+                            {
+                                "name": "first",
+                                "passed": False,
+                                "reason_code": "first_failure",
+                            },
+                            {"name": "second", "passed": False, "reason_code": reason_code},
+                        ),
+                        {},
+                        (),
+                    )
+
+    def test_acceptance_report_rejects_sensitive_check_and_measurement_strings(self):
+        sensitive_strings = (
+            "C:\\licensed\\POTCAR",
+            "/licensed/POTCAR",
+            "TITEL  = PAW_PBE Mo_sv 02Feb2006\nTITEL  = PAW_PBE S 06Sep2000",
+        )
+        artifact = (self.valid_artifact("POTCAR"),)
+        for sensitive in sensitive_strings:
+            for field in ("check", "measurement"):
+                with self.subTest(sensitive=sensitive, field=field):
+                    checks = (
+                        {
+                            "name": "artifact:POTCAR",
+                            "passed": True,
+                            "details": {"value": sensitive if field == "check" else "POTCAR"},
+                        },
+                    )
+                    measurements = {
+                        "vasp_version": sensitive if field == "measurement" else "6.4.3",
+                        "vaspkit_version": "1.5.1",
+                    }
+                    with self.assertRaises(ValueError):
+                        AcceptanceReport(True, None, checks, measurements, artifact)
+
+        report = AcceptanceReport(
+            True,
+            None,
+            ({"name": "artifact:POTCAR", "passed": True},),
+            {"vasp_version": "6.4.3", "vaspkit_version": "1.5.1"},
+            artifact,
+        )
+        self.assertTrue(report.accepted)
+
     def test_acceptance_report_rejects_values_outside_canonical_json_domain(self):
         class MutableBox:
             def __init__(self):
@@ -998,6 +1078,115 @@ class ScientificAcceptanceTests(unittest.TestCase):
         self.assertNotEqual(self.root, observed["contcar_path"].parent)
         self.assertFalse(observed["vasprun_path"].exists())
         self.assertFalse(observed["contcar_path"].exists())
+
+    def test_vasprun_loader_rejects_in_place_snapshot_mutation(self):
+        self.write_complete_outputs("scf")
+        alternate = b"vasprun snapshot changed after hashing"
+
+        def mutating_loader(path):
+            path.write_bytes(alternate)
+            return self.fake_vasprun()
+
+        report = self.assert_rejected(
+            "evidence_changed", "scf", vasprun_loader=mutating_loader
+        )
+        self.assertNotIn(alternate.decode("ascii"), json.dumps(report.as_dict()))
+
+    def test_contcar_loader_rejects_in_place_snapshot_mutation(self):
+        self.write_complete_outputs("relax")
+        alternate = b"CONTCAR snapshot changed after hashing"
+
+        def mutating_loader(path):
+            path.write_bytes(alternate)
+            return object()
+
+        report = self.assert_rejected(
+            "evidence_changed", "relax", structure_loader=mutating_loader
+        )
+        self.assertNotIn(alternate.decode("ascii"), json.dumps(report.as_dict()))
+
+    def test_vasprun_loader_rejects_snapshot_path_replacement(self):
+        self.write_complete_outputs("scf")
+        alternate = b"replacement vasprun snapshot"
+
+        def replacing_loader(path):
+            replacement = path.with_name(path.name + ".replacement")
+            replacement.write_bytes(alternate)
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+            return self.fake_vasprun()
+
+        report = self.accept("scf", vasprun_loader=replacing_loader)
+        self.assertFalse(report.accepted)
+        self.assertIn(report.reason_code, {"evidence_changed", "vasprun_unparseable"})
+        self.assertEqual(report.reason_code, report.checks[-1]["reason_code"])
+        self.assertNotIn(alternate.decode("ascii"), json.dumps(report.as_dict()))
+
+    def test_contcar_loader_rejects_snapshot_path_replacement(self):
+        self.write_complete_outputs("relax")
+        alternate = b"replacement CONTCAR snapshot"
+
+        def replacing_loader(path):
+            replacement = path.with_name(path.name + ".replacement")
+            replacement.write_bytes(alternate)
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+            return object()
+
+        report = self.assert_rejected(
+            "evidence_changed", "relax", structure_loader=replacing_loader
+        )
+        self.assertNotIn(alternate.decode("ascii"), json.dumps(report.as_dict()))
+
+    @unittest.skipIf(os.name == "nt", "POSIX snapshot replacement required")
+    def test_vasprun_loader_rejects_snapshot_swap_restore(self):
+        self.write_complete_outputs("scf")
+        alternate = b"swap-restore vasprun snapshot"
+
+        def swapping_loader(path):
+            held = path.with_name(path.name + ".held")
+            replacement = path.with_name(path.name + ".replacement")
+            replacement.write_bytes(alternate)
+            replacement.chmod(0o600)
+            os.replace(path, held)
+            os.replace(replacement, path)
+            try:
+                self.assertEqual(alternate, path.read_bytes())
+            finally:
+                os.replace(path, replacement)
+                os.replace(held, path)
+                replacement.unlink()
+            return self.fake_vasprun()
+
+        report = self.assert_rejected(
+            "evidence_changed", "scf", vasprun_loader=swapping_loader
+        )
+        self.assertNotIn(alternate.decode("ascii"), json.dumps(report.as_dict()))
+
+    @unittest.skipIf(os.name == "nt", "POSIX snapshot replacement required")
+    def test_contcar_loader_rejects_snapshot_swap_restore(self):
+        self.write_complete_outputs("relax")
+        alternate = b"swap-restore CONTCAR snapshot"
+
+        def swapping_loader(path):
+            held = path.with_name(path.name + ".held")
+            replacement = path.with_name(path.name + ".replacement")
+            replacement.write_bytes(alternate)
+            replacement.chmod(0o600)
+            os.replace(path, held)
+            os.replace(replacement, path)
+            try:
+                self.assertEqual(alternate, path.read_bytes())
+            finally:
+                os.replace(path, replacement)
+                os.replace(held, path)
+                replacement.unlink()
+            return object()
+
+        report = self.assert_rejected(
+            "evidence_changed", "relax", structure_loader=swapping_loader
+        )
+        self.assertNotIn(alternate.decode("ascii"), json.dumps(report.as_dict()))
 
     @unittest.skipIf(os.name == "nt", "POSIX directory replacement required")
     def test_vasprun_loader_is_anchored_during_attempt_directory_swap_restore(self):
