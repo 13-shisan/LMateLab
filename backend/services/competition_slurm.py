@@ -7,7 +7,7 @@ import re
 import stat
 import subprocess
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
@@ -37,6 +37,17 @@ class SlurmCommandTimeout(SlurmError):
 
 class SlurmOutputTooLarge(SlurmError):
     pass
+
+
+def calculate_script_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as handle:
+            while chunk := handle.read(64 * 1024):
+                digest.update(chunk)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script is unavailable") from exc
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -72,6 +83,7 @@ class SlurmSubmission:
     script_path: Path
     runner_kind: str
     runner_mode: str
+    script_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
         _validate_canonical_uuid("workflow_id", self.workflow_id)
@@ -82,6 +94,11 @@ class SlurmSubmission:
             raise ValueError("attempt_number must be a positive integer")
         if self.runner_mode not in RUNNER_MODES.get(self.runner_kind, frozenset()):
             raise ValueError("runner mode is not allowed")
+        object.__setattr__(
+            self,
+            "script_sha256",
+            calculate_script_sha256(self.script_path),
+        )
 
     @property
     def job_name(self) -> str:
@@ -89,7 +106,11 @@ class SlurmSubmission:
 
     @property
     def comment(self) -> str:
-        return f"lmatelab:workflow={self.workflow_id};attempt={self.attempt_id}"
+        return (
+            f"lmatelab:workflow={self.workflow_id};attempt={self.attempt_id};"
+            f"runner={self.runner_kind};mode={self.runner_mode};"
+            f"script_sha256={self.script_sha256}"
+        )
 
 
 @dataclass(frozen=True)
@@ -202,6 +223,8 @@ class SlurmClient:
         script_path = submission.script_path.resolve()
         if script_path not in self._allowed_scripts:
             raise ValueError("submission script is not allowlisted")
+        if calculate_script_sha256(script_path) != submission.script_sha256:
+            raise ValueError("submission script identity changed")
         attempt_directory = self._attempt_directory(
             submission.workflow_id,
             submission.attempt_id,

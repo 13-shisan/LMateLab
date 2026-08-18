@@ -141,10 +141,7 @@ class SlurmCommandContractTests(unittest.TestCase):
         self.assertIn(f"--chdir={self.attempt_dir}", argv)
         self.assertIn(f"--output={self.attempt_dir / 'stdout.log'}", argv)
         self.assertIn(f"--error={self.attempt_dir / 'stderr.log'}", argv)
-        self.assertIn(
-            f"--comment=lmatelab:workflow={self.workflow_id};attempt={self.attempt_id}",
-            argv,
-        )
+        self.assertIn(f"--comment={self.submission().comment}", argv)
         self.assertIn("--job-name=lmatelab-", " ".join(argv))
         self.assertEqual(
             [str(self.script), "success", self.workflow_id, self.attempt_id],
@@ -165,6 +162,31 @@ class SlurmCommandContractTests(unittest.TestCase):
         for kind, mode in (("probe", "scf"), ("vasp", "success"), ("shell", "id")):
             with self.subTest(kind=kind, mode=mode), self.assertRaises(ValueError):
                 self.submission(runner_kind=kind, runner_mode=mode)
+
+    def test_submission_identity_binds_runner_mode_and_script_digest(self):
+        submission = self.submission()
+        expected_sha256 = hashlib.sha256(self.script.read_bytes()).hexdigest()
+
+        self.assertEqual(expected_sha256, submission.script_sha256)
+        self.assertEqual(
+            (
+                f"lmatelab:workflow={self.workflow_id};attempt={self.attempt_id};"
+                f"runner=probe;mode=success;script_sha256={expected_sha256}"
+            ),
+            submission.comment,
+        )
+        self.assertLessEqual(len(submission.comment.encode("utf-8")), 256)
+
+    def test_submit_rejects_script_changed_after_submission_construction(self):
+        executor = RecordingExecutor(stdout=b"12345\n")
+        client = self.client(executor)
+        submission = self.submission()
+        self.script.write_text("#!/bin/bash\necho changed\n", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            client.submit(submission)
+
+        self.assertEqual([], executor.calls)
 
     def test_vasp_submission_argv_is_fixed_and_shell_free(self):
         executor = RecordingExecutor()
@@ -493,6 +515,10 @@ class CompetitionReconcileTests(unittest.TestCase):
             self.assertEqual("vasp", metadata["runner_kind"])
             self.assertEqual("scf", metadata["runner_mode"])
             self.assertEqual(str(self.vasp_script.resolve()), metadata["script_path"])
+            expected_sha256 = hashlib.sha256(self.vasp_script.read_bytes()).hexdigest()
+            self.assertEqual(expected_sha256, metadata.get("script_sha256"))
+            self.assertEqual(expected_sha256, claim.submission.script_sha256)
+            self.assertEqual(claim.submission.comment, metadata["comment"])
 
     def test_claim_rejects_a_non_fixed_step(self):
         self.set_run_status("running")
@@ -837,6 +863,201 @@ class CompetitionReconcileTests(unittest.TestCase):
                 event_types,
             )
 
+    def test_recovery_rejects_script_changed_at_the_claimed_path(self):
+        with Session(self.engine) as session:
+            claim = self.reconciler.claim_next_attempt(
+                session,
+                self.workflow_id,
+                "success",
+            )
+        self.slurm.write_job_receipt(self.workflow_id, claim.attempt_id, "41020")
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, claim.attempt_id)
+            metadata = json.loads(attempt.metadata_json)
+            payload = {
+                "jobs": [
+                    {
+                        "job_id": 41020,
+                        "name": metadata["job_name"],
+                        "job_state": ["RUNNING"],
+                        "exit_code": {
+                            "return_code": {"number": 0},
+                            "signal": {"id": {"number": 0}},
+                        },
+                        "state_reason": "None",
+                        "current_working_directory": attempt.working_directory,
+                        "comment": metadata["comment"],
+                        "user_name": "pb23030683",
+                        "nodes": "anode02",
+                    }
+                ]
+            }
+
+        self.script.write_text("#!/bin/bash\necho changed\n", encoding="utf-8")
+        recovery = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=SequenceExecutor(response(stdout=json.dumps(payload).encode())),
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+        )
+        with Session(self.engine) as session, self.assertRaises(ReconcileError) as raised:
+            recovery.recover_submission(session, claim.attempt_id)
+
+        self.assertEqual("submission_not_recoverable", raised.exception.code)
+
+    def _legacy_probe_attempt(
+        self,
+        *,
+        status="queued",
+        step_key="relax",
+        probe_mode="success",
+        metadata_updates=None,
+    ):
+        attempt_id = str(uuid.uuid4())
+        attempt_number = 1
+        attempt_directory = self.slurm.prepare_attempt_directory(
+            self.workflow_id,
+            attempt_id,
+        )
+        comment = f"lmatelab:workflow={self.workflow_id};attempt={attempt_id}"
+        job_name = f"lmatelab-{self.workflow_id[:8]}-{step_key}-a{attempt_number}"
+        metadata = {
+            "comment": comment,
+            "job_name": job_name,
+            "probe_mode": probe_mode,
+        }
+        if metadata_updates:
+            metadata.update(metadata_updates)
+        job_id = None if status == "submitting" else "51010"
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            step = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == step_key,
+                )
+            )
+            run.status = status
+            step.status = status
+            session.add(
+                WorkflowAttempt(
+                    id=attempt_id,
+                    step_id=step.id,
+                    attempt_number=attempt_number,
+                    status=status,
+                    slurm_job_id=job_id,
+                    working_directory=str(attempt_directory),
+                    metadata_json=metadata,
+                )
+            )
+            session.commit()
+        payload = {
+            "jobs": [
+                {
+                    "job_id": 51010,
+                    "name": job_name,
+                    "job_state": ["RUNNING"],
+                    "exit_code": {
+                        "return_code": {"number": 0},
+                        "signal": {"id": {"number": 0}},
+                    },
+                    "state_reason": "None",
+                    "current_working_directory": str(attempt_directory),
+                    "comment": comment,
+                    "user_name": "pb23030683",
+                    "nodes": "anode02",
+                }
+            ]
+        }
+        return attempt_id, payload
+
+    def test_legacy_submitting_probe_recovers_with_historical_identity(self):
+        attempt_id, payload = self._legacy_probe_attempt(status="submitting")
+        self.slurm.write_job_receipt(self.workflow_id, attempt_id, "51010")
+        recovery = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=SequenceExecutor(response(stdout=json.dumps(payload).encode())),
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+        )
+
+        try:
+            with Session(self.engine) as session:
+                result = recovery.recover_submission(session, attempt_id)
+        except ReconcileError as exc:
+            self.fail(f"legacy submission was rejected with {exc.code}")
+
+        self.assertEqual(("51010", "queued"), (result.job_id, result.status))
+
+    def test_legacy_probe_reconciles_queued_running_and_completed_states(self):
+        attempt_id, payload = self._legacy_probe_attempt()
+        observed = []
+        for raw_state, expected in (
+            ("PENDING", "queued"),
+            ("RUNNING", "running"),
+            ("COMPLETED", "succeeded"),
+        ):
+            try:
+                result = self.reconcile_with_payload(
+                    attempt_id,
+                    self.payload_with_state(payload, raw_state),
+                )
+            except ReconcileError as exc:
+                self.fail(f"legacy attempt was rejected with {exc.code}")
+            observed.append(result.status)
+
+        self.assertEqual(["queued", "running", "succeeded"], observed)
+
+    def test_mixed_or_invalid_legacy_runner_metadata_is_rejected(self):
+        cases = (
+            {
+                "label": "mixed",
+                "step_key": "relax",
+                "probe_mode": "success",
+                "updates": {
+                    "runner_kind": "probe",
+                    "runner_mode": "success",
+                    "script_path": str(self.script.resolve()),
+                },
+            },
+            {
+                "label": "invalid-mode",
+                "step_key": "relax",
+                "probe_mode": "scf",
+                "updates": None,
+            },
+            {
+                "label": "non-relax",
+                "step_key": "scf",
+                "probe_mode": "success",
+                "updates": None,
+            },
+        )
+        for case in cases:
+            with self.subTest(label=case["label"]):
+                attempt_id, payload = self._legacy_probe_attempt(
+                    step_key=case["step_key"],
+                    probe_mode=case["probe_mode"],
+                    metadata_updates=case["updates"],
+                )
+                try:
+                    with self.assertRaises(ReconcileError) as raised:
+                        self.reconcile_with_payload(attempt_id, payload)
+                    self.assertEqual("attempt_not_reconcilable", raised.exception.code)
+                finally:
+                    with Session(self.engine) as session:
+                        attempt = session.get(WorkflowAttempt, attempt_id)
+                        step = session.get(WorkflowStep, attempt.step_id)
+                        session.delete(attempt)
+                        step.status = "waiting"
+                        session.commit()
+
     def test_accepted_workflow_cannot_submit_a_duplicate_job(self):
         with Session(self.engine) as session:
             first = self.reconciler.submit_probe(session, self.workflow_id, "success")
@@ -1036,7 +1257,7 @@ class CompetitionReconcileTests(unittest.TestCase):
         }
         return changed
 
-    def accepted_vasp_attempt(self):
+    def accepted_vasp_attempt(self, step_key="scf"):
         attempt_id = str(uuid.uuid4())
         attempt_directory = self.slurm.prepare_attempt_directory(
             self.workflow_id,
@@ -1045,19 +1266,19 @@ class CompetitionReconcileTests(unittest.TestCase):
         submission = SlurmSubmission(
             workflow_id=self.workflow_id,
             attempt_id=attempt_id,
-            step_key="scf",
+            step_key=step_key,
             attempt_number=1,
             attempt_directory=attempt_directory,
             script_path=self.vasp_script,
             runner_kind="vasp",
-            runner_mode="scf",
+            runner_mode=step_key,
         )
         with Session(self.engine) as session:
             run = session.get(WorkflowRun, self.workflow_id)
             step = session.scalar(
                 select(WorkflowStep).where(
                     WorkflowStep.workflow_id == self.workflow_id,
-                    WorkflowStep.step_key == "scf",
+                    WorkflowStep.step_key == step_key,
                 )
             )
             run.status = "running"
@@ -1074,8 +1295,9 @@ class CompetitionReconcileTests(unittest.TestCase):
                         "comment": submission.comment,
                         "job_name": submission.job_name,
                         "runner_kind": "vasp",
-                        "runner_mode": "scf",
+                        "runner_mode": step_key,
                         "script_path": str(self.vasp_script.resolve()),
+                        "script_sha256": submission.script_sha256,
                     },
                 )
             )
@@ -1098,6 +1320,103 @@ class CompetitionReconcileTests(unittest.TestCase):
                 }
             ]
         }
+
+    def test_scheduler_identity_rejects_valid_runner_metadata_reinterpretation(self):
+        attempt_id, payload = self.accepted_vasp_attempt(step_key="relax")
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            probe = SlurmSubmission(
+                workflow_id=self.workflow_id,
+                attempt_id=attempt_id,
+                step_key="relax",
+                attempt_number=attempt.attempt_number,
+                attempt_directory=Path(attempt.working_directory),
+                script_path=self.script,
+                runner_kind="probe",
+                runner_mode="success",
+            )
+            metadata = json.loads(attempt.metadata_json)
+            metadata.update(
+                {
+                    "comment": probe.comment,
+                    "job_name": probe.job_name,
+                    "runner_kind": "probe",
+                    "runner_mode": "success",
+                    "script_path": str(self.script.resolve()),
+                    "script_sha256": probe.script_sha256,
+                }
+            )
+            attempt.metadata_json = metadata
+            session.commit()
+
+        result = self.reconcile_with_payload(
+            attempt_id,
+            self.payload_with_state(payload, "COMPLETED", "0:0"),
+        )
+
+        self.assertEqual(("unknown", True), (result.status, result.stale))
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            self.assertNotIn(attempt.status, {"succeeded", "awaiting_acceptance"})
+
+    def test_reconcile_rejects_script_changed_at_the_claimed_path(self):
+        outcome, payload = self.accepted_attempt()
+        self.script.write_text("#!/bin/bash\necho changed\n", encoding="utf-8")
+
+        with self.assertRaises(ReconcileError) as raised:
+            self.reconcile_with_payload(outcome.attempt_id, payload)
+
+        self.assertEqual("attempt_not_reconcilable", raised.exception.code)
+
+    def test_cancel_terminal_classification_rejects_changed_script(self):
+        outcome, running = self.accepted_attempt()
+        completed = self.payload_with_state(running, "COMPLETED", "0:0")
+        self.script.write_text("#!/bin/bash\necho changed\n", encoding="utf-8")
+        executor = SequenceExecutor(
+            response(stdout=json.dumps(running).encode()),
+            response(stderr=b"already completing", returncode=1),
+            response(stdout=json.dumps(completed).encode()),
+        )
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session, self.assertRaises(ReconcileError) as raised:
+            reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+
+        self.assertEqual("cancellation_ownership_mismatch", raised.exception.code)
+
+    def test_cancel_terminal_classification_rejects_changed_scheduler_identity(self):
+        outcome, running = self.accepted_attempt()
+        completed = self.payload_with_state(running, "COMPLETED", "0:0")
+        completed["jobs"][0]["comment"] = "lmatelab:workflow=wrong;attempt=wrong"
+        executor = SequenceExecutor(
+            response(stdout=json.dumps(running).encode()),
+            response(stderr=b"already completing", returncode=1),
+            response(stdout=json.dumps(completed).encode()),
+        )
+        reconciler = CompetitionReconciler(
+            slurm=SlurmClient(
+                binaries=fixed_binaries(),
+                executor=executor,
+                workflow_root=self.workflow_root,
+                allowed_scripts=(self.script,),
+            ),
+            probe_script=self.script,
+            slurm_user="pb23030683",
+        )
+
+        with Session(self.engine) as session, self.assertRaises(ReconcileError) as raised:
+            reconciler.cancel_attempt(session, self.workflow_id, outcome.attempt_id)
+
+        self.assertEqual("cancellation_ownership_mismatch", raised.exception.code)
 
     def reconcile_with_payload(self, attempt_id, payload):
         reconciler = CompetitionReconciler(

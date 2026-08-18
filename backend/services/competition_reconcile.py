@@ -40,6 +40,13 @@ class AttemptClaim:
 
 
 @dataclass(frozen=True)
+class _AttemptRunnerContract:
+    submission: SlurmSubmission
+    expected_comment: str
+    legacy: bool
+
+
+@dataclass(frozen=True)
 class SubmissionOutcome:
     workflow_id: str
     attempt_id: str
@@ -78,6 +85,19 @@ _ACTIVE_ATTEMPT_STATUSES = frozenset(
         "running",
         "awaiting_acceptance",
         "cancelling",
+    }
+)
+_NEW_RUNNER_METADATA_FIELDS = frozenset(
+    {"runner_kind", "runner_mode", "script_path", "script_sha256"}
+)
+_LEGACY_PROBE_METADATA_FIELDS = frozenset(
+    {
+        "before_cancel",
+        "cancel_result",
+        "comment",
+        "job_name",
+        "probe_mode",
+        "scheduler_observation",
     }
 )
 
@@ -138,30 +158,122 @@ class CompetitionReconciler:
     def _runner_contract_from_metadata(
         self,
         *,
-        step_key: str,
+        run: WorkflowRun,
+        step: WorkflowStep,
+        attempt: WorkflowAttempt,
         metadata: dict[str, object],
-    ) -> tuple[str, str, Path]:
-        runner_kind = metadata.get("runner_kind")
-        runner_mode = metadata.get("runner_mode")
-        script_path = metadata.get("script_path")
-        if not all(isinstance(value, str) for value in (runner_kind, runner_mode, script_path)):
+    ) -> _AttemptRunnerContract:
+        new_fields = _NEW_RUNNER_METADATA_FIELDS.intersection(metadata)
+        has_legacy_mode = "probe_mode" in metadata
+        if new_fields and has_legacy_mode:
             raise ReconcileError(
                 "invalid_runner_contract",
                 "runner contract is not allowed",
             )
-        resolved_script = self._validated_runner_script(
-            step_key=step_key,
-            runner_kind=runner_kind,
-            runner_mode=runner_mode,
-            script_path=Path(script_path),
+
+        legacy = not new_fields and has_legacy_mode
+        if legacy:
+            if (
+                step.step_key != "relax"
+                or not set(metadata).issubset(_LEGACY_PROBE_METADATA_FIELDS)
+                or metadata.get("probe_mode") not in PROBE_MODES
+            ):
+                raise ReconcileError(
+                    "invalid_runner_contract",
+                    "runner contract is not allowed",
+                )
+            runner_kind = "probe"
+            runner_mode = metadata["probe_mode"]
+            resolved_script = self.probe_script
+        else:
+            if new_fields != _NEW_RUNNER_METADATA_FIELDS:
+                raise ReconcileError(
+                    "invalid_runner_contract",
+                    "runner contract is not allowed",
+                )
+            runner_kind = metadata.get("runner_kind")
+            runner_mode = metadata.get("runner_mode")
+            script_path = metadata.get("script_path")
+            script_sha256 = metadata.get("script_sha256")
+            if not all(
+                isinstance(value, str)
+                for value in (runner_kind, runner_mode, script_path, script_sha256)
+            ):
+                raise ReconcileError(
+                    "invalid_runner_contract",
+                    "runner contract is not allowed",
+                )
+            resolved_script = self._validated_runner_script(
+                step_key=step.step_key,
+                runner_kind=runner_kind,
+                runner_mode=runner_mode,
+                script_path=Path(script_path),
+            )
+
+        try:
+            submission = SlurmSubmission(
+                workflow_id=run.id,
+                attempt_id=attempt.id,
+                step_key=step.step_key,
+                attempt_number=attempt.attempt_number,
+                attempt_directory=Path(attempt.working_directory),
+                script_path=resolved_script,
+                runner_kind=runner_kind,
+                runner_mode=runner_mode,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "runner contract is not allowed",
+            ) from exc
+
+        expected_comment = (
+            f"lmatelab:workflow={run.id};attempt={attempt.id}"
+            if legacy
+            else submission.comment
         )
-        return runner_kind, runner_mode, resolved_script
+        if (
+            metadata.get("job_name") != submission.job_name
+            or metadata.get("comment") != expected_comment
+            or (
+                not legacy
+                and metadata.get("script_sha256") != submission.script_sha256
+            )
+        ):
+            raise ReconcileError(
+                "invalid_runner_contract",
+                "runner contract is not allowed",
+            )
+        return _AttemptRunnerContract(
+            submission=submission,
+            expected_comment=expected_comment,
+            legacy=legacy,
+        )
 
     @staticmethod
     def _workload_scheduler_status(runner_kind: str, scheduler_status: str) -> str:
         if runner_kind == "vasp" and scheduler_status == "succeeded":
             return "awaiting_acceptance"
         return scheduler_status
+
+    @staticmethod
+    def _scheduler_identity_matches(
+        observation: SlurmJobObservation,
+        *,
+        job_id: str,
+        job_name: str,
+        working_directory: str,
+        comment: str,
+        user_name: str | None = None,
+    ) -> bool:
+        return (
+            not observation.stale
+            and observation.job_id == job_id
+            and observation.job_name == job_name
+            and observation.working_directory == working_directory
+            and observation.comment == comment
+            and (user_name is None or observation.user_name == user_name)
+        )
 
     @staticmethod
     def _active_attempt_exists(session: Session, workflow_id: str) -> bool:
@@ -333,6 +445,7 @@ class CompetitionReconciler:
                         "runner_kind": runner_kind,
                         "runner_mode": runner_mode,
                         "script_path": str(resolved_script),
+                        "script_sha256": submission.script_sha256,
                     },
                 )
             )
@@ -628,8 +741,10 @@ class CompetitionReconciler:
             raise ReconcileError("submission_not_recoverable", "submission cannot be recovered")
 
         try:
-            runner_kind, runner_mode, script_path = self._runner_contract_from_metadata(
-                step_key=step.step_key,
+            contract = self._runner_contract_from_metadata(
+                run=run,
+                step=step,
+                attempt=attempt,
                 metadata=metadata,
             )
         except ReconcileError as exc:
@@ -643,32 +758,23 @@ class CompetitionReconciler:
         expected_directory = str(
             self.slurm.prepare_attempt_directory(run.id, attempt.id).resolve()
         )
-        if (
-            observation.stale
-            or observation.job_name != metadata.get("job_name")
-            or observation.working_directory != expected_directory
-            or observation.comment != metadata.get("comment")
+        if not self._scheduler_identity_matches(
+            observation,
+            job_id=job_id,
+            job_name=contract.submission.job_name,
+            working_directory=expected_directory,
+            comment=contract.expected_comment,
         ):
             raise ReconcileError(
                 "submission_recovery_unverified",
                 "scheduler ownership evidence did not match the submission",
             )
 
-        submission = SlurmSubmission(
-            workflow_id=run.id,
-            attempt_id=attempt.id,
-            step_key=step.step_key,
-            attempt_number=attempt.attempt_number,
-            attempt_directory=Path(expected_directory),
-            script_path=script_path,
-            runner_kind=runner_kind,
-            runner_mode=runner_mode,
-        )
         claim = AttemptClaim(
             workflow_id=run.id,
             step_id=step.id,
             attempt_id=attempt.id,
-            submission=submission,
+            submission=contract.submission,
             status="submitting",
         )
         return self._record_submission_accepted(
@@ -813,6 +919,20 @@ class CompetitionReconciler:
         if attempt.status not in {"queued", "running"} or not attempt.slurm_job_id:
             raise ReconcileError("job_not_active", "attempt does not have an active job")
 
+        metadata = self._decoded_attempt_metadata(attempt)
+        try:
+            contract = self._runner_contract_from_metadata(
+                run=run,
+                step=step,
+                attempt=attempt,
+                metadata=metadata,
+            )
+        except ReconcileError as exc:
+            raise ReconcileError(
+                "cancellation_ownership_mismatch",
+                "attempt ownership metadata is invalid",
+            ) from exc
+
         lock = session.execute(
             update(WorkflowAttempt)
             .where(
@@ -839,15 +959,13 @@ class CompetitionReconciler:
         expected_directory = str(
             self.slurm.prepare_attempt_directory(run.id, attempt.id).resolve()
         )
-        expected_comment = f"lmatelab:workflow={run.id};attempt={attempt.id}"
-        ownership_matches = (
-            not before.stale
-            and before.job_id == attempt.slurm_job_id
-            and isinstance(before.job_name, str)
-            and before.job_name.startswith("lmatelab-")
-            and before.working_directory == expected_directory
-            and before.comment == expected_comment
-            and before.user_name == self.slurm_user
+        ownership_matches = self._scheduler_identity_matches(
+            before,
+            job_id=attempt.slurm_job_id,
+            job_name=contract.submission.job_name,
+            working_directory=expected_directory,
+            comment=contract.expected_comment,
+            user_name=self.slurm_user,
         )
         if not ownership_matches:
             session.rollback()
@@ -867,19 +985,19 @@ class CompetitionReconciler:
             except (SlurmError, ValueError):
                 after = None
             if after is not None and after.state in {"succeeded", "failed", "cancelled"}:
-                metadata = self._decoded_attempt_metadata(attempt)
-                try:
-                    runner_kind, _runner_mode, _script_path = (
-                        self._runner_contract_from_metadata(
-                            step_key=step.step_key,
-                            metadata=metadata,
-                        )
-                    )
-                except ReconcileError as exc:
+                if not self._scheduler_identity_matches(
+                    after,
+                    job_id=attempt.slurm_job_id,
+                    job_name=contract.submission.job_name,
+                    working_directory=expected_directory,
+                    comment=contract.expected_comment,
+                    user_name=self.slurm_user,
+                ):
+                    session.rollback()
                     raise ReconcileError(
                         "cancellation_ownership_mismatch",
-                        "attempt ownership metadata is invalid",
-                    ) from exc
+                        "scheduler ownership evidence did not match the attempt",
+                    )
                 return self._persist_cancel_result(
                     session,
                     run=run,
@@ -887,7 +1005,10 @@ class CompetitionReconciler:
                     attempt=attempt,
                     before=before,
                     after=after,
-                    status=self._workload_scheduler_status(runner_kind, after.state),
+                    status=self._workload_scheduler_status(
+                        contract.submission.runner_kind,
+                        after.state,
+                    ),
                     result="raced_terminal",
                     event_type="cancellation_raced_terminal",
                 )
@@ -938,6 +1059,20 @@ class CompetitionReconciler:
                 "attempt does not have a workflow ledger",
             )
 
+        metadata = self._decoded_attempt_metadata(attempt)
+        try:
+            contract = self._runner_contract_from_metadata(
+                run=run,
+                step=step,
+                attempt=attempt,
+                metadata=metadata,
+            )
+        except ReconcileError as exc:
+            raise ReconcileError(
+                "attempt_not_reconcilable",
+                "attempt runner contract is invalid",
+            ) from exc
+
         try:
             observation = self.slurm.observe(attempt.slurm_job_id)
         except (SlurmError, ValueError) as exc:
@@ -950,17 +1085,13 @@ class CompetitionReconciler:
             expected_directory = str(
                 self.slurm.prepare_attempt_directory(run.id, attempt.id).resolve()
             )
-            expected_comment = f"lmatelab:workflow={run.id};attempt={attempt.id}"
-            identity_matches = (
-                observation.job_id == attempt.slurm_job_id
-                and isinstance(observation.job_name, str)
-                and observation.job_name.startswith("lmatelab-")
-                and observation.working_directory == expected_directory
-                and observation.comment == expected_comment
-                and (
-                    self.slurm_user is None
-                    or observation.user_name == self.slurm_user
-                )
+            identity_matches = self._scheduler_identity_matches(
+                observation,
+                job_id=attempt.slurm_job_id,
+                job_name=contract.submission.job_name,
+                working_directory=expected_directory,
+                comment=contract.expected_comment,
+                user_name=self.slurm_user,
             )
             if not identity_matches:
                 observation = SlurmJobObservation(
@@ -983,17 +1114,6 @@ class CompetitionReconciler:
                     payload_sha256=observation.payload_sha256,
                 )
 
-        metadata = self._decoded_attempt_metadata(attempt)
-        try:
-            runner_kind, _runner_mode, _script_path = self._runner_contract_from_metadata(
-                step_key=step.step_key,
-                metadata=metadata,
-            )
-        except ReconcileError as exc:
-            raise ReconcileError(
-                "attempt_not_reconcilable",
-                "attempt runner contract is invalid",
-            ) from exc
         previous = metadata.get("scheduler_observation")
         evidence = self._observation_evidence(observation)
         state_changed = (
@@ -1002,6 +1122,7 @@ class CompetitionReconciler:
             != self._observation_signature(evidence)
         )
         metadata["scheduler_observation"] = evidence
+        runner_kind = contract.submission.runner_kind
         status = self._workload_scheduler_status(runner_kind, observation.state)
 
         now = self._clock()
