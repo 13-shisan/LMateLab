@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 from database import Base
 from models import User
 from models_workflow import WorkflowAttempt, WorkflowEvent, WorkflowRun, WorkflowStep
+import services.competition_slurm as competition_slurm
 from services.competition_reconcile import CompetitionReconciler, ReconcileError
 from services.competition_slurm import (
     SlurmBinaries,
@@ -26,6 +28,11 @@ from services.competition_slurm import (
     SlurmOutputTooLarge,
     SlurmSubmission,
 )
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 
 class RecordingExecutor:
@@ -250,6 +257,347 @@ class SlurmCommandContractTests(unittest.TestCase):
         with self.assertRaises(OSError):
             os.fstat(pass_fds[0])
 
+    def test_submit_consumes_immutable_snapshot_when_source_is_modified_in_place(self):
+        original = self.script.read_bytes()
+        replacement = b"#!/bin/bash\necho modified in place\n"
+
+        class InPlaceMutationExecutor:
+            def __init__(inner_self):
+                inner_self.calls = []
+                inner_self.consumed = None
+
+            def __call__(inner_self, argv, **kwargs):
+                inner_self.calls.append((list(argv), dict(kwargs)))
+                with self.script.open("r+b") as handle:
+                    handle.seek(0)
+                    handle.truncate(0)
+                    handle.write(replacement)
+                    handle.flush()
+
+                descriptor = kwargs["pass_fds"][0]
+                duplicate = os.dup(descriptor)
+                try:
+                    os.lseek(duplicate, 0, os.SEEK_SET)
+                    chunks = []
+                    while chunk := os.read(duplicate, 64 * 1024):
+                        chunks.append(chunk)
+                    inner_self.consumed = b"".join(chunks)
+                finally:
+                    os.close(duplicate)
+                return subprocess.CompletedProcess(argv, 0, b"12345\n", b"")
+
+        executor = InPlaceMutationExecutor()
+        submission = self.submission()
+
+        self.assertEqual("12345", self.client(executor).submit(submission))
+
+        self.assertEqual(original, executor.consumed)
+        argv, kwargs = executor.calls[0]
+        self.assertIn(f"--comment={submission.comment}", argv)
+        self.assertEqual(f"/proc/self/fd/{kwargs['pass_fds'][0]}", argv[-4])
+        with self.assertRaises(OSError):
+            os.fstat(kwargs["pass_fds"][0])
+
+    def test_linux_snapshot_requests_and_verifies_all_required_seals(self):
+        allow_sealing = 0x0002
+        close_on_exec = 0x0001
+
+        class FakeFcntl:
+            F_ADD_SEALS = 1033
+            F_GET_SEALS = 1034
+            F_SEAL_SEAL = 0x0001
+            F_SEAL_SHRINK = 0x0002
+            F_SEAL_GROW = 0x0004
+            F_SEAL_WRITE = 0x0008
+
+            def __init__(inner_self):
+                inner_self.calls = []
+                inner_self.applied = 0
+
+            def fcntl(inner_self, descriptor, operation, argument=0):
+                inner_self.calls.append((descriptor, operation, argument))
+                if operation == inner_self.F_ADD_SEALS:
+                    inner_self.applied = argument
+                    return 0
+                if operation == inner_self.F_GET_SEALS:
+                    return inner_self.applied
+                raise AssertionError(f"unexpected fcntl operation: {operation}")
+
+        fake_fcntl = FakeFcntl()
+        memfd_calls = []
+        snapshot_path = self.root / "fake-memfd"
+
+        def fake_memfd_create(name, flags):
+            memfd_calls.append((name, flags))
+            return os.open(
+                snapshot_path,
+                os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
+
+        submission = self.submission()
+        executor = RecordingExecutor(stdout=b"12345\n")
+        with (
+            mock.patch.object(competition_slurm, "_IS_LINUX", True, create=True),
+            mock.patch.object(competition_slurm, "_IS_WINDOWS", False, create=True),
+            mock.patch.object(competition_slurm, "_fcntl", fake_fcntl, create=True),
+            mock.patch.object(
+                competition_slurm.os,
+                "memfd_create",
+                side_effect=fake_memfd_create,
+                create=True,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "MFD_ALLOW_SEALING",
+                allow_sealing,
+                create=True,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "MFD_CLOEXEC",
+                close_on_exec,
+                create=True,
+            ),
+        ):
+            self.assertEqual("12345", self.client(executor).submit(submission))
+
+        required_seals = (
+            fake_fcntl.F_SEAL_WRITE
+            | fake_fcntl.F_SEAL_GROW
+            | fake_fcntl.F_SEAL_SHRINK
+            | fake_fcntl.F_SEAL_SEAL
+        )
+        self.assertEqual(1, len(memfd_calls))
+        self.assertEqual(allow_sealing | close_on_exec, memfd_calls[0][1])
+        self.assertEqual(
+            [
+                mock.call(
+                    mock.ANY,
+                    fake_fcntl.F_ADD_SEALS,
+                    required_seals,
+                ),
+                mock.call(mock.ANY, fake_fcntl.F_GET_SEALS, 0),
+            ],
+            [mock.call(*call) for call in fake_fcntl.calls],
+        )
+
+    def test_linux_submission_fails_closed_and_closes_fds_when_seals_are_unverified(self):
+        class UnverifiedFcntl:
+            F_ADD_SEALS = 1033
+            F_GET_SEALS = 1034
+            F_SEAL_SEAL = 0x0001
+            F_SEAL_SHRINK = 0x0002
+            F_SEAL_GROW = 0x0004
+            F_SEAL_WRITE = 0x0008
+
+            @staticmethod
+            def fcntl(descriptor, operation, argument=0):
+                if operation == UnverifiedFcntl.F_ADD_SEALS:
+                    return 0
+                if operation == UnverifiedFcntl.F_GET_SEALS:
+                    return 0
+                raise AssertionError(f"unexpected fcntl operation: {operation}")
+
+        snapshot_descriptors = []
+        source_descriptors = []
+        snapshot_path = self.root / "unsealed-memfd"
+        real_open_hashed_script = competition_slurm._open_hashed_script
+
+        def fake_memfd_create(name, flags):
+            descriptor = os.open(
+                snapshot_path,
+                os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
+            snapshot_descriptors.append(descriptor)
+            return descriptor
+
+        def recording_open_hashed_script(path):
+            descriptor, digest = real_open_hashed_script(path)
+            source_descriptors.append(descriptor)
+            return descriptor, digest
+
+        submission = self.submission()
+        executor = RecordingExecutor(stdout=b"12345\n")
+        with (
+            mock.patch.object(competition_slurm, "_IS_LINUX", True, create=True),
+            mock.patch.object(competition_slurm, "_IS_WINDOWS", False, create=True),
+            mock.patch.object(competition_slurm, "_fcntl", UnverifiedFcntl(), create=True),
+            mock.patch.object(
+                competition_slurm,
+                "_open_hashed_script",
+                side_effect=recording_open_hashed_script,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "memfd_create",
+                side_effect=fake_memfd_create,
+                create=True,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "MFD_ALLOW_SEALING",
+                0x0002,
+                create=True,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "MFD_CLOEXEC",
+                0x0001,
+                create=True,
+            ),
+        ):
+            with self.assertRaises(ValueError):
+                self.client(executor).submit(submission)
+
+        self.assertEqual([], executor.calls)
+        self.assertEqual(1, len(snapshot_descriptors))
+        self.assertEqual(1, len(source_descriptors))
+        for descriptor in snapshot_descriptors + source_descriptors:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_linux_submission_rejects_snapshot_modified_before_sealing(self):
+        replacement = b"#!/bin/bash\necho pre-seal mutation\n"
+
+        class MutatingFcntl:
+            F_ADD_SEALS = 1033
+            F_GET_SEALS = 1034
+            F_SEAL_SEAL = 0x0001
+            F_SEAL_SHRINK = 0x0002
+            F_SEAL_GROW = 0x0004
+            F_SEAL_WRITE = 0x0008
+
+            def __init__(inner_self):
+                inner_self.applied = 0
+
+            def fcntl(inner_self, descriptor, operation, argument=0):
+                if operation == inner_self.F_ADD_SEALS:
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    os.ftruncate(descriptor, 0)
+                    os.write(descriptor, replacement)
+                    inner_self.applied = argument
+                    return 0
+                if operation == inner_self.F_GET_SEALS:
+                    return inner_self.applied
+                raise AssertionError(f"unexpected fcntl operation: {operation}")
+
+        snapshot_descriptors = []
+        snapshot_path = self.root / "mutated-memfd"
+
+        def fake_memfd_create(name, flags):
+            descriptor = os.open(
+                snapshot_path,
+                os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
+            snapshot_descriptors.append(descriptor)
+            return descriptor
+
+        submission = self.submission()
+        executor = RecordingExecutor(stdout=b"12345\n")
+        with (
+            mock.patch.object(competition_slurm, "_IS_LINUX", True),
+            mock.patch.object(competition_slurm, "_IS_WINDOWS", False),
+            mock.patch.object(competition_slurm, "_fcntl", MutatingFcntl()),
+            mock.patch.object(
+                competition_slurm.os,
+                "memfd_create",
+                side_effect=fake_memfd_create,
+                create=True,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "MFD_ALLOW_SEALING",
+                0x0002,
+                create=True,
+            ),
+            mock.patch.object(
+                competition_slurm.os,
+                "MFD_CLOEXEC",
+                0x0001,
+                create=True,
+            ),
+        ):
+            with self.assertRaises(ValueError):
+                self.client(executor).submit(submission)
+
+        self.assertEqual([], executor.calls)
+        self.assertEqual(1, len(snapshot_descriptors))
+        with self.assertRaises(OSError):
+            os.fstat(snapshot_descriptors[0])
+
+    @unittest.skipUnless(os.name == "nt", "Windows local-test fallback only")
+    def test_windows_snapshot_fallback_is_rejected_for_the_default_executor(self):
+        submission = self.submission()
+        client = SlurmClient(
+            binaries=fixed_binaries(),
+            executor=subprocess.run,
+            timeout_seconds=3.0,
+            allowed_scripts=(self.script,),
+            workflow_root=self.root / "workflows",
+        )
+        recorder = RecordingExecutor(stdout=b"12345\n")
+        client._executor = recorder
+
+        with self.assertRaises(ValueError):
+            client.submit(submission)
+
+        self.assertEqual([], recorder.calls)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "memfd_create")
+        and fcntl is not None
+        and hasattr(fcntl, "F_ADD_SEALS"),
+        "Linux memfd sealing is required",
+    )
+    def test_inherited_linux_snapshot_is_sealed_against_write_and_truncate(self):
+        original = self.script.read_bytes()
+        test_case = self
+
+        class SealInspectingExecutor:
+            def __init__(inner_self):
+                inner_self.calls = []
+                inner_self.consumed = None
+
+            def __call__(inner_self, argv, **kwargs):
+                inner_self.calls.append((list(argv), dict(kwargs)))
+                descriptor = kwargs["pass_fds"][0]
+                required_seals = (
+                    fcntl.F_SEAL_WRITE
+                    | fcntl.F_SEAL_GROW
+                    | fcntl.F_SEAL_SHRINK
+                    | fcntl.F_SEAL_SEAL
+                )
+                try:
+                    applied_seals = fcntl.fcntl(descriptor, fcntl.F_GET_SEALS)
+                except OSError:
+                    applied_seals = 0
+                test_case.assertEqual(required_seals, applied_seals & required_seals)
+                with test_case.assertRaises(OSError):
+                    os.write(descriptor, b"changed")
+                with test_case.assertRaises(OSError):
+                    os.ftruncate(descriptor, 0)
+
+                duplicate = os.dup(descriptor)
+                try:
+                    os.lseek(duplicate, 0, os.SEEK_SET)
+                    inner_self.consumed = os.read(duplicate, 64 * 1024)
+                finally:
+                    os.close(duplicate)
+                return subprocess.CompletedProcess(argv, 0, b"12345\n", b"")
+
+        executor = SealInspectingExecutor()
+
+        self.assertEqual("12345", self.client(executor).submit(self.submission()))
+
+        self.assertEqual(original, executor.consumed)
+        inherited_descriptor = executor.calls[0][1]["pass_fds"][0]
+        with self.assertRaises(OSError):
+            os.fstat(inherited_descriptor)
+
     def test_submission_descriptor_closes_after_command_error(self):
         executor = RecordingExecutor(stderr=b"private scheduler detail", returncode=1)
         client = self.client(executor)
@@ -281,6 +629,97 @@ class SlurmCommandContractTests(unittest.TestCase):
         self.assertEqual(1, len(pass_fds))
         with self.assertRaises(OSError):
             os.fstat(pass_fds[0])
+
+    def test_source_descriptor_closes_when_initial_hash_is_interrupted(self):
+        opened_descriptors = []
+        real_os_open = competition_slurm.os.open
+
+        def recording_os_open(*args, **kwargs):
+            descriptor = real_os_open(*args, **kwargs)
+            opened_descriptors.append(descriptor)
+            return descriptor
+
+        with (
+            mock.patch.object(
+                competition_slurm.os,
+                "open",
+                side_effect=recording_os_open,
+            ),
+            mock.patch.object(
+                competition_slurm,
+                "_hash_script_descriptor",
+                side_effect=KeyboardInterrupt,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            competition_slurm._open_hashed_script(self.script)
+
+        self.assertEqual(1, len(opened_descriptors))
+        descriptor_closed = False
+        try:
+            os.fstat(opened_descriptors[0])
+        except OSError:
+            descriptor_closed = True
+        finally:
+            if not descriptor_closed:
+                os.close(opened_descriptors[0])
+        self.assertTrue(descriptor_closed)
+
+    def test_source_and_snapshot_descriptors_close_when_copy_is_interrupted(self):
+        source_descriptors = []
+        snapshot_descriptors = []
+        real_open_hashed_script = competition_slurm._open_hashed_script
+        snapshot_path = self.root / "interrupted-snapshot"
+
+        def recording_open_hashed_script(path):
+            descriptor, digest = real_open_hashed_script(path)
+            source_descriptors.append(descriptor)
+            return descriptor, digest
+
+        def fake_snapshot_descriptor(*, allow_windows_test_fallback):
+            descriptor = os.open(
+                snapshot_path,
+                os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
+            snapshot_descriptors.append(descriptor)
+            return descriptor
+
+        submission = self.submission()
+        executor = RecordingExecutor(stdout=b"12345\n")
+        with (
+            mock.patch.object(
+                competition_slurm,
+                "_open_hashed_script",
+                side_effect=recording_open_hashed_script,
+            ),
+            mock.patch.object(
+                competition_slurm,
+                "_create_private_snapshot_descriptor",
+                side_effect=fake_snapshot_descriptor,
+            ),
+            mock.patch.object(
+                competition_slurm,
+                "_copy_script_descriptor",
+                side_effect=KeyboardInterrupt,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            self.client(executor).submit(submission)
+
+        self.assertEqual([], executor.calls)
+        self.assertEqual(1, len(source_descriptors))
+        self.assertEqual(1, len(snapshot_descriptors))
+        closed = []
+        for descriptor in source_descriptors + snapshot_descriptors:
+            try:
+                os.fstat(descriptor)
+            except OSError:
+                closed.append(True)
+            else:
+                closed.append(False)
+                os.close(descriptor)
+        self.assertEqual([True, True], closed)
 
     def test_submission_rejects_a_script_outside_the_allowlist(self):
         foreign_script = self.root / "foreign.slurm"

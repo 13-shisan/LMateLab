@@ -6,11 +6,18 @@ import os
 import re
 import stat
 import subprocess
+import sys
+import tempfile
 import uuid
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
+
+try:
+    import fcntl as _fcntl
+except ImportError:
+    _fcntl = None
 
 
 FIXED_STEPS = frozenset({"relax", "scf", "band", "dos"})
@@ -23,6 +30,8 @@ _JOB_ID_RE = re.compile(r"^([1-9][0-9]*)(?:;[A-Za-z0-9_.-]+)?$")
 _LOG_NAMES = {"stdout": "stdout.log", "stderr": "stderr.log"}
 _MAX_SUBMISSION_SCRIPT_BYTES = 1024 * 1024
 _SCRIPT_READ_CHUNK_BYTES = 64 * 1024
+_IS_LINUX = sys.platform.startswith("linux")
+_IS_WINDOWS = os.name == "nt"
 
 
 class SlurmError(RuntimeError):
@@ -69,7 +78,10 @@ def _hash_script_descriptor(descriptor: int) -> str:
                 raise ValueError("submission script is invalid")
             digest.update(chunk)
         after = os.fstat(descriptor)
-        if total != before.st_size or _script_stat_signature(before) != _script_stat_signature(after):
+        if (
+            total != before.st_size
+            or _script_stat_signature(before) != _script_stat_signature(after)
+        ):
             raise ValueError("submission script changed while hashing")
         os.lseek(descriptor, 0, os.SEEK_SET)
     except (OSError, TypeError, ValueError) as exc:
@@ -93,8 +105,129 @@ def _open_hashed_script(path: Path) -> tuple[int, str]:
         raise ValueError("submission script is unavailable") from exc
     try:
         return descriptor, _hash_script_descriptor(descriptor)
-    except Exception:
+    except BaseException:
         os.close(descriptor)
+        raise
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    remaining = memoryview(payload)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written < 1:
+            raise OSError("submission script snapshot write failed")
+        remaining = remaining[written:]
+
+
+def _copy_script_descriptor(source: int, destination: int) -> str:
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(source)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > _MAX_SUBMISSION_SCRIPT_BYTES
+        ):
+            raise ValueError("submission script is invalid")
+        os.lseek(source, 0, os.SEEK_SET)
+        os.lseek(destination, 0, os.SEEK_SET)
+        os.ftruncate(destination, 0)
+        total = 0
+        while chunk := os.read(source, _SCRIPT_READ_CHUNK_BYTES):
+            total += len(chunk)
+            if total > _MAX_SUBMISSION_SCRIPT_BYTES:
+                raise ValueError("submission script is invalid")
+            _write_all(destination, chunk)
+            digest.update(chunk)
+        after = os.fstat(source)
+        if total != before.st_size or _script_stat_signature(before) != _script_stat_signature(after):
+            raise ValueError("submission script changed while copying")
+
+        snapshot = os.fstat(destination)
+        if not stat.S_ISREG(snapshot.st_mode) or snapshot.st_size != total:
+            raise ValueError("submission script snapshot is invalid")
+        os.lseek(destination, 0, os.SEEK_SET)
+        if _hash_script_descriptor(destination) != digest.hexdigest():
+            raise ValueError("submission script snapshot identity changed")
+        os.lseek(destination, 0, os.SEEK_SET)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script snapshot is unavailable") from exc
+    return digest.hexdigest()
+
+
+def _create_private_snapshot_descriptor(
+    *,
+    allow_windows_test_fallback: bool,
+) -> int:
+    if _IS_LINUX:
+        memfd_create = getattr(os, "memfd_create", None)
+        allow_sealing = getattr(os, "MFD_ALLOW_SEALING", None)
+        close_on_exec = getattr(os, "MFD_CLOEXEC", None)
+        if memfd_create is None or allow_sealing is None or close_on_exec is None:
+            raise ValueError("submission script snapshot is unavailable")
+        try:
+            return memfd_create(
+                "lmatelab-slurm-script",
+                allow_sealing | close_on_exec,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError("submission script snapshot is unavailable") from exc
+
+    if _IS_WINDOWS and allow_windows_test_fallback:
+        try:
+            with tempfile.TemporaryFile(mode="w+b") as handle:
+                return os.dup(handle.fileno())
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError("submission script snapshot is unavailable") from exc
+
+    raise ValueError("submission script snapshot is unavailable")
+
+
+def _seal_linux_snapshot(descriptor: int) -> None:
+    if _fcntl is None:
+        raise ValueError("submission script snapshot is unavailable")
+    required_names = (
+        "F_ADD_SEALS",
+        "F_GET_SEALS",
+        "F_SEAL_WRITE",
+        "F_SEAL_GROW",
+        "F_SEAL_SHRINK",
+        "F_SEAL_SEAL",
+    )
+    if any(not hasattr(_fcntl, name) for name in required_names):
+        raise ValueError("submission script snapshot is unavailable")
+    required_seals = (
+        _fcntl.F_SEAL_WRITE
+        | _fcntl.F_SEAL_GROW
+        | _fcntl.F_SEAL_SHRINK
+        | _fcntl.F_SEAL_SEAL
+    )
+    try:
+        _fcntl.fcntl(descriptor, _fcntl.F_ADD_SEALS, required_seals)
+        applied_seals = _fcntl.fcntl(descriptor, _fcntl.F_GET_SEALS)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script snapshot is unavailable") from exc
+    if applied_seals & required_seals != required_seals:
+        raise ValueError("submission script snapshot is unavailable")
+
+
+def _snapshot_script_descriptor(
+    source: int,
+    *,
+    allow_windows_test_fallback: bool = False,
+) -> tuple[int, str]:
+    snapshot = _create_private_snapshot_descriptor(
+        allow_windows_test_fallback=allow_windows_test_fallback,
+    )
+    try:
+        digest = _copy_script_descriptor(source, snapshot)
+        if _IS_LINUX:
+            _seal_linux_snapshot(snapshot)
+            if _hash_script_descriptor(snapshot) != digest:
+                raise ValueError("submission script snapshot identity changed")
+        os.lseek(snapshot, 0, os.SEEK_SET)
+        return snapshot, digest
+    except BaseException:
+        os.close(snapshot)
         raise
 
 
@@ -225,6 +358,9 @@ class SlurmClient:
             raise ValueError("max_log_tail_bytes must be positive")
         self.binaries = binaries or SlurmBinaries()
         self._executor = executor
+        self._allow_windows_test_snapshot = (
+            _IS_WINDOWS and executor is not subprocess.run
+        )
         self.timeout_seconds = float(timeout_seconds)
         self.max_output_bytes = int(max_output_bytes)
         self._allowed_scripts = frozenset(Path(path).resolve() for path in allowed_scripts)
@@ -293,11 +429,24 @@ class SlurmClient:
             raise ValueError("submission script is unavailable") from exc
         if resolved not in self._allowed_scripts:
             raise ValueError("submission script is not allowlisted")
-        descriptor, digest = _open_hashed_script(candidate)
-        if digest != submission.script_sha256:
-            os.close(descriptor)
-            raise ValueError("submission script identity changed")
-        return descriptor
+        source, source_digest = _open_hashed_script(candidate)
+        snapshot = None
+        try:
+            if source_digest != submission.script_sha256:
+                raise ValueError("submission script identity changed")
+            snapshot, snapshot_digest = _snapshot_script_descriptor(
+                source,
+                allow_windows_test_fallback=self._allow_windows_test_snapshot,
+            )
+            if snapshot_digest != submission.script_sha256:
+                raise ValueError("submission script identity changed")
+            return snapshot
+        except BaseException:
+            if snapshot is not None:
+                os.close(snapshot)
+            raise
+        finally:
+            os.close(source)
 
     def _submission_argv(
         self,
