@@ -74,9 +74,22 @@ async def coordinator_loop(coordinator: Any, interval_seconds: float) -> None:
         while True:
             loop = asyncio.get_running_loop()
             started = loop.time()
+            tick_task = asyncio.create_task(
+                asyncio.to_thread(coordinator.tick_once),
+                name="lmatelab-competition-coordinator-tick",
+            )
             try:
-                await asyncio.to_thread(coordinator.tick_once)
+                await asyncio.shield(tick_task)
             except asyncio.CancelledError:
+                while not tick_task.done():
+                    try:
+                        await asyncio.shield(tick_task)
+                    except asyncio.CancelledError:
+                        continue
+                try:
+                    tick_task.result()
+                except Exception:
+                    logger.error("competition coordinator tick failed")
                 raise
             except Exception:
                 logger.error("competition coordinator tick failed")

@@ -105,6 +105,46 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(0, coordinator.cancel_calls)
         self.assertIsNone(app.state.coordinator_task)
 
+    async def test_shutdown_drains_in_flight_tick_before_close(self):
+        tick_started = threading.Event()
+        release_tick = threading.Event()
+
+        def tick():
+            tick_started.set()
+            if not release_tick.wait(1.0):
+                raise AssertionError("test did not release the blocking tick")
+
+        coordinator = _FakeCoordinator(tick)
+        app = self.main.build_app(
+            coordinator_factory=lambda: coordinator,
+            coordinator_enabled=True,
+            coordinator_interval=0.01,
+        )
+        lifespan = app.router.lifespan_context(app)
+        await lifespan.__aenter__()
+        for _ in range(100):
+            if tick_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        self.assertTrue(tick_started.is_set())
+        loop_task = app.state.coordinator_task
+        shutdown = asyncio.create_task(lifespan.__aexit__(None, None, None))
+
+        try:
+            await asyncio.sleep(0.01)
+            loop_task.cancel()
+            await asyncio.sleep(0.01)
+            self.assertFalse(shutdown.done())
+            self.assertEqual(0, coordinator.close_calls)
+            self.assertEqual(0, coordinator.cancel_calls)
+        finally:
+            release_tick.set()
+
+        await asyncio.wait_for(shutdown, timeout=0.5)
+        self.assertEqual(1, coordinator.close_calls)
+        self.assertEqual(0, coordinator.cancel_calls)
+        self.assertIsNone(app.state.coordinator_task)
+
     async def test_tick_exceptions_are_sanitized_and_loop_continues(self):
         second_tick = threading.Event()
 
