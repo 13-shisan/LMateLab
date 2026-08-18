@@ -1,4 +1,5 @@
 import importlib
+import math
 import os
 import sys
 import tempfile
@@ -169,6 +170,81 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
                         runtime.slurm_user(values)
                     else:
                         runtime.slurm_probe_script(values)
+
+    def test_vasp_coordinator_runtime_configuration_is_strict(self):
+        runtime = self.require_runtime()
+        values = {
+            "LMATELAB_VASP_STAGE_SCRIPT": "/opt/lmatelab/vasp-stage.slurm",
+            "LMATELAB_COORDINATOR_ENABLED": "1",
+            "LMATELAB_COORDINATOR_INTERVAL_SECONDS": "10",
+            "LMATELAB_COORDINATOR_BATCH_LIMIT": "8",
+        }
+
+        self.assertEqual(
+            Path(values["LMATELAB_VASP_STAGE_SCRIPT"]),
+            runtime.vasp_stage_script(values),
+        )
+        self.assertTrue(runtime.coordinator_enabled(values))
+        self.assertEqual(10.0, runtime.coordinator_interval_seconds(values))
+        self.assertEqual(8, runtime.coordinator_batch_limit(values))
+
+    def test_vasp_coordinator_runtime_configuration_has_bounded_defaults(self):
+        runtime = self.require_runtime()
+
+        self.assertTrue(runtime.coordinator_enabled({}))
+        self.assertEqual(10.0, runtime.coordinator_interval_seconds({}))
+        self.assertEqual(8, runtime.coordinator_batch_limit({}))
+
+    def test_vasp_stage_script_rejects_relative_and_traversing_paths(self):
+        runtime = self.require_runtime()
+
+        for value in (
+            "relative/vasp-stage.slurm",
+            "/opt/lmatelab/../vasp-stage.slurm",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    runtime.vasp_stage_script({"LMATELAB_VASP_STAGE_SCRIPT": value})
+
+    def test_coordinator_enabled_accepts_only_exact_zero_or_one(self):
+        runtime = self.require_runtime()
+
+        self.assertFalse(
+            runtime.coordinator_enabled({"LMATELAB_COORDINATOR_ENABLED": "0"})
+        )
+        for value in ("true", "false", "yes", "2", " 1", "1 ", ""):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    runtime.coordinator_enabled(
+                        {"LMATELAB_COORDINATOR_ENABLED": value}
+                    )
+
+    def test_coordinator_interval_rejects_malformed_nonfinite_and_out_of_range(self):
+        runtime = self.require_runtime()
+
+        for value in (
+            "invalid",
+            str(math.nan),
+            str(math.inf),
+            str(-math.inf),
+            "1.999",
+            "60.001",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    runtime.coordinator_interval_seconds(
+                        {"LMATELAB_COORDINATOR_INTERVAL_SECONDS": value}
+                    )
+
+    def test_coordinator_batch_rejects_malformed_and_out_of_range(self):
+        runtime = self.require_runtime()
+
+        for value in ("invalid", "1.0", "0", "33", " 8", "08"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    runtime.coordinator_batch_limit(
+                        {"LMATELAB_COORDINATOR_BATCH_LIMIT": value}
+                    )
 
     def test_main_entrypoint_integrates_router_allowlist_and_spa_resolver(self):
         entrypoint = BACKEND_ROOT / "main_107cup.py"
