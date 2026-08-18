@@ -382,6 +382,7 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(TEST_RELEASE_COMMIT, body["release_commit"])
         self.assertEqual(["relax", "scf", "band", "dos"], [step["key"] for step in body["steps"]])
         for step in body["steps"]:
+            self.assertIsNone(step["attempt_id"])
             self.assertIsNone(step["job_id"])
             self.assertEqual(0, step["attempt"])
             self.assertIsNone(step["attempt_dir"])
@@ -399,6 +400,7 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
 
         self.assertEqual(200, detail.status_code, detail.text)
         step = detail.json()["steps"][0]
+        self.assertEqual(attempt_id, step["attempt_id"])
         self.assertEqual("41050", step["job_id"])
         self.assertEqual(1, step["attempt"])
         self.assertEqual(f"{draft['id']}/attempts/{attempt_id}", step["attempt_dir"])
@@ -413,6 +415,27 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         item = next(row for row in listing.json()["items"] if row["id"] == draft["id"])
         self.assertEqual("41050", item["latest_job_id"])
         self.assertEqual("relax", item["current_step"])
+
+    def test_step_attempt_id_rejects_malformed_and_noncanonical_ledger_ids(self):
+        for tampered_attempt_id in (
+            "not-a-uuid/private-attempt",
+            str(uuid.uuid4()).upper(),
+        ):
+            with self.subTest(tampered_attempt_id=tampered_attempt_id):
+                draft, attempt_id = self.create_validated_attempt()
+                with Session(self.engine) as session:
+                    attempt = session.get(WorkflowAttempt, attempt_id)
+                    attempt.id = tampered_attempt_id
+                    session.commit()
+
+                response = self.client.get(
+                    f"/api/competition/workflows/{draft['id']}"
+                )
+
+                self.assertEqual(200, response.status_code, response.text)
+                step = response.json()["steps"][0]
+                self.assertIsNone(step["attempt_id"])
+                self.assertNotIn(tampered_attempt_id, response.text)
 
     def test_list_and_dashboard_reject_tampered_historical_job_ids(self):
         draft, attempt_id = self.create_validated_attempt(status="running")
@@ -764,6 +787,7 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             "status",
             "job_id",
             "attempt",
+            "attempt_id",
             "attempt_dir",
             "slurm_state",
             "exit_code",

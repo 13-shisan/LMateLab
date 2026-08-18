@@ -151,6 +151,15 @@ def _safe_match(value: object, pattern: re.Pattern[str]) -> str | None:
     return None
 
 
+def _safe_canonical_uuid(value: object) -> str | None:
+    if type(value) is not str:
+        return None
+    try:
+        return value if str(UUID(value)) == value else None
+    except ValueError:
+        return None
+
+
 def _safe_acceptance(
     metadata: dict[str, Any],
     attempt_status: str,
@@ -210,6 +219,9 @@ def _step_payload(step: WorkflowStep, workflow_id: str) -> dict[str, Any]:
             else None
         ),
         "attempt": attempt.attempt_number if attempt is not None else 0,
+        "attempt_id": (
+            _safe_canonical_uuid(attempt.id) if attempt is not None else None
+        ),
         "attempt_dir": (
             _relative_attempt_directory(workflow_id, attempt)
             if attempt is not None
