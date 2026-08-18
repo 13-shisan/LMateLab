@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from models_workflow import (
@@ -28,8 +28,10 @@ from services.competition_inputs import (
 )
 from services.competition_reconcile import (
     AttemptClaim,
+    CancellationOutcome,
     CompetitionReconciler,
     ReconcileError,
+    RETRYABLE_ATTEMPT_STATUSES,
     SubmissionOutcome,
 )
 from services.competition_vasp import (
@@ -56,6 +58,13 @@ _CLAIMABLE_RUN_STATUSES: Final = frozenset(
 )
 _FAILED_STEP_STATUSES: Final = frozenset({"failed", "scientific_failed"})
 _CANCELLATION_RESULTS: Final = frozenset({"requested", "raced_terminal", "failed"})
+_CANCELLATION_EVENT_TYPES: Final = frozenset(
+    {
+        "cancellation_requested",
+        "cancellation_raced_terminal",
+        "cancellation_failed",
+    }
+)
 _RECONCILABLE_ATTEMPT_STATUSES: Final = frozenset(
     {"queued", "running", "cancelling", "unknown"}
 )
@@ -321,6 +330,23 @@ class CompetitionCoordinator:
 
     @staticmethod
     def _has_cancellation_intent(session: Session, workflow_id: str) -> bool:
+        latest_retry = session.scalar(
+            select(func.max(WorkflowEvent.sequence)).where(
+                WorkflowEvent.workflow_id == workflow_id,
+                WorkflowEvent.event_type == "workflow_step_retry_requested",
+            )
+        )
+        latest_cancel = session.scalar(
+            select(func.max(WorkflowEvent.sequence)).where(
+                WorkflowEvent.workflow_id == workflow_id,
+                WorkflowEvent.event_type.in_(_CANCELLATION_EVENT_TYPES),
+            )
+        )
+        if latest_retry is not None and (
+            latest_cancel is None or latest_retry > latest_cancel
+        ):
+            return False
+
         metadata_values = session.scalars(
             select(WorkflowAttempt.metadata_json)
             .join(WorkflowStep, WorkflowStep.id == WorkflowAttempt.step_id)
@@ -361,9 +387,10 @@ class CompetitionCoordinator:
             status=attempt.status,
         )
 
-    def start(self, workflow_id: str, owner_id: int) -> CoordinatorOutcome:
+    @staticmethod
+    def _request_identity(workflow_id: str, owner_id: int) -> tuple[str, int]:
         try:
-            workflow_id = str(uuid.UUID(workflow_id))
+            canonical_workflow_id = str(uuid.UUID(workflow_id))
         except (AttributeError, TypeError, ValueError) as exc:
             raise CoordinatorError(
                 "workflow_not_found",
@@ -371,6 +398,10 @@ class CompetitionCoordinator:
             ) from exc
         if isinstance(owner_id, bool) or not isinstance(owner_id, int) or owner_id < 1:
             raise CoordinatorError("workflow_not_found", "workflow was not found")
+        return canonical_workflow_id, owner_id
+
+    def start(self, workflow_id: str, owner_id: int) -> CoordinatorOutcome:
+        workflow_id, owner_id = self._request_identity(workflow_id, owner_id)
 
         with self._session_factory() as session:
             run = session.get(WorkflowRun, workflow_id)
@@ -398,6 +429,71 @@ class CompetitionCoordinator:
             "workflow_not_startable",
             "workflow could not be started",
         )
+
+    def retry(
+        self,
+        workflow_id: str,
+        owner_id: int,
+        step_key: str,
+    ) -> CoordinatorOutcome:
+        workflow_id, owner_id = self._request_identity(workflow_id, owner_id)
+        if step_key not in FIXED_STAGE_ORDER:
+            raise CoordinatorError(
+                "workflow_step_invalid",
+                "workflow step is outside the fixed workflow",
+            )
+
+        with self._session_factory() as session:
+            run = session.get(WorkflowRun, workflow_id)
+            if run is None or run.owner_id != owner_id:
+                raise CoordinatorError("workflow_not_found", "workflow was not found")
+            self._validate_execution_scope(run)
+            self._step_statuses(session, workflow_id)
+            try:
+                self.reconciler.request_retry(
+                    session,
+                    workflow_id,
+                    owner_id=owner_id,
+                    step_key=step_key,
+                )
+            except ReconcileError as exc:
+                raise CoordinatorError(exc.code, str(exc)) from exc
+
+        outcome = self._advance(workflow_id, owner_id)
+        if outcome is not None:
+            return outcome
+        raise CoordinatorError(
+            "retry_conflict",
+            "workflow retry could not claim a new attempt",
+        )
+
+    def cancel(self, workflow_id: str, owner_id: int) -> CancellationOutcome:
+        workflow_id, owner_id = self._request_identity(workflow_id, owner_id)
+
+        with self._session_factory() as session:
+            run = session.get(WorkflowRun, workflow_id)
+            if run is None or run.owner_id != owner_id:
+                raise CoordinatorError("workflow_not_found", "workflow was not found")
+            self._step_statuses(session, workflow_id)
+            active = self._active_attempts(session, workflow_id)
+            if not active:
+                raise CoordinatorError(
+                    "workflow_not_cancellable",
+                    "workflow does not have an active attempt",
+                )
+            if len(active) != 1:
+                raise CoordinatorError(
+                    "multiple_active_attempts",
+                    "workflow has multiple active attempts",
+                )
+            try:
+                return self.reconciler.cancel_attempt(
+                    session,
+                    workflow_id,
+                    active[0].id,
+                )
+            except ReconcileError as exc:
+                raise CoordinatorError(exc.code, str(exc)) from exc
 
     def tick_once(self) -> CoordinatorTickResult:
         with self._session_factory() as session:
@@ -573,6 +669,59 @@ class CompetitionCoordinator:
             )
             return None
 
+    @staticmethod
+    def _release_blocked_descendants_after_retry(
+        session: Session,
+        *,
+        run: WorkflowRun,
+        step: WorkflowStep,
+        attempt: WorkflowAttempt,
+    ) -> None:
+        if (
+            attempt.attempt_number <= 1
+            or step.step_key not in {"relax", "scf"}
+        ):
+            return
+        descendants = list(
+            session.scalars(
+                select(WorkflowStep)
+                .where(
+                    WorkflowStep.workflow_id == run.id,
+                    WorkflowStep.position > step.position,
+                )
+                .order_by(WorkflowStep.position)
+            )
+        )
+        for descendant in descendants:
+            has_attempt = session.scalar(
+                select(WorkflowAttempt.id)
+                .where(WorkflowAttempt.step_id == descendant.id)
+                .limit(1)
+            )
+            if has_attempt is not None:
+                raise CoordinatorError(
+                    "acceptance_ledger_invalid",
+                    "retried upstream step has downstream attempts",
+                )
+            if descendant.status == "waiting":
+                continue
+            if descendant.status != "blocked":
+                raise CoordinatorError(
+                    "acceptance_ledger_invalid",
+                    "retried upstream step has invalid downstream state",
+                )
+            descendant.status = "waiting"
+            append_workflow_event(
+                session,
+                workflow_id=run.id,
+                event_type="workflow_step_unblocked",
+                payload={
+                    "attempt_id": attempt.id,
+                    "step_key": descendant.step_key,
+                    "unblocked_by": step.step_key,
+                },
+            )
+
     def _accept_completed_attempt(self, attempt_id: str) -> bool:
         with self._session_factory() as session:
             session.rollback()
@@ -735,6 +884,13 @@ class CompetitionCoordinator:
             if metadata_updated.rowcount != 1:
                 session.rollback()
                 return False
+            if report.accepted:
+                self._release_blocked_descendants_after_retry(
+                    session,
+                    run=run,
+                    step=step,
+                    attempt=attempt,
+                )
             for artifact in report.artifacts:
                 name = artifact["name"]
                 relative_path = f"{run.id}/attempts/{attempt.id}/{name}"

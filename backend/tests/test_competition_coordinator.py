@@ -45,6 +45,7 @@ class FakeSlurm:
         self.submissions = {}
         self.receipts = {}
         self.jobs = {}
+        self.cancelled_jobs = []
         self.next_job_id = 71000
 
     def prepare_attempt_directory(self, workflow_id, attempt_id):
@@ -148,6 +149,12 @@ class FakeSlurm:
             payload_sha256="f" * 64,
         )
 
+    def inspect_job(self, job_id):
+        return self.observe(job_id)
+
+    def cancel(self, job_id):
+        self.cancelled_jobs.append(job_id)
+
 
 class FakeAcceptancePolicy:
     def __init__(self):
@@ -209,7 +216,7 @@ class FakeAcceptancePolicy:
         )
 
 
-class CompetitionCoordinatorTests(unittest.TestCase):
+class CoordinatorTestCase(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
@@ -420,6 +427,9 @@ class CompetitionCoordinatorTests(unittest.TestCase):
             workflow_id or self.workflow_id,
             self.owner_id,
         )
+
+
+class CompetitionCoordinatorTests(CoordinatorTestCase):
 
     def test_next_eligible_step_is_the_fixed_branch_policy(self):
         states = {step: "waiting" for step in FIXED_STEPS}
@@ -1253,6 +1263,348 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         attempt = self.latest_attempt("relax")
         self.assertEqual(claim.attempt_id, attempt.id)
         self.assertEqual("submission_failed", attempt.status)
+
+
+class CoordinatorRetryTests(CoordinatorTestCase):
+    def get_attempt(self, attempt_id):
+        with self.SessionLocal() as session:
+            return session.get(WorkflowAttempt, attempt_id)
+
+    def event_rows(self, workflow_id=None):
+        workflow_id = workflow_id or self.workflow_id
+        with self.SessionLocal() as session:
+            return list(
+                session.scalars(
+                    select(WorkflowEvent)
+                    .where(WorkflowEvent.workflow_id == workflow_id)
+                    .order_by(WorkflowEvent.sequence)
+                )
+            )
+
+    def make_scf_scientific_failure(self):
+        self.start()
+        self.complete("relax")
+        self.complete("scf", accepted=False)
+        return self.latest_attempt("scf")
+
+    def test_retry_creates_a_new_attempt_without_changing_failed_evidence(self):
+        failed = self.make_scf_scientific_failure()
+        failed_before = (
+            failed.status,
+            failed.slurm_job_id,
+            failed.working_directory,
+            failed.metadata_json,
+            failed.finished_at,
+        )
+        evidence_before = [
+            (row.id, row.event_type, row.payload_json)
+            for row in self.event_rows()
+            if json.loads(row.payload_json).get("attempt_id") == failed.id
+        ]
+
+        outcome = self.coordinator.retry(self.workflow_id, self.owner_id, "scf")
+
+        self.assertNotEqual(failed.id, outcome.attempt_id)
+        retried = self.latest_attempt("scf")
+        self.assertEqual((2, "queued"), (retried.attempt_number, retried.status))
+        failed_after = self.get_attempt(failed.id)
+        self.assertEqual(
+            failed_before,
+            (
+                failed_after.status,
+                failed_after.slurm_job_id,
+                failed_after.working_directory,
+                failed_after.metadata_json,
+                failed_after.finished_at,
+            ),
+        )
+        evidence_ids = {row[0] for row in evidence_before}
+        evidence_after = [
+            (row.id, row.event_type, row.payload_json)
+            for row in self.event_rows()
+            if row.id in evidence_ids
+        ]
+        self.assertEqual(evidence_before, evidence_after)
+        retry_events = [
+            row
+            for row in self.event_rows()
+            if row.event_type == "workflow_step_retry_requested"
+        ]
+        self.assertEqual(1, len(retry_events))
+        self.assertEqual(
+            {"attempt_id": failed.id, "step_key": "scf"},
+            json.loads(retry_events[0].payload_json),
+        )
+
+    def test_retry_accepts_failed_and_cancelled_latest_attempts(self):
+        for terminal_status in ("failed", "cancelled"):
+            with self.subTest(terminal_status=terminal_status):
+                workflow_id = self.create_workflow()
+                coordinator = self.new_coordinator()
+                coordinator.start(workflow_id, self.owner_id)
+                attempt = self.latest_attempt("relax", workflow_id)
+                with self.SessionLocal() as session:
+                    current = session.get(WorkflowAttempt, attempt.id)
+                    step = session.get(WorkflowStep, current.step_id)
+                    run = session.get(WorkflowRun, workflow_id)
+                    current.status = terminal_status
+                    step.status = terminal_status
+                    run.status = "failed" if terminal_status == "failed" else "cancelled"
+                    session.commit()
+
+                outcome = coordinator.retry(workflow_id, self.owner_id, "relax")
+
+                self.assertNotEqual(attempt.id, outcome.attempt_id)
+                self.assertEqual(2, self.latest_attempt("relax", workflow_id).attempt_number)
+                self.assertEqual(terminal_status, self.get_attempt(attempt.id).status)
+
+    def test_explicit_retry_supersedes_but_preserves_cancel_evidence(self):
+        self.start()
+        cancelled = self.latest_attempt("relax")
+        self.coordinator.cancel(self.workflow_id, self.owner_id)
+        self.slurm.set_state(
+            cancelled.id,
+            "cancelled",
+            raw_state="CANCELLED",
+            exit_code="0:15",
+        )
+        self.coordinator.tick_once()
+        cancelled_before = self.get_attempt(cancelled.id)
+        metadata_before = cancelled_before.metadata_json
+        self.assertEqual("cancelled", cancelled_before.status)
+        self.assertEqual(
+            "requested",
+            json.loads(metadata_before)["cancel_result"]["result"],
+        )
+
+        outcome = self.coordinator.retry(
+            self.workflow_id,
+            self.owner_id,
+            "relax",
+        )
+
+        self.assertNotEqual(cancelled.id, outcome.attempt_id)
+        self.assertEqual("queued", outcome.status)
+        cancelled_after = self.get_attempt(cancelled.id)
+        self.assertEqual("cancelled", cancelled_after.status)
+        self.assertEqual(metadata_before, cancelled_after.metadata_json)
+
+    def test_retry_rejects_non_owner_non_fixed_active_and_successful_steps(self):
+        with self.assertRaises(CoordinatorError) as non_owner:
+            self.coordinator.retry(self.workflow_id, self.owner_id + 1, "relax")
+        self.assertEqual("workflow_not_found", non_owner.exception.code)
+
+        with self.assertRaises(CoordinatorError) as non_fixed:
+            self.coordinator.retry(self.workflow_id, self.owner_id, "foreign")
+        self.assertEqual("workflow_step_invalid", non_fixed.exception.code)
+
+        self.start()
+        with self.assertRaises(CoordinatorError) as active:
+            self.coordinator.retry(self.workflow_id, self.owner_id, "relax")
+        self.assertEqual("workflow_has_active_attempt", active.exception.code)
+
+        successful_workflow = self.create_workflow()
+        coordinator = self.new_coordinator()
+        coordinator.start(successful_workflow, self.owner_id)
+        for step_key in FIXED_STEPS:
+            attempt = self.latest_attempt(step_key, successful_workflow)
+            self.slurm.set_state(
+                attempt.id,
+                "succeeded",
+                raw_state="COMPLETED",
+                exit_code="0:0",
+            )
+            coordinator.tick_once()
+        with self.assertRaises(CoordinatorError) as successful:
+            coordinator.retry(successful_workflow, self.owner_id, "dos")
+        self.assertEqual("step_not_retryable", successful.exception.code)
+
+    def test_upstream_retry_rejects_any_downstream_attempt(self):
+        failed = self.make_scf_scientific_failure()
+        with self.SessionLocal() as session:
+            band = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "band",
+                )
+            )
+            session.add(
+                WorkflowAttempt(
+                    step_id=band.id,
+                    attempt_number=1,
+                    status="failed",
+                    metadata_json={"evidence": "must-remain"},
+                )
+            )
+            session.commit()
+
+        with self.assertRaises(CoordinatorError) as raised:
+            self.coordinator.retry(self.workflow_id, self.owner_id, "scf")
+
+        self.assertEqual("step_has_downstream_attempts", raised.exception.code)
+        self.assertEqual(1, self.attempt_count("scf"))
+        self.assertEqual("scientific_failed", self.get_attempt(failed.id).status)
+
+    def test_band_retry_preserves_accepted_dos_sibling(self):
+        self.start()
+        self.complete("relax")
+        self.complete("scf")
+        self.complete("band", accepted=False)
+        self.complete("dos")
+        failed_band = self.latest_attempt("band")
+        accepted_dos = self.latest_attempt("dos")
+        dos_before = (
+            accepted_dos.id,
+            accepted_dos.status,
+            accepted_dos.metadata_json,
+        )
+
+        outcome = self.coordinator.retry(self.workflow_id, self.owner_id, "band")
+
+        self.assertNotEqual(failed_band.id, outcome.attempt_id)
+        self.assertEqual(2, self.latest_attempt("band").attempt_number)
+        accepted_dos_after = self.get_attempt(accepted_dos.id)
+        self.assertEqual(
+            dos_before,
+            (
+                accepted_dos_after.id,
+                accepted_dos_after.status,
+                accepted_dos_after.metadata_json,
+            ),
+        )
+        self.assertEqual("succeeded", self.step_statuses()["dos"])
+
+    def test_successful_scf_retry_releases_blocked_band_and_dos(self):
+        failed = self.make_scf_scientific_failure()
+        self.coordinator.retry(self.workflow_id, self.owner_id, "scf")
+        self.acceptance.failures.pop("scf")
+
+        self.complete("scf")
+
+        self.assertEqual("scientific_failed", self.get_attempt(failed.id).status)
+        self.assertEqual(2, self.latest_attempt("scf").attempt_number)
+        self.assertEqual(1, self.attempt_count("band"))
+        self.assertEqual(0, self.attempt_count("dos"))
+        self.assertEqual(
+            {
+                "relax": "succeeded",
+                "scf": "succeeded",
+                "band": "queued",
+                "dos": "waiting",
+            },
+            self.step_statuses(),
+        )
+
+    def test_successful_relax_retry_releases_only_attempt_free_descendants(self):
+        self.start()
+        self.complete("relax", accepted=False)
+        failed = self.latest_attempt("relax")
+        self.coordinator.retry(self.workflow_id, self.owner_id, "relax")
+        self.acceptance.failures.pop("relax")
+
+        self.complete("relax")
+
+        self.assertEqual("scientific_failed", self.get_attempt(failed.id).status)
+        self.assertEqual(2, self.latest_attempt("relax").attempt_number)
+        self.assertEqual(1, self.attempt_count("scf"))
+        self.assertEqual(0, self.attempt_count("band"))
+        self.assertEqual(0, self.attempt_count("dos"))
+        self.assertEqual(
+            {
+                "relax": "succeeded",
+                "scf": "queued",
+                "band": "waiting",
+                "dos": "waiting",
+            },
+            self.step_statuses(),
+        )
+
+    def test_duplicate_retry_does_not_create_another_attempt_job_or_event(self):
+        self.make_scf_scientific_failure()
+        first = self.coordinator.retry(self.workflow_id, self.owner_id, "scf")
+        counts_before = (
+            self.attempt_count("scf"),
+            len(self.slurm.submitted_steps),
+            len(
+                [
+                    row
+                    for row in self.event_rows()
+                    if row.event_type == "workflow_step_retry_requested"
+                ]
+            ),
+        )
+
+        with self.assertRaises(CoordinatorError) as duplicate:
+            self.coordinator.retry(self.workflow_id, self.owner_id, "scf")
+
+        self.assertEqual("workflow_has_active_attempt", duplicate.exception.code)
+        self.assertEqual(first.attempt_id, self.latest_attempt("scf").id)
+        self.assertEqual(
+            counts_before,
+            (
+                self.attempt_count("scf"),
+                len(self.slurm.submitted_steps),
+                len(
+                    [
+                        row
+                        for row in self.event_rows()
+                        if row.event_type == "workflow_step_retry_requested"
+                    ]
+                ),
+            ),
+        )
+        sequences = [row.sequence for row in self.event_rows()]
+        self.assertEqual(list(range(1, len(sequences) + 1)), sequences)
+
+    def test_workflow_cancel_selects_the_only_owned_active_attempt(self):
+        started = self.start()
+        active = self.latest_attempt("relax")
+
+        outcome = self.coordinator.cancel(self.workflow_id, self.owner_id)
+
+        self.assertEqual(started.attempt_id, outcome.attempt_id)
+        self.assertEqual(active.slurm_job_id, outcome.job_id)
+        self.assertEqual([active.slurm_job_id], self.slurm.cancelled_jobs)
+        self.assertEqual("cancelling", self.latest_attempt("relax").status)
+        self.assertEqual("cancelling", self.run_status())
+
+    def test_workflow_cancel_rejects_non_owner_and_zero_active_attempts(self):
+        with self.assertRaises(CoordinatorError) as non_owner:
+            self.coordinator.cancel(self.workflow_id, self.owner_id + 1)
+        self.assertEqual("workflow_not_found", non_owner.exception.code)
+
+        with self.assertRaises(CoordinatorError) as zero:
+            self.coordinator.cancel(self.workflow_id, self.owner_id)
+        self.assertEqual("workflow_not_cancellable", zero.exception.code)
+        self.assertEqual([], self.slurm.cancelled_jobs)
+
+    def test_workflow_cancel_fails_closed_with_multiple_active_attempts(self):
+        self.start()
+        with self.SessionLocal() as session:
+            scf = session.scalar(
+                select(WorkflowStep).where(
+                    WorkflowStep.workflow_id == self.workflow_id,
+                    WorkflowStep.step_key == "scf",
+                )
+            )
+            scf.status = "queued"
+            session.add(
+                WorkflowAttempt(
+                    step_id=scf.id,
+                    attempt_number=1,
+                    status="queued",
+                    slurm_job_id="79999",
+                    metadata_json={"foreign": "must-not-cancel"},
+                )
+            )
+            session.commit()
+
+        with self.assertRaises(CoordinatorError) as multiple:
+            self.coordinator.cancel(self.workflow_id, self.owner_id)
+
+        self.assertEqual("multiple_active_attempts", multiple.exception.code)
+        self.assertEqual([], self.slurm.cancelled_jobs)
+        self.assertEqual(2, self.active_count())
 
 
 if __name__ == "__main__":

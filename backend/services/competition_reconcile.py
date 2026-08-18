@@ -94,6 +94,10 @@ _ACTIVE_ATTEMPT_STATUSES = frozenset(
         "cancelling",
     }
 )
+_RETRY_BLOCKING_ATTEMPT_STATUSES = _ACTIVE_ATTEMPT_STATUSES | {"unknown"}
+RETRYABLE_ATTEMPT_STATUSES = frozenset(
+    {"failed", "scientific_failed", "cancelled"}
+)
 _NEW_RUNNER_METADATA_FIELDS = frozenset(
     {"runner_kind", "runner_mode", "script_path", "script_sha256"}
 )
@@ -441,6 +445,123 @@ class CompetitionReconciler:
             "workflow_not_claimable",
             "workflow cannot be claimed for submission",
         )
+
+    def request_retry(
+        self,
+        session: Session,
+        workflow_id: str,
+        *,
+        owner_id: int,
+        step_key: str,
+    ) -> None:
+        session.rollback()
+        run = session.get(WorkflowRun, workflow_id)
+        if run is None or run.owner_id != owner_id:
+            raise ReconcileError("workflow_not_found", "workflow was not found")
+        step = session.scalar(
+            select(WorkflowStep).where(
+                WorkflowStep.workflow_id == workflow_id,
+                WorkflowStep.step_key == step_key,
+            )
+        )
+        if step is None:
+            raise ReconcileError(
+                "workflow_step_invalid",
+                "workflow step is outside the fixed workflow",
+            )
+        active_step = WorkflowStep.__table__.alias("retry_active_step")
+        active_attempt_exists = (
+            select(WorkflowAttempt.id)
+            .select_from(
+                WorkflowAttempt.__table__.join(
+                    active_step,
+                    active_step.c.id == WorkflowAttempt.step_id,
+                )
+            )
+            .where(
+                active_step.c.workflow_id == workflow_id,
+                WorkflowAttempt.status.in_(_RETRY_BLOCKING_ATTEMPT_STATUSES),
+            )
+            .exists()
+        )
+        if session.scalar(select(active_attempt_exists)):
+            raise ReconcileError(
+                "workflow_has_active_attempt",
+                "workflow already has an active attempt",
+            )
+        latest = session.scalar(
+            select(WorkflowAttempt)
+            .where(WorkflowAttempt.step_id == step.id)
+            .order_by(
+                WorkflowAttempt.attempt_number.desc(),
+                WorkflowAttempt.id.desc(),
+            )
+        )
+        if latest is None or latest.status not in RETRYABLE_ATTEMPT_STATUSES:
+            raise ReconcileError(
+                "step_not_retryable",
+                "workflow step cannot be retried",
+            )
+        if step.status != latest.status:
+            raise ReconcileError(
+                "workflow_ledger_invalid",
+                "workflow retry ledger is invalid",
+            )
+
+        downstream_attempt_exists = None
+        if step_key in {"relax", "scf"}:
+            downstream_step = WorkflowStep.__table__.alias(
+                "retry_downstream_step"
+            )
+            downstream_attempt_exists = (
+                select(WorkflowAttempt.id)
+                .select_from(
+                    WorkflowAttempt.__table__.join(
+                        downstream_step,
+                        downstream_step.c.id == WorkflowAttempt.step_id,
+                    )
+                )
+                .where(
+                    downstream_step.c.workflow_id == workflow_id,
+                    downstream_step.c.position > step.position,
+                )
+                .exists()
+            )
+            if session.scalar(select(downstream_attempt_exists)):
+                raise ReconcileError(
+                    "step_has_downstream_attempts",
+                    "upstream workflow step already has downstream attempts",
+                )
+
+        retry_conditions = [
+            WorkflowStep.id == step.id,
+            WorkflowStep.workflow_id == workflow_id,
+            WorkflowStep.status == latest.status,
+            ~active_attempt_exists,
+        ]
+        if downstream_attempt_exists is not None:
+            retry_conditions.append(~downstream_attempt_exists)
+        retry_requested = session.execute(
+            update(WorkflowStep)
+            .where(*retry_conditions)
+            .values(status="waiting")
+            .execution_options(synchronize_session=False)
+        )
+        if retry_requested.rowcount != 1:
+            session.rollback()
+            raise ReconcileError(
+                "retry_conflict",
+                "workflow retry conflicted with another transition",
+            )
+        if run.status == "cancelled":
+            run.status = "failed"
+        append_workflow_event(
+            session,
+            workflow_id=workflow_id,
+            event_type="workflow_step_retry_requested",
+            payload={"attempt_id": latest.id, "step_key": step_key},
+        )
+        session.commit()
 
     def claim_attempt(
         self,
