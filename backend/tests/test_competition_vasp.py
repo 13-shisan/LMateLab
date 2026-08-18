@@ -1,21 +1,26 @@
 ﻿from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
 import stat
 import tempfile
 import traceback
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from services import competition_vasp
 from services.competition_vasp import (
+    AcceptanceReport,
     DEFAULT_POTCAR_CONTRACT,
     FIXED_STAGE_ORDER,
     STAGE_REQUIRED_OUTPUTS,
     PotcarContract,
     VaspPolicyError,
+    accept_vasp_attempt,
     validate_potcar,
 )
 
@@ -431,6 +436,573 @@ class PotcarPolicyTests(unittest.TestCase):
                 combined_sha256="C" * 64,
                 vaspkit_version="1.5.1",
             )
+
+
+class ScientificAcceptanceTests(unittest.TestCase):
+    band_kpoints = (
+        b"MoS2 high-symmetry path\n40\nLine-mode\nReciprocal\n"
+        b"0 0 0 ! G\n0.5 0 0 ! M\n\n"
+        b"0.5 0 0 ! M\n0.333333333333333 0.333333333333333 0 ! K\n\n"
+        b"0.333333333333333 0.333333333333333 0 ! K\n0 0 0 ! G\n"
+    )
+    dos_kpoints = b"Automatic mesh\n0\nGamma\n24 24 1\n0 0 0\n"
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name)
+        self.potcar = (
+            b"TITEL  = PAW_PBE Mo_sv 02Feb2006\n"
+            b"TITEL  = PAW_PBE S 06Sep2000\n"
+        )
+        self.contract = PotcarContract(
+            symbols=("Mo_sv", "S"),
+            titles=("PAW_PBE Mo_sv", "PAW_PBE S"),
+            source_sha256=("a" * 64, "b" * 64),
+            combined_sha256=hashlib.sha256(self.potcar).hexdigest(),
+            vaspkit_version="1.5.1",
+        )
+
+    def write(self, name: str, content: bytes) -> Path:
+        path = self.root / name
+        path.write_bytes(content)
+        path.chmod(0o600)
+        return path
+
+    def write_complete_outputs(self, stage: str) -> None:
+        common = {
+            "POTCAR.spec": b"Mo_sv\nS\n",
+            "POTCAR": self.potcar,
+            "potcar-source-sha256.txt": (
+                f"{'a' * 64}  Mo_sv\n{'b' * 64}  S\n".encode("ascii")
+            ),
+            "vaspkit-version.txt": b"VASPKIT Standard Edition 1.5.1\n",
+            "vasp-exit-code.txt": b"0\n",
+            "runtime-time.txt": (
+                b"Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.25\n"
+                b"Maximum resident set size (kbytes): 123456\n"
+            ),
+            "OUTCAR": (
+                b"vasp.6.4.3 27Mar24\n"
+                b"General timing and accounting informations for this job:\n"
+            ),
+            "vasprun.xml": b"<?xml version='1.0'?><modeling></modeling>\n",
+        }
+        for name, content in common.items():
+            self.write(name, content)
+        for name in STAGE_REQUIRED_OUTPUTS[stage]:
+            if not (self.root / name).exists():
+                self.write(name, b"accepted-stage-evidence\n")
+        if stage == "band":
+            self.write("KPOINTS", self.band_kpoints)
+        if stage == "dos":
+            self.write("KPOINTS", self.dos_kpoints)
+            self.write("INCAR", b"SYSTEM = MoS2 DOS\nNEDOS = 3000\n")
+
+    @staticmethod
+    def fake_vasprun(*, electronic=True, ionic=True, efermi=1.25, parameters=None):
+        return SimpleNamespace(
+            converged_electronic=electronic,
+            converged_ionic=ionic,
+            efermi=efermi,
+            parameters=parameters or {},
+        )
+
+    def accept(self, stage: str, **kwargs):
+        scheduler_state = kwargs.pop("scheduler_state", "COMPLETED")
+        scheduler_exit_code = kwargs.pop("scheduler_exit_code", "0:0")
+        vasprun_loader = kwargs.pop(
+            "vasprun_loader",
+            lambda _path: self.fake_vasprun(
+                parameters={"NEDOS": 3000} if stage == "dos" else {}
+            ),
+        )
+        structure_loader = kwargs.pop("structure_loader", lambda _path: object())
+        return accept_vasp_attempt(
+            self.root,
+            stage,
+            scheduler_state=scheduler_state,
+            scheduler_exit_code=scheduler_exit_code,
+            vasprun_loader=vasprun_loader,
+            structure_loader=structure_loader,
+            potcar_contract=self.contract,
+            **kwargs,
+        )
+
+    def assert_rejected(self, code: str, stage: str = "scf", **kwargs):
+        report = self.accept(stage, **kwargs)
+        self.assertFalse(report.accepted)
+        self.assertEqual(code, report.reason_code)
+        self.assertTrue(report.checks)
+        self.assertFalse(report.checks[-1]["passed"])
+        return report
+
+    def test_acceptance_report_is_deeply_immutable_and_as_dict_has_no_aliases(self):
+        checks = [{"name": "scheduler_state", "passed": True, "details": {"state": "COMPLETED"}}]
+        measurements = {"versions": {"vasp": "6.4.3"}}
+        artifacts = [{"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 1}]
+        report = AcceptanceReport(True, None, checks, measurements, artifacts)
+        checks[0]["passed"] = False
+        measurements["versions"]["vasp"] = "changed"
+        artifacts[0]["name"] = "changed"
+
+        first = report.as_dict()
+        first["checks"][0]["details"]["state"] = "changed"
+        first["measurements"]["versions"]["vasp"] = "changed"
+        first["artifacts"][0]["name"] = "changed"
+
+        self.assertEqual(report.as_dict(), {
+            "accepted": True,
+            "reason_code": None,
+            "checks": [{"details": {"state": "COMPLETED"}, "name": "scheduler_state", "passed": True}],
+            "measurements": {"versions": {"vasp": "6.4.3"}},
+            "artifacts": [{"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 1}],
+        })
+        with self.assertRaises(TypeError):
+            report.measurements["changed"] = True
+
+    def test_acceptance_report_rejects_inconsistent_success_or_failure(self):
+        for accepted, reason_code, checks in (
+            (True, "failure", ({"name": "x", "passed": False},)),
+            (False, None, ({"name": "x", "passed": False},)),
+            (False, "failure", ()),
+            (False, "failure", ({"name": "x", "passed": True},)),
+        ):
+            with self.subTest(accepted=accepted, reason_code=reason_code, checks=checks):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(accepted, reason_code, checks, {}, ())
+
+    def test_each_fixed_stage_accepts_complete_evidence_and_hashes_all_artifacts(self):
+        for stage in FIXED_STAGE_ORDER:
+            with self.subTest(stage=stage):
+                self.write_complete_outputs(stage)
+                report = self.accept(stage)
+                self.assertTrue(report.accepted, report.as_dict())
+                self.assertIsNone(report.reason_code)
+                self.assertEqual("1.5.1", report.measurements["vaspkit_version"])
+                self.assertEqual("6.4.3", report.measurements["vasp_version"])
+                self.assertEqual(1.25, report.measurements["elapsed_wall_seconds"])
+                self.assertEqual(123456, report.measurements["process_tree_peak_rss_kbytes"])
+                self.assertNotIn("MaxRSS", json.dumps(report.as_dict()))
+                self.assertNotIn("gpu", json.dumps(report.as_dict()).lower())
+                artifact_names = {artifact["name"] for artifact in report.artifacts}
+                self.assertTrue(set(STAGE_REQUIRED_OUTPUTS[stage]).issubset(artifact_names))
+                self.assertTrue({"POTCAR", "vasp-exit-code.txt", "runtime-time.txt", "vaspkit-version.txt"}.issubset(artifact_names))
+                for artifact in report.artifacts:
+                    self.assertRegex(artifact["sha256"], r"^[0-9a-f]{64}$")
+                    self.assertGreater(artifact["size_bytes"], 0)
+
+    def test_scheduler_state_must_be_exactly_completed(self):
+        self.write_complete_outputs("scf")
+        for value in ("COMPLETING", "completed", "COMPLETED+"):
+            with self.subTest(value=value):
+                self.assert_rejected("scheduler_state_not_completed", scheduler_state=value)
+
+    def test_scheduler_exit_code_must_be_exactly_zero_colon_zero(self):
+        self.write_complete_outputs("scf")
+        for value in ("1:0", "0:1", "0", " 0:0"):
+            with self.subTest(value=value):
+                self.assert_rejected("scheduler_exit_code_nonzero", scheduler_exit_code=value)
+
+    def test_vasp_exit_evidence_must_be_one_integer_zero(self):
+        self.write_complete_outputs("scf")
+        for content, code in (
+            (b"1\n", "vasp_exit_nonzero"),
+            (b"zero\n", "vasp_exit_invalid"),
+            (b"0\n0\n", "vasp_exit_invalid"),
+            (b"+0\n", "vasp_exit_invalid"),
+        ):
+            with self.subTest(content=content):
+                self.write("vasp-exit-code.txt", content)
+                self.assert_rejected(code)
+
+    def test_common_metadata_rejects_oversized_symlink_and_nonregular_evidence(self):
+        for kind, code in (
+            ("oversized", "evidence_too_large"),
+            ("nonregular", "evidence_nonregular"),
+        ):
+            with self.subTest(kind=kind):
+                self.write_complete_outputs("scf")
+                path = self.root / "runtime-time.txt"
+                path.unlink()
+                if kind == "oversized":
+                    self.write("runtime-time.txt", b"x" * 8193)
+                else:
+                    path.mkdir()
+                self.assert_rejected(code)
+
+    def test_metadata_symlink_is_rejected_before_open_without_os_symlink_privilege(self):
+        self.write_complete_outputs("scf")
+        target = self.root / "runtime-time.txt"
+        original_lstat = Path.lstat
+
+        def report_symlink(path):
+            identity = original_lstat(path)
+            if path != target:
+                return identity
+            return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777)
+
+        with (
+            mock.patch.object(Path, "lstat", autospec=True, side_effect=report_symlink),
+            mock.patch.object(competition_vasp, "_HAS_SECURE_DIR_FD", False),
+        ):
+            self.assert_rejected("evidence_symlink")
+
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits are not authoritative on Windows")
+    def test_evidence_must_be_private(self):
+        self.write_complete_outputs("scf")
+        (self.root / "runtime-time.txt").chmod(0o640)
+        self.assert_rejected("evidence_not_private")
+
+    def test_posix_private_mode_policy_rejects_group_or_world_access(self):
+        with mock.patch.object(competition_vasp.os, "name", "posix"):
+            self.assertTrue(competition_vasp._private_evidence_mode(
+                SimpleNamespace(st_mode=stat.S_IFREG | 0o600)
+            ))
+            self.assertFalse(competition_vasp._private_evidence_mode(
+                SimpleNamespace(st_mode=stat.S_IFREG | 0o640)
+            ))
+            self.assertFalse(competition_vasp._private_evidence_mode(
+                SimpleNamespace(st_mode=stat.S_IFREG | 0o604)
+            ))
+
+    def test_required_artifacts_reject_missing_empty_symlink_and_nonregular_files(self):
+        for kind, code in (
+            ("missing", "evidence_missing"),
+            ("empty", "evidence_empty"),
+            ("nonregular", "evidence_nonregular"),
+        ):
+            with self.subTest(kind=kind):
+                self.write_complete_outputs("scf")
+                path = self.root / "CHGCAR"
+                path.unlink()
+                if kind == "empty":
+                    self.write("CHGCAR", b"")
+                elif kind == "nonregular":
+                    path.mkdir()
+                self.assert_rejected(code)
+
+    def test_required_artifact_symlink_is_rejected_before_open_without_privilege(self):
+        self.write_complete_outputs("scf")
+        target = self.root / "CHGCAR"
+        original_lstat = Path.lstat
+
+        def report_symlink(path):
+            identity = original_lstat(path)
+            if path != target:
+                return identity
+            return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777)
+
+        with (
+            mock.patch.object(Path, "lstat", autospec=True, side_effect=report_symlink),
+            mock.patch.object(competition_vasp, "_HAS_SECURE_DIR_FD", False),
+        ):
+            self.assert_rejected("evidence_symlink")
+
+    def test_real_required_artifact_symlink_is_never_followed(self):
+        self.write_complete_outputs("scf")
+        path = self.root / "CHGCAR"
+        path.unlink()
+        target = self.write("chgcar-target", b"evidence\n")
+        try:
+            path.symlink_to(target)
+        except OSError as exc:
+            self.skipTest(f"real symlinks unavailable: {exc}")
+
+        self.assert_rejected("evidence_symlink")
+
+    def test_required_artifact_is_rejected_above_fixed_output_bound(self):
+        self.write_complete_outputs("scf")
+        with (self.root / "CHGCAR").open("wb") as handle:
+            handle.truncate(competition_vasp._MAX_ACCEPTANCE_OUTPUT_BYTES + 1)
+        self.assert_rejected("evidence_too_large")
+
+    def test_outcar_requires_exact_completion_marker(self):
+        self.write_complete_outputs("scf")
+        for content in (
+            b"vasp.6.4.3 27Mar24\nGeneral timing and accounting information for this job:\n",
+            b"vasp.6.4.3 27Mar24\ngeneral timing and accounting informations for this job:\n",
+        ):
+            with self.subTest(content=content):
+                self.write("OUTCAR", content)
+                self.assert_rejected("outcar_incomplete")
+
+    def test_vasprun_must_be_complete_xml_and_pymatgen_parseable(self):
+        self.write_complete_outputs("scf")
+        self.write("vasprun.xml", b"<modeling><calculation>")
+        self.assert_rejected("vasprun_unparseable")
+
+        self.write_complete_outputs("scf")
+        def reject_loader(_path):
+            raise ValueError("synthetic parser detail")
+        report = self.assert_rejected("vasprun_unparseable", vasprun_loader=reject_loader)
+        self.assertNotIn("synthetic", json.dumps(report.as_dict()))
+
+    def test_scf_rejects_slurm_success_when_electronic_convergence_is_false(self):
+        self.write_complete_outputs("scf")
+
+        report = self.accept(
+            "scf",
+            vasprun_loader=lambda _path: self.fake_vasprun(electronic=False),
+        )
+
+        self.assertIsInstance(report, AcceptanceReport)
+        self.assertFalse(report.accepted)
+        self.assertEqual("electronic_not_converged", report.reason_code)
+
+    def test_relax_requires_ionic_convergence(self):
+        self.write_complete_outputs("relax")
+        self.assert_rejected(
+            "ionic_not_converged",
+            "relax",
+            vasprun_loader=lambda _path: self.fake_vasprun(ionic=False),
+        )
+
+    def test_scf_fermi_level_must_be_finite_real_number(self):
+        self.write_complete_outputs("scf")
+        for value in (math.nan, math.inf, -math.inf, "1.25", True, None):
+            with self.subTest(value=value):
+                self.assert_rejected(
+                    "scf_efermi_invalid",
+                    vasprun_loader=lambda _path, value=value: self.fake_vasprun(efermi=value),
+                )
+
+    def test_band_requires_exact_fixed_kpoints_hash_and_path(self):
+        self.write_complete_outputs("band")
+        for content in (
+            self.band_kpoints.replace(b"40\n", b"39\n", 1),
+            self.band_kpoints.replace(b"0.5 0 0 ! M", b"0.4 0 0 ! M", 1),
+            self.band_kpoints.replace(b"Line-mode", b"line-mode"),
+        ):
+            with self.subTest(digest=hashlib.sha256(content).hexdigest()):
+                self.write("KPOINTS", content)
+                self.assert_rejected("band_kpoints_invalid", "band")
+
+    def test_dos_requires_exact_fixed_gamma_mesh_hash(self):
+        self.write_complete_outputs("dos")
+        for content in (
+            self.dos_kpoints.replace(b"24 24 1", b"24 24 2"),
+            self.dos_kpoints.replace(b"Gamma", b"Monkhorst-Pack"),
+        ):
+            with self.subTest(content=content):
+                self.write("KPOINTS", content)
+                self.assert_rejected("dos_kpoints_invalid", "dos")
+
+    def test_dos_nedos_is_bounded_unambiguous_and_matches_effective_parameter(self):
+        for incar, parameter, code in (
+            (b"NEDOS = 99\n", 99, "dos_nedos_invalid"),
+            (b"NEDOS = 10001\n", 10001, "dos_nedos_invalid"),
+            (b"NEDOS = 3000\nNEDOS = 3000\n", 3000, "dos_nedos_invalid"),
+            (b"NEDOS = three thousand\n", 3000, "dos_nedos_invalid"),
+            (b"NEDOS = 4000\n", 3000, "dos_nedos_mismatch"),
+            (b"NEDOS = 3000\n", "3000", "dos_nedos_mismatch"),
+        ):
+            with self.subTest(incar=incar, parameter=parameter):
+                self.write_complete_outputs("dos")
+                self.write("INCAR", incar)
+                self.assert_rejected(
+                    code,
+                    "dos",
+                    vasprun_loader=lambda _path, parameter=parameter: self.fake_vasprun(
+                        parameters={"NEDOS": parameter}
+                    ),
+                )
+
+        self.write_complete_outputs("dos")
+        self.write("INCAR", b"NEDOS = 4000\n")
+        report = self.accept(
+            "dos",
+            vasprun_loader=lambda _path: self.fake_vasprun(parameters={"NEDOS": 4000}),
+        )
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertEqual(4000, report.measurements["nedos"])
+
+    def test_dos_nedos_rejects_a_valid_line_plus_malformed_candidate(self):
+        self.write_complete_outputs("dos")
+        self.write("INCAR", b"NEDOS = 3000\nNEDOS malformed duplicate\n")
+        self.assert_rejected("dos_nedos_invalid", "dos")
+
+    def test_relax_contcar_must_be_pymatgen_parseable(self):
+        self.write_complete_outputs("relax")
+        def reject_structure(_path):
+            raise ValueError("synthetic structure detail")
+        report = self.assert_rejected(
+            "contcar_unparseable", "relax", structure_loader=reject_structure
+        )
+        self.assertNotIn("synthetic", json.dumps(report.as_dict()))
+
+    def test_vaspkit_banner_is_exact_unique_and_recorded(self):
+        for content, code in (
+            (b"VASPKIT Standard Edition 1.5.0\n", "vaspkit_version_invalid"),
+            (
+                b"VASPKIT Standard Edition 1.5.1\nVASPKIT Standard Edition 1.5.1\n",
+                "vaspkit_version_invalid",
+            ),
+            (b"VASPKIT Standard Edition 1.5.1 extra\n", "vaspkit_version_invalid"),
+            (
+                b"VASPKIT Standard Edition 1.5.1\n" + b"x" * 8192,
+                "evidence_too_large",
+            ),
+        ):
+            with self.subTest(content=content):
+                self.write_complete_outputs("scf")
+                self.write("vaspkit-version.txt", content)
+                self.assert_rejected(code)
+
+    def test_outcar_vasp_version_is_unique_and_well_formed(self):
+        marker = b"General timing and accounting informations for this job:\n"
+        for content in (
+            b"VASP version 6.4.3\n" + marker,
+            b"vasp.6.4\n" + marker,
+            b"vasp.6.4.3\nvasp.6.4.3\n" + marker,
+            b"vasp.6.4.3\nvasp.6.4.2\n" + marker,
+        ):
+            with self.subTest(content=content):
+                self.write_complete_outputs("scf")
+                self.write("OUTCAR", content)
+                self.assert_rejected("outcar_version_invalid")
+
+        self.write_complete_outputs("scf")
+        self.write(
+            "OUTCAR",
+            b"vasp.6.4.3 27Mar24\nvasp.malformed duplicate\n" + marker,
+        )
+        self.assert_rejected("outcar_version_invalid")
+
+    def test_runtime_evidence_requires_one_valid_elapsed_and_peak_rss(self):
+        valid_elapsed = b"Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.25\n"
+        valid_rss = b"Maximum resident set size (kbytes): 123456\n"
+        for content in (
+            valid_rss,
+            valid_elapsed,
+            valid_elapsed + valid_elapsed + valid_rss,
+            valid_elapsed + valid_rss + valid_rss,
+            b"Elapsed (wall clock) time (h:mm:ss or m:ss): 0:61.0\n" + valid_rss,
+            valid_elapsed + b"Maximum resident set size (kbytes): -1\n",
+        ):
+            with self.subTest(content=content):
+                self.write_complete_outputs("scf")
+                self.write("runtime-time.txt", content)
+                self.assert_rejected("runtime_evidence_invalid")
+
+        self.write_complete_outputs("scf")
+        self.write(
+            "runtime-time.txt",
+            valid_elapsed
+            + b"Elapsed (wall clock) time malformed duplicate\n"
+            + valid_rss,
+        )
+        self.assert_rejected("runtime_evidence_invalid")
+
+    def test_very_long_numeric_metadata_fails_closed_with_stable_codes(self):
+        long_integer = b"9" * 5000
+        self.write_complete_outputs("scf")
+        self.write("vasp-exit-code.txt", long_integer + b"\n")
+        self.assert_rejected("vasp_exit_invalid")
+
+        self.write_complete_outputs("scf")
+        self.write(
+            "runtime-time.txt",
+            b"Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.25\n"
+            b"Maximum resident set size (kbytes): " + long_integer + b"\n",
+        )
+        self.assert_rejected("runtime_evidence_invalid")
+
+        self.write_complete_outputs("dos")
+        self.write("INCAR", b"NEDOS = " + long_integer + b"\n")
+        self.assert_rejected("dos_nedos_invalid", "dos")
+
+    def test_output_changed_during_validation_or_hash_is_rejected(self):
+        self.write_complete_outputs("scf")
+        original = competition_vasp._hash_opened_evidence
+        changed = False
+
+        def mutate_after_hash(opened):
+            nonlocal changed
+            result = original(opened)
+            if opened.name == "CHGCAR" and not changed:
+                changed = True
+                with (self.root / "CHGCAR").open("ab") as handle:
+                    handle.write(b"changed")
+            return result
+
+        with mock.patch(
+            "services.competition_vasp._hash_opened_evidence", side_effect=mutate_after_hash
+        ):
+            self.assert_rejected("evidence_changed")
+
+    def test_stable_file_does_not_require_lstat_and_fstat_ctime_to_match(self):
+        path = self.write("single-evidence", b"stable evidence\n")
+        original_lstat = Path.lstat
+
+        def lstat_with_cross_api_rounding(target):
+            identity = original_lstat(target)
+            if target != path:
+                return identity
+            return SimpleNamespace(
+                st_dev=identity.st_dev,
+                st_ino=identity.st_ino,
+                st_mode=identity.st_mode,
+                st_size=identity.st_size,
+                st_mtime_ns=identity.st_mtime_ns,
+                st_ctime_ns=identity.st_ctime_ns - 100,
+            )
+
+        with (
+            mock.patch.object(Path, "lstat", autospec=True, side_effect=lstat_with_cross_api_rounding),
+            competition_vasp.ExitStack() as resources,
+        ):
+            opened = competition_vasp._open_acceptance_evidence(
+                self.root, "single-evidence", None, resources
+            )
+            artifact = competition_vasp._hash_opened_evidence(opened)
+            competition_vasp._verify_evidence_unchanged(opened)
+
+        self.assertEqual(hashlib.sha256(b"stable evidence\n").hexdigest(), artifact["sha256"])
+
+    def test_invalid_stage_fails_without_reading_attempt_directory(self):
+        report = self.assert_rejected("stage_invalid", "legacy")
+        self.assertFalse(self.root.joinpath("OUTCAR").exists())
+
+    def test_default_loaders_are_lazy_and_use_bounded_pymatgen_parsing_options(self):
+        source = Path("services/competition_vasp.py").read_text(encoding="utf-8")
+        self.assertIn("from pymatgen.io.vasp.outputs import Vasprun", source)
+        self.assertIn("parse_dos=False", source)
+        self.assertIn("parse_eigen=False", source)
+        self.assertIn("parse_projected_eigen=False", source)
+        self.assertIn("from pymatgen.core import Structure", source)
+        self.assertIn("Structure.from_file(path)", source)
+
+        from pymatgen.core import Structure
+        from pymatgen.io.vasp import outputs
+
+        vasprun_path = self.root / "vasprun.xml"
+        contcar_path = self.root / "CONTCAR"
+        with mock.patch.object(outputs, "Vasprun", return_value=mock.sentinel.vasprun) as loader:
+            self.assertIs(
+                mock.sentinel.vasprun,
+                competition_vasp._default_vasprun_loader(vasprun_path),
+            )
+        loader.assert_called_once_with(
+            vasprun_path,
+            parse_dos=False,
+            parse_eigen=False,
+            parse_projected_eigen=False,
+        )
+        with mock.patch.object(
+            Structure, "from_file", return_value=mock.sentinel.structure
+        ) as loader:
+            self.assertIs(
+                mock.sentinel.structure,
+                competition_vasp._default_structure_loader(contcar_path),
+            )
+        loader.assert_called_once_with(contcar_path)
+
+    def test_source_does_not_reuse_legacy_vasp_authority_or_routes(self):
+        source = Path("services/competition_vasp.py").read_text(encoding="utf-8")
+        self.assertNotIn("spin-ase-data", source)
+        self.assertNotIn("_outcar_laststep_convergence", source)
+        self.assertNotIn("routers.vasp", source)
 
 
 if __name__ == "__main__":
