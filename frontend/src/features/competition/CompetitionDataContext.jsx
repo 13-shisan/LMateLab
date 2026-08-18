@@ -18,6 +18,7 @@ const loadingResource = Object.freeze({
   error: null,
   refreshing: false,
   requestKey: null,
+  refreshError: null,
 });
 
 
@@ -60,6 +61,35 @@ export function beginCompetitionResourceLoad(
 }
 
 
+export function finishCompetitionResourceError(
+  resource,
+  error,
+  { preserveReady = false, requestKey = null } = {},
+) {
+  if (
+    preserveReady
+    && resource?.status === 'ready'
+    && resource.data !== null
+    && resource.requestKey === requestKey
+  ) {
+    return {
+      ...resource,
+      error: null,
+      refreshing: false,
+      refreshError: 'refresh-failed',
+    };
+  }
+  return {
+    status: error?.code === 'forbidden' ? 'forbidden' : 'error',
+    data: null,
+    error,
+    refreshing: false,
+    requestKey,
+    refreshError: null,
+  };
+}
+
+
 export function useCompetitionResource(
   loader,
   { preserveReady = false, requestKey = null } = {},
@@ -87,16 +117,14 @@ export function useCompetitionResource(
           error: null,
           refreshing: false,
           requestKey,
+          refreshError: null,
         });
       } catch (error) {
         if (!active) return;
-        setResource({
-          status: error?.code === 'forbidden' ? 'forbidden' : 'error',
-          data: null,
-          error,
-          refreshing: false,
+        setResource((current) => finishCompetitionResourceError(current, error, {
+          preserveReady,
           requestKey,
-        });
+        }));
       }
     }
 

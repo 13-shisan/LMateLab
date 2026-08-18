@@ -306,6 +306,12 @@ export default function CompetitionWorkflowDetail() {
         {readOnly ? <PreviewReadOnlyNotice /> : null}
       </header>
 
+      {state.refreshError === 'refresh-failed' ? (
+        <p className="competition-result-failure-warning" role="status">
+          状态刷新暂时失败，已保留上一次有效数据并将自动重试
+        </p>
+      ) : null}
+
       <section className="competition-workflow-evidence" aria-labelledby="competition-workflow-identity-title">
         <div className="competition-workflow-section-heading">
           <h2 id="competition-workflow-identity-title">不可变标识</h2>

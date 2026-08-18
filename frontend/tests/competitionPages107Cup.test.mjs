@@ -1691,8 +1691,13 @@ test('workflow polling runs only for live active scientific states', () => {
         error: null,
         refreshing: false,
         requestKey: null,
+        refreshError: null,
       },
     },
+  );
+  const finishCompetitionResourceError = loadFunction(
+    contextSource,
+    'finishCompetitionResourceError',
   );
   const shouldPollWorkflow = loadFunction(detailSource, 'shouldPollWorkflow');
 
@@ -1714,6 +1719,7 @@ test('workflow polling runs only for live active scientific states', () => {
     error: null,
     refreshing: false,
     requestKey: 'workflow:wf-1',
+    refreshError: null,
   };
   assert.deepEqual(beginCompetitionResourceLoad(ready, {
     preserveReady: true,
@@ -1731,7 +1737,39 @@ test('workflow polling runs only for live active scientific states', () => {
     error: null,
     refreshing: false,
     requestKey: 'workflow:wf-2',
+    refreshError: null,
   });
+
+  const privateRefreshError = new Error('/home/private/workflow/status');
+  const preservedAfterRefreshError = finishCompetitionResourceError(
+    { ...ready, refreshing: true },
+    privateRefreshError,
+    { preserveReady: true, requestKey: 'workflow:wf-1' },
+  );
+  assert.deepEqual(preservedAfterRefreshError, {
+    ...ready,
+    refreshing: false,
+    refreshError: 'refresh-failed',
+  });
+  assert.equal(JSON.stringify(preservedAfterRefreshError).includes('/home/private'), false);
+
+  const initialError = finishCompetitionResourceError(
+    {
+      status: 'loading',
+      data: null,
+      error: null,
+      refreshing: false,
+      requestKey: 'workflow:wf-1',
+      refreshError: null,
+    },
+    privateRefreshError,
+    { preserveReady: true, requestKey: 'workflow:wf-1' },
+  );
+  assert.equal(initialError.status, 'error');
+  assert.equal(initialError.data, null);
+  assert.equal(initialError.error, privateRefreshError);
+  assert.equal(initialError.refreshing, false);
+  assert.equal(initialError.refreshError, null);
 
   assert.match(contextSource, /export\s+function\s+useCompetitionPollingResource\(/);
   assert.match(contextSource, /useCompetitionResource\(\s*useCallback\(/);
@@ -1743,6 +1781,9 @@ test('workflow polling runs only for live active scientific states', () => {
   assert.match(contextSource, /if\s*\(!active\)\s*return/g);
   assert.match(detailSource, /useCompetitionPollingResource\(loadWorkflow,/);
   assert.match(detailSource, /shouldPollWorkflow\(mode,/);
+  assert.match(detailSource, /state\.refreshError\s*===\s*['"]refresh-failed['"]/);
+  assert.match(detailSource, /状态刷新暂时失败，已保留上一次有效数据并将自动重试/);
+  assert.doesNotMatch(detailSource, /state\.refreshError\?\.message/);
 });
 
 test('workflow scientific failed, blocked, and awaiting acceptance remain distinct', () => {
