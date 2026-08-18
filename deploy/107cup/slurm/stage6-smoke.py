@@ -246,7 +246,8 @@ def test_only_probe() -> dict[str, object]:
         attempt_number=1,
         attempt_directory=attempt_directory,
         script_path=PROBE_SCRIPT,
-        probe_mode="success",
+        runner_kind="probe",
+        runner_mode="success",
     )
     result = client.test_submission(submission)
     queue = run_command(

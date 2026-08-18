@@ -1,6 +1,9 @@
+import ast
+import hashlib
 import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -84,6 +87,65 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertIn(required, source)
         for forbidden in ("shell=True", "docker", "vasp_std", "vasp_gam", "vasp_ncl"):
             self.assertNotIn(forbidden, source)
+
+    def test_stage6_smoke_test_only_probe_uses_typed_probe_runner(self):
+        source = self.read_required("slurm/stage6-smoke.py")
+        module = ast.parse(source)
+        function = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "test_only_probe"
+        )
+
+        class TypedSubmission:
+            created: list["TypedSubmission"] = []
+
+            def __init__(
+                self,
+                *,
+                workflow_id: str,
+                attempt_id: str,
+                step_key: str,
+                attempt_number: int,
+                attempt_directory: Path,
+                script_path: Path,
+                runner_kind: str,
+                runner_mode: str,
+            ) -> None:
+                self.runner_kind = runner_kind
+                self.runner_mode = runner_mode
+                self.job_name = "typed-probe-job"
+                self.__class__.created.append(self)
+
+        class Client:
+            def prepare_attempt_directory(self, workflow_id: str, attempt_id: str) -> Path:
+                return Path("/attempts") / workflow_id / attempt_id
+
+            def test_submission(self, submission: TypedSubmission) -> SimpleNamespace:
+                return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+        namespace = {
+            "PROBE_SCRIPT": Path("/fixed/probe.slurm"),
+            "SlurmSubmission": TypedSubmission,
+            "create_client": lambda: Client(),
+            "hashlib": hashlib,
+            "json": json,
+            "run_command": lambda *_args, **_kwargs: {"stdout": '{"jobs": []}'},
+            "uuid": SimpleNamespace(uuid4=lambda: "00000000-0000-4000-8000-000000000001"),
+        }
+        exec(
+            compile(ast.Module(body=[function], type_ignores=[]), "stage6-smoke.py", "exec"),
+            namespace,
+        )
+
+        result = namespace["test_only_probe"]()
+
+        self.assertEqual(0, result["returncode"])
+        self.assertEqual(1, len(TypedSubmission.created))
+        self.assertEqual(
+            ("probe", "success"),
+            (TypedSubmission.created[0].runner_kind, TypedSubmission.created[0].runner_mode),
+        )
 
     def test_stage6_smoke_resolves_the_pinned_release_when_slurm_spools_the_script(self):
         source = self.read_required("slurm/stage6-smoke.py")
