@@ -233,6 +233,170 @@ test('live malformed JSON responses never retain the response text', async () =>
   }
 });
 
+test('live transport failures expose only stable public errors', async () => {
+  const cases = [
+    {
+      label: 'fetch rejection',
+      fetchImpl: async () => {
+        throw new Error('/home/private/fetch-failure $(scancel 1)');
+      },
+      status: 0,
+      message: '网络连接失败，请稍后重试',
+      code: 'network-error',
+    },
+    {
+      label: 'fetch abort',
+      fetchImpl: async () => {
+        throw new DOMException('/home/private/abort-failure', 'AbortError');
+      },
+      status: 0,
+      message: '请求已中断，请重试',
+      code: 'request-aborted',
+    },
+    {
+      label: 'response text rejection',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: async () => {
+          throw new Error('/home/private/body-read-failure');
+        },
+      }),
+      status: 200,
+      message: '响应读取失败，请稍后重试',
+      code: 'response-read-error',
+    },
+    {
+      label: 'response blob rejection',
+      method: 'downloadArtifact',
+      args: ['wf-1', 'band'],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        blob: async () => {
+          throw new Error('/home/private/blob-read-failure');
+        },
+      }),
+      status: 200,
+      message: '响应读取失败，请稍后重试',
+      code: 'response-read-error',
+    },
+  ];
+
+  for (const expected of cases) {
+    const provider = createApiCompetitionDataProvider({
+      authHeaders: () => ({}),
+      fetchImpl: expected.fetchImpl,
+    });
+    const method = expected.method || 'getWorkflow';
+    const args = expected.args || ['wf-1'];
+    await assert.rejects(
+      () => provider[method](...args),
+      (error) => {
+        assert.equal(error.name, 'CompetitionRequestError', expected.label);
+        assert.equal(error.status, expected.status, expected.label);
+        assert.equal(error.code, expected.code, expected.label);
+        assert.equal(error.message, expected.message, expected.label);
+        assert.equal('details' in error, false, expected.label);
+        assert.equal('cause' in error, false, expected.label);
+        const publicError = `${error.message}\n${JSON.stringify(error)}`;
+        assert.doesNotMatch(publicError, /home\/private|scancel|failure/i, expected.label);
+        return true;
+      },
+    );
+  }
+});
+
+test('live requests time out even when fetch ignores abort signals', { timeout: 1000 }, async () => {
+  let suppliedSignal = null;
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async (_path, init) => {
+      suppliedSignal = init.signal;
+      return new Promise(() => {});
+    },
+  });
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    () => provider.getWorkflow('wf-1'),
+    (error) => {
+      assert.equal(error.name, 'CompetitionRequestError');
+      assert.equal(error.status, 0);
+      assert.equal(error.code, 'request-timeout');
+      assert.equal(error.message, '请求超时，请稍后重试');
+      assert.equal('details' in error, false);
+      assert.equal('cause' in error, false);
+      return true;
+    },
+  );
+  assert.ok(Date.now() - startedAt < 500);
+  assert.equal(suppliedSignal instanceof AbortSignal, true);
+  assert.equal(suppliedSignal.aborted, true);
+});
+
+test('live request timeout covers stalled body reads', { timeout: 1000 }, async () => {
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => new Promise(() => {}),
+    }),
+  });
+
+  await assert.rejects(
+    () => provider.getWorkflow('wf-1'),
+    (error) => error.name === 'CompetitionRequestError'
+      && error.status === 0
+      && error.code === 'request-timeout'
+      && error.message === '请求超时，请稍后重试',
+  );
+});
+
+test('live requests clear timers and safely observe late fetch rejection', { timeout: 1000 }, async () => {
+  let successfulSignal = null;
+  const successfulProvider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async (_path, init) => {
+      successfulSignal = init.signal;
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await successfulProvider.getWorkflow('wf-1');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(successfulSignal.aborted, false);
+
+  let rejectLateFetch;
+  const lateProvider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async () => new Promise((_resolve, reject) => {
+      rejectLateFetch = reject;
+    }),
+  });
+  const unhandled = [];
+  const captureUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', captureUnhandled);
+  try {
+    await assert.rejects(
+      () => lateProvider.getWorkflow('wf-1'),
+      (error) => error.code === 'request-timeout',
+    );
+    rejectLateFetch(new Error('/home/private/late-fetch-rejection'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', captureUnhandled);
+  }
+});
+
 test('demo database pagination is stable and reports the full total', async () => {
   const provider = createDemoCompetitionDataProvider();
   const firstPage = await provider.listDatabase({ page: 1, pageSize: 2 });
