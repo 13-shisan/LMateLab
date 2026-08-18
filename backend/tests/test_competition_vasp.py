@@ -1049,6 +1049,61 @@ class ScientificAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(["OUTCAR", "vasprun.xml"], [item["name"] for item in report.artifacts])
 
+    def test_acceptance_report_rejects_artifact_names_outside_fixed_vocabulary(self):
+        checks = ({"name": "stage", "passed": True},)
+        invalid_names = (
+            "C:licensed",
+            "file:secret",
+            "TITEL = licensed POTCAR body",
+            "secret.txt",
+            "../OUTCAR",
+            "dir/OUTCAR",
+            "dir\\OUTCAR",
+        )
+        for name in invalid_names:
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(
+                        True,
+                        None,
+                        checks,
+                        {},
+                        (self.valid_artifact(name),),
+                    )
+
+    def test_acceptance_report_accepts_every_fixed_artifact_name(self):
+        artifact_names = competition_vasp._ACCEPTANCE_ARTIFACT_NAMES
+        self.assertTrue(artifact_names)
+        for name in sorted(artifact_names):
+            with self.subTest(name=name):
+                report = AcceptanceReport(
+                    True,
+                    None,
+                    ({"name": f"artifact:{name}", "passed": True},),
+                    {},
+                    (self.valid_artifact(name),),
+                )
+                self.assertEqual(name, report.artifacts[0]["name"])
+
+    def test_generated_success_and_failure_reports_use_fixed_artifact_names(self):
+        allowed_names = competition_vasp._ACCEPTANCE_ARTIFACT_NAMES
+        for stage in FIXED_STAGE_ORDER:
+            with self.subTest(stage=stage):
+                self.write_complete_outputs(stage)
+                accepted = self.accept(stage)
+                self.assertTrue(accepted.accepted, accepted.as_dict())
+
+                self.write("vasp-exit-code.txt", b"1\n")
+                rejected = self.accept(stage)
+                self.assertFalse(rejected.accepted, rejected.as_dict())
+                self.assertEqual("vasp_exit_nonzero", rejected.reason_code)
+
+                for report in (accepted, rejected):
+                    self.assertTrue(
+                        {artifact["name"] for artifact in report.artifacts}
+                        <= allowed_names
+                    )
+
     def test_each_fixed_stage_accepts_complete_evidence_and_hashes_all_artifacts(self):
         for stage in FIXED_STAGE_ORDER:
             with self.subTest(stage=stage):

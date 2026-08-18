@@ -269,9 +269,10 @@ class AcceptanceReport:
                 or "/" in name
                 or "\\" in name
                 or "\0" in name
+                or name not in _ACCEPTANCE_ARTIFACT_NAMES
                 or name in artifact_names
             ):
-                raise ValueError("artifact names must be unique safe basenames")
+                raise ValueError("artifact names must be unique fixed acceptance names")
             if type(digest) is not str or _SHA256_RE.fullmatch(digest) is None:
                 raise ValueError("artifact SHA-256 values must be canonical")
             if type(size_bytes) is not int or size_bytes <= 0:
