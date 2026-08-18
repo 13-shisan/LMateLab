@@ -770,6 +770,57 @@ class AttemptInputTests(unittest.TestCase):
         self.assertTrue(staging.is_dir())
         self.assertEqual(rewritten, journal.read_bytes())
 
+    def test_failed_unpublished_cleanup_retains_journal_when_staging_removal_fails(self):
+        attempt_id = self._target_attempt("relax")
+        journal = competition_attempt_inputs._recovery_journal_path(self.root, self.workflow_id, attempt_id)
+        observed = {}
+
+        def fail_copy(**_kwargs):
+            raise VaspPolicyError("input_copy_mismatch", "synthetic copy policy failure")
+
+        def fail_removal(staging):
+            observed["staging"] = staging
+            observed["journal"] = journal.read_bytes()
+            raise OSError("synthetic staging removal failure")
+
+        with (
+            mock.patch("services.competition_attempt_inputs.copy_verified_input", side_effect=fail_copy),
+            mock.patch("services.competition_attempt_inputs.shutil.rmtree", side_effect=fail_removal),
+        ):
+            with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                prepare_attempt_inputs(
+                    session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                    step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                    release_commit=self.release_commit,
+                )
+        self.assertEqual("input_copy_mismatch", raised.exception.code)
+        self.assertTrue(observed["staging"].is_dir())
+        self.assertEqual(observed["journal"], journal.read_bytes())
+
+    def test_wrong_scope_journal_cannot_authorize_failed_unpublished_cleanup(self):
+        attempt_id = self._target_attempt("relax")
+        journal = competition_attempt_inputs._recovery_journal_path(self.root, self.workflow_id, attempt_id)
+        observed = {}
+
+        def rewrite_then_fail(**kwargs):
+            observed["staging"] = kwargs["destination"].parent
+            observed["journal"] = self._rewrite_journal_field(journal, "step_key", "scf")
+            raise VaspPolicyError("input_copy_mismatch", "synthetic copy policy failure")
+
+        with mock.patch(
+            "services.competition_attempt_inputs.copy_verified_input",
+            side_effect=rewrite_then_fail,
+        ):
+            with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                prepare_attempt_inputs(
+                    session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                    step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                    release_commit=self.release_commit,
+                )
+        self.assertEqual("input_copy_mismatch", raised.exception.code)
+        self.assertTrue(observed["staging"].is_dir())
+        self.assertEqual(observed["journal"], journal.read_bytes())
+
 
 if __name__ == "__main__":
     unittest.main()

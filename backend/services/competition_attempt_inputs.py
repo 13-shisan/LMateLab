@@ -201,12 +201,12 @@ def prepare_attempt_inputs(
     except VaspPolicyError:
         if not published:
             session.rollback()
-            _remove_owned_unpublished(staging, journal)
+            _remove_owned_unpublished(root, workflow, step, attempt, staging, journal)
         raise
     except Exception:
         session.rollback()
         if not published:
-            _remove_owned_unpublished(staging, journal)
+            _remove_owned_unpublished(root, workflow, step, attempt, staging, journal)
         raise
 
     _remove_recovery_journal(journal)
@@ -685,12 +685,37 @@ def _remove_recovery_journal(path: Path) -> None:
         pass
 
 
-def _remove_owned_unpublished(staging: Path, journal: Path) -> None:
+def _remove_owned_unpublished(
+    root: Path,
+    workflow: WorkflowRun,
+    step: WorkflowStep,
+    attempt: WorkflowAttempt,
+    staging: Path,
+    journal: Path,
+) -> None:
+    if not journal.exists():
+        return
     try:
-        if staging.exists() and staging.is_dir() and not staging.is_symlink():
-            shutil.rmtree(staging)
-    finally:
-        _remove_recovery_journal(journal)
+        payload = _validate_journal_identity(_read_recovery_journal(journal), workflow, step, attempt)
+        journal_staging = _safe_row_path(root, payload["staging_relative_path"])
+        allowed_prefix = root / ".attempt-staging" / workflow.id
+        if (
+            journal_staging != staging
+            or journal_staging.parent != allowed_prefix
+            or not journal_staging.name.startswith(f"{attempt.id}-")
+            or not journal_staging.name.endswith(".staging")
+            or journal_staging.is_symlink()
+        ):
+            return
+        if journal_staging.exists():
+            if not journal_staging.is_dir():
+                return
+            shutil.rmtree(journal_staging)
+        if journal_staging.exists() or journal_staging.is_symlink():
+            return
+    except (OSError, VaspPolicyError):
+        return
+    _remove_recovery_journal(journal)
 
 
 def _clear_journal_proven_orphan_staging(
