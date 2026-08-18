@@ -54,6 +54,12 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         cls.environment.start()
+        cls.identity_secret = patch.object(
+            importlib.import_module("auth_identity"),
+            "JWT_SECRET",
+            os.environ["JWT_SECRET"],
+        )
+        cls.identity_secret.start()
         sys.modules.pop("main_107cup", None)
         cls.main = importlib.import_module("main_107cup")
         cls.workflow_router = importlib.import_module(
@@ -63,6 +69,7 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def tearDownClass(cls):
         sys.modules.pop("main_107cup", None)
+        cls.identity_secret.stop()
         cls.environment.stop()
         cls.frontend.cleanup()
 
@@ -456,12 +463,19 @@ class CompetitionProductionCoordinatorTests(unittest.TestCase):
             },
         )
         cls.environment.start()
+        cls.identity_secret = patch.object(
+            importlib.import_module("auth_identity"),
+            "JWT_SECRET",
+            os.environ["JWT_SECRET"],
+        )
+        cls.identity_secret.start()
         sys.modules.pop("main_107cup", None)
         cls.main = importlib.import_module("main_107cup")
 
     @classmethod
     def tearDownClass(cls):
         sys.modules.pop("main_107cup", None)
+        cls.identity_secret.stop()
         cls.environment.stop()
         cls.frontend.cleanup()
 
