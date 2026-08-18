@@ -221,6 +221,16 @@ class AttemptInputTests(unittest.TestCase):
                 return row
         self.fail(f"missing ledger row for {logical_path}")
 
+    def _rewrite_journal_field(self, journal, field, value):
+        envelope = json.loads(journal.read_bytes())
+        envelope["payload"][field] = value
+        envelope["sha256"] = hashlib.sha256(
+            competition_attempt_inputs._canonical_json_bytes(envelope["payload"])
+        ).hexdigest()
+        rewritten = competition_attempt_inputs._canonical_json_bytes(envelope)
+        journal.write_bytes(rewritten)
+        return rewritten
+
     def test_status_constants_are_explicit_stage7_values(self):
         self.assertEqual("preparing", ATTEMPT_PREPARING)
         self.assertEqual("awaiting_acceptance", ATTEMPT_AWAITING_ACCEPTANCE)
@@ -250,6 +260,46 @@ class AttemptInputTests(unittest.TestCase):
 
         self.assertEqual({"INCAR", "KPOINTS", "POTCAR.spec", "POSCAR", "CHGCAR"}, prepared.names)
         self.assertFalse((prepared.directory / "WAVECAR").exists())
+
+    def test_band_and_dos_reject_parent_outputs_mixed_across_attempts(self):
+        for step_key in ("band", "dos"):
+            with self.subTest(step_key=step_key):
+                attempt_id = self._target_attempt(step_key)
+                parent_ids = (
+                    self._parent_attempt("scf", {"POSCAR": b"attempt-one-poscar"}),
+                    self._parent_attempt("scf", {"CHGCAR": b"attempt-two-charge"}),
+                )
+                try:
+                    with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                        prepare_attempt_inputs(
+                            session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                            step_key=step_key, attempt_id=attempt_id, template_version=self.template_version,
+                            release_commit=self.release_commit,
+                        )
+                    self.assertEqual("parent_lineage_invalid", raised.exception.code)
+                finally:
+                    for parent_id in parent_ids:
+                        self._delete_parent(parent_id)
+
+    def test_band_and_dos_reject_ambiguous_complete_parent_attempts(self):
+        for step_key in ("band", "dos"):
+            with self.subTest(step_key=step_key):
+                attempt_id = self._target_attempt(step_key)
+                parent_ids = (
+                    self._parent_attempt("scf", {"POSCAR": b"first-poscar", "CHGCAR": b"first-charge"}),
+                    self._parent_attempt("scf", {"POSCAR": b"second-poscar", "CHGCAR": b"second-charge"}),
+                )
+                try:
+                    with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                        prepare_attempt_inputs(
+                            session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                            step_key=step_key, attempt_id=attempt_id, template_version=self.template_version,
+                            release_commit=self.release_commit,
+                        )
+                    self.assertEqual("parent_lineage_invalid", raised.exception.code)
+                finally:
+                    for parent_id in parent_ids:
+                        self._delete_parent(parent_id)
 
     def test_rejects_tampered_stage5_or_parent_bytes(self):
         stage5_path = self.root / self._stage5_directory_id / "relax" / "INCAR"
@@ -655,6 +705,70 @@ class AttemptInputTests(unittest.TestCase):
                         release_commit=self.release_commit,
                     )
                 self.assertEqual("input_recovery_invalid", raised.exception.code)
+
+    def test_recovery_rejects_rehashed_wrong_scope_journal(self):
+        for field, value in (
+            ("step_key", "scf"),
+            ("template_version", "other_template"),
+            ("release_commit", "b" * 40),
+        ):
+            with self.subTest(field=field):
+                attempt_id = self._target_attempt("relax")
+                with mock.patch(
+                    "services.competition_attempt_inputs._commit_prepared_rows",
+                    side_effect=RuntimeError("synthetic database failure"),
+                ):
+                    with Session(self.engine) as session, self.assertRaises(VaspPolicyError):
+                        prepare_attempt_inputs(
+                            session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                            step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                            release_commit=self.release_commit,
+                        )
+                target = self.root / self.workflow_id / "attempts" / attempt_id
+                original = (target / "INCAR").read_bytes()
+                journal = competition_attempt_inputs._recovery_journal_path(self.root, self.workflow_id, attempt_id)
+                rewritten = self._rewrite_journal_field(journal, field, value)
+                with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                    prepare_attempt_inputs(
+                        session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                        step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                        release_commit=self.release_commit,
+                    )
+                self.assertEqual("input_recovery_invalid", raised.exception.code)
+                with Session(self.engine) as session:
+                    rows = list(session.scalars(select(WorkflowFile).where(
+                        WorkflowFile.attempt_id == attempt_id
+                    )))
+                self.assertEqual([], rows)
+                self.assertEqual(original, (target / "INCAR").read_bytes())
+                self.assertEqual(rewritten, journal.read_bytes())
+
+    def test_wrong_scope_journal_cannot_authorize_orphan_staging_cleanup(self):
+        attempt_id = self._target_attempt("relax")
+        staging = competition_attempt_inputs._new_staging_directory(self.root, self.workflow_id, attempt_id)
+        competition_attempt_inputs._make_private_directory(staging)
+        journal = competition_attempt_inputs._recovery_journal_path(self.root, self.workflow_id, attempt_id)
+        payload = competition_attempt_inputs._journal_payload(
+            workflow_id=self.workflow_id,
+            attempt_id=attempt_id,
+            step_key="relax",
+            template_version=self.template_version,
+            release_commit=self.release_commit,
+            staging=staging,
+            root=self.root,
+            rows=(),
+        )
+        competition_attempt_inputs._write_recovery_journal(journal, payload)
+        rewritten = self._rewrite_journal_field(journal, "step_key", "scf")
+        with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+            prepare_attempt_inputs(
+                session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                release_commit=self.release_commit,
+            )
+        self.assertEqual("input_recovery_invalid", raised.exception.code)
+        self.assertTrue(staging.is_dir())
+        self.assertEqual(rewritten, journal.read_bytes())
 
 
 if __name__ == "__main__":

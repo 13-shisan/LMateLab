@@ -149,7 +149,7 @@ def prepare_attempt_inputs(
             release_commit=release_commit,
         )
 
-    _clear_journal_proven_orphan_staging(root, workflow_id, attempt_id, journal)
+    _clear_journal_proven_orphan_staging(root, workflow, step, attempt, journal)
     sources = _select_input_sources(session, root, workflow, step, attempt)
     row_payloads = _row_payloads(
         workflow=workflow,
@@ -352,11 +352,19 @@ def _select_input_sources(
         _verify_source_row(root, row)
         sources.append(_InputSource(filename, f"stage5_{filename.lower()}", row, None))
 
+    parent_rows = {
+        parent_step_key: _accepted_parent_rows(
+            session,
+            root,
+            workflow,
+            parent_step_key,
+            tuple(source_name for key, source_name, _ in _PARENT_INPUTS[step.step_key] if key == parent_step_key),
+        )
+        for parent_step_key in {key for key, _, _ in _PARENT_INPUTS[step.step_key]}
+    }
     for parent_step_key, source_name, destination_name in _PARENT_INPUTS[step.step_key]:
-        matches = _accepted_parent_rows(session, root, workflow, parent_step_key, source_name)
-        if len(matches) != 1:
-            raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
-        parent_attempt, row = matches[0]
+        parent_attempt, rows = parent_rows[parent_step_key]
+        row = rows[source_name]
         sources.append(_InputSource(
             destination_name,
             f"{parent_step_key}_{source_name.lower()}",
@@ -373,8 +381,8 @@ def _accepted_parent_rows(
     root: Path,
     workflow: WorkflowRun,
     expected_step_key: str,
-    expected_name: str,
-) -> list[tuple[WorkflowAttempt, WorkflowFile]]:
+    expected_names: tuple[str, ...],
+) -> tuple[WorkflowAttempt, dict[str, WorkflowFile]]:
     parents = list(session.execute(
         select(WorkflowAttempt, WorkflowStep)
         .join(WorkflowStep, WorkflowAttempt.step_id == WorkflowStep.id)
@@ -387,24 +395,33 @@ def _accepted_parent_rows(
     ))
     if not parents:
         raise VaspPolicyError("parent_not_accepted", "parent attempt is not accepted")
-    result: list[tuple[WorkflowAttempt, WorkflowFile]] = []
+    if not expected_names or len(set(expected_names)) != len(expected_names):
+        raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
+    expected_set = set(expected_names)
+    result: list[tuple[WorkflowAttempt, dict[str, WorkflowFile]]] = []
     for parent, _parent_step in parents:
         rows = list(session.scalars(select(WorkflowFile).where(
             WorkflowFile.workflow_id == workflow.id,
             WorkflowFile.attempt_id == parent.id,
             WorkflowFile.source_kind == "attempt_output",
         )))
+        matching_rows: dict[str, list[WorkflowFile]] = {}
         for row in rows:
             if row.owner_id != workflow.owner_id:
                 raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
             metadata = _metadata_object(row.metadata_json, code="parent_lineage_invalid")
-            if metadata.get("logical_path") != expected_name:
+            logical_path = metadata.get("logical_path")
+            if logical_path not in expected_set:
                 continue
             if metadata.get("step_key") != expected_step_key or metadata.get("accepted") is not True:
                 raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
             _verify_source_row(root, row)
-            result.append((parent, row))
-    return result
+            matching_rows.setdefault(logical_path, []).append(row)
+        if all(len(matching_rows.get(name, ())) == 1 for name in expected_names):
+            result.append((parent, {name: matching_rows[name][0] for name in expected_names}))
+    if len(result) != 1:
+        raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
+    return result[0]
 
 
 def _verify_source_row(root: Path, row: WorkflowFile) -> None:
@@ -676,13 +693,19 @@ def _remove_owned_unpublished(staging: Path, journal: Path) -> None:
         _remove_recovery_journal(journal)
 
 
-def _clear_journal_proven_orphan_staging(root: Path, workflow_id: str, attempt_id: str, journal: Path) -> None:
+def _clear_journal_proven_orphan_staging(
+    root: Path,
+    workflow: WorkflowRun,
+    step: WorkflowStep,
+    attempt: WorkflowAttempt,
+    journal: Path,
+) -> None:
     if not journal.exists():
         return
-    payload = _validate_journal_identity(_read_recovery_journal(journal), workflow_id, attempt_id)
+    payload = _validate_journal_identity(_read_recovery_journal(journal), workflow, step, attempt)
     staging = _safe_row_path(root, payload["staging_relative_path"])
-    allowed_prefix = root / ".attempt-staging" / workflow_id
-    if staging.parent != allowed_prefix or not staging.name.startswith(f"{attempt_id}-") or not staging.name.endswith(".staging"):
+    allowed_prefix = root / ".attempt-staging" / workflow.id
+    if staging.parent != allowed_prefix or not staging.name.startswith(f"{attempt.id}-") or not staging.name.endswith(".staging"):
         raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is invalid")
     if staging.exists():
         if staging.is_symlink() or not staging.is_dir():
@@ -761,14 +784,14 @@ def _recover_or_return_published(
             raise VaspPolicyError("input_publication_mismatch", "attempt publication does not match current lineage")
         _validate_published_rows(target, rows, step.step_key)
         if journal.exists():
-            payload = _validate_journal_identity(_read_recovery_journal(journal), workflow.id, attempt.id)
+            payload = _validate_journal_identity(_read_recovery_journal(journal), workflow, step, attempt)
             if tuple(payload.get("rows", ())) != rows:
                 raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is invalid")
             _remove_recovery_journal(journal)
         return _prepared_result(attempt.id, target, rows)
     if not journal.exists():
         raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is unavailable")
-    payload = _validate_journal_identity(_read_recovery_journal(journal), workflow.id, attempt.id)
+    payload = _validate_journal_identity(_read_recovery_journal(journal), workflow, step, attempt)
     rows_value = payload.get("rows")
     if not isinstance(rows_value, list):
         raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is invalid")
@@ -792,11 +815,24 @@ def _recover_or_return_published(
     return _prepared_result(attempt.id, target, rows)
 
 
-def _validate_journal_identity(payload: dict[str, Any], workflow_id: str, attempt_id: str) -> dict[str, Any]:
+def _validate_journal_identity(
+    payload: dict[str, Any],
+    workflow: WorkflowRun,
+    step: WorkflowStep,
+    attempt: WorkflowAttempt,
+) -> dict[str, Any]:
     required = {"version", "workflow_id", "attempt_id", "step_key", "template_version", "release_commit", "staging_relative_path", "rows"}
-    if set(payload) != required or payload.get("version") != _JOURNAL_VERSION or payload.get("workflow_id") != workflow_id or payload.get("attempt_id") != attempt_id:
+    if (
+        set(payload) != required
+        or payload.get("version") != _JOURNAL_VERSION
+        or payload.get("workflow_id") != workflow.id
+        or payload.get("attempt_id") != attempt.id
+        or payload.get("step_key") != step.step_key
+        or payload.get("template_version") != workflow.template_version
+        or payload.get("release_commit") != workflow.release_commit
+    ):
         raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is invalid")
-    if payload.get("step_key") not in FIXED_STAGE_ORDER or not isinstance(payload.get("staging_relative_path"), str):
+    if not isinstance(payload.get("staging_relative_path"), str):
         raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is invalid")
     return payload
 
