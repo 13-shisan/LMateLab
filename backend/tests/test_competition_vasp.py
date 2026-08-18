@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import traceback
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from services import competition_vasp
 from services.competition_vasp import (
     DEFAULT_POTCAR_CONTRACT,
     FIXED_STAGE_ORDER,
@@ -78,6 +80,18 @@ class PotcarPolicyTests(unittest.TestCase):
             STAGE_REQUIRED_OUTPUTS,
         )
         self.assertEqual(("Mo_sv", "S"), DEFAULT_POTCAR_CONTRACT.symbols)
+        self.assertEqual(("PAW_PBE Mo_sv", "PAW_PBE S"), DEFAULT_POTCAR_CONTRACT.titles)
+        self.assertEqual(
+            (
+                "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
+                "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+            ),
+            DEFAULT_POTCAR_CONTRACT.source_sha256,
+        )
+        self.assertEqual(
+            "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+            DEFAULT_POTCAR_CONTRACT.combined_sha256,
+        )
         self.assertEqual("1.5.1", DEFAULT_POTCAR_CONTRACT.vaspkit_version)
 
     def test_fixed_stage_output_mapping_is_immutable(self):
@@ -188,6 +202,7 @@ class PotcarPolicyTests(unittest.TestCase):
             self.skipTest(f"Windows cannot create test symlink: {error.winerror}")
         self.assert_policy_error("potcar_symlink")
 
+        (self.root / "POTCAR").unlink()
         self.write_valid_inputs()
         metadata_target = self.root / "metadata-target"
         metadata_target.write_bytes(b"VASPKIT Standard Edition 1.5.1\n")
@@ -215,6 +230,17 @@ class PotcarPolicyTests(unittest.TestCase):
         self.write("vaspkit-version.txt", b"VASPKIT Standard Edition 1.5.0\n")
 
         self.assert_policy_error("vaspkit_version_invalid")
+
+    def test_potcar_accepts_one_anchored_vaspkit_banner_with_surrounding_output(self):
+        self.write_valid_inputs()
+        self.write(
+            "vaspkit-version.txt",
+            b"synthetic startup notice\nVASPKIT Standard Edition 1.5.1\nsynthetic footer\n",
+        )
+
+        result = validate_potcar(self.root, contract=self.contract)
+
+        self.assertEqual("1.5.1", result["vaspkit_version"])
 
     def test_potcar_rejects_non_banner_or_multiple_vaspkit_identities(self):
         self.write_valid_inputs()
@@ -252,6 +278,81 @@ class PotcarPolicyTests(unittest.TestCase):
         self.assertNotIn(str(self.root), str(error))
         self.assertNotIn(secret.decode(), str(error))
 
+    def test_low_level_oserror_cause_and_traceback_are_sanitized(self):
+        self.write_valid_inputs()
+        secret = "SYNTHETIC-PRIVATE-CONTENT"
+        raw_error = OSError(f"{secret} at {self.root / 'POTCAR'}")
+        original_lstat = Path.lstat
+
+        def fail_potcar_lstat(path, *args, **kwargs):
+            if path.name == "POTCAR":
+                raise raw_error
+            return original_lstat(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "lstat", autospec=True, side_effect=fail_potcar_lstat):
+            with self.assertRaises(VaspPolicyError) as raised:
+                validate_potcar(self.root, contract=self.contract)
+
+        formatted = "".join(
+            traceback.format_exception(
+                type(raised.exception), raised.exception, raised.exception.__traceback__
+            )
+        )
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertNotIn(str(self.root), formatted)
+        self.assertNotIn(secret, formatted)
+
+    def test_required_file_replacement_after_path_check_keeps_opened_identity(self):
+        self.write_valid_inputs()
+        path_replacement = self.write("path-replacement", b"replaced\n")
+        descriptor_replacement = self.write("descriptor-replacement", b"replaced\n")
+        original_path_open = Path.open
+        original_os_open = os.open
+        path_swapped = False
+        descriptor_swapped = False
+
+        def race_path_open(path, *args, **kwargs):
+            nonlocal path_swapped
+            if path.name == "POTCAR.spec" and not path_swapped:
+                os.replace(path_replacement, path)
+                path_swapped = True
+            return original_path_open(path, *args, **kwargs)
+
+        def race_descriptor_open(path, flags, *args, **kwargs):
+            nonlocal descriptor_swapped
+            descriptor = original_os_open(path, flags, *args, **kwargs)
+            if (
+                os.name != "nt"
+                and Path(path).name == "POTCAR.spec"
+                and not descriptor_swapped
+            ):
+                os.replace(descriptor_replacement, path)
+                descriptor_swapped = True
+            return descriptor
+
+        with (
+            mock.patch.object(Path, "open", autospec=True, side_effect=race_path_open),
+            mock.patch.object(os, "open", side_effect=race_descriptor_open),
+        ):
+            result = validate_potcar(self.root, contract=self.contract)
+
+        self.assertEqual(self.contract.combined_sha256, result["sha256"])
+
+    def test_additional_titles_are_rejected_before_unbounded_accumulation(self):
+        self.write_valid_inputs()
+        self.write(
+            "POTCAR",
+            self.potcar + b"".join(b"TITEL = PAW_PBE X 08Apr2002\n" for _ in range(100)),
+        )
+
+        with mock.patch(
+            "services.competition_vasp._canonical_title",
+            wraps=competition_vasp._canonical_title,
+        ) as canonical_title:
+            self.assert_policy_error("potcar_titles_invalid")
+
+        self.assertEqual(len(self.contract.titles), canonical_title.call_count)
+
     def test_potcar_stat_failure_is_sanitized(self):
         self.write_valid_inputs()
         raw_error = OSError(f"synthetic stat failure at {self.root}")
@@ -262,7 +363,10 @@ class PotcarPolicyTests(unittest.TestCase):
                 raise raw_error
             return original_stat(path, *args, **kwargs)
 
-        with mock.patch.object(Path, "stat", autospec=True, side_effect=fail_only_potcar_stat):
+        with (
+            mock.patch.object(Path, "stat", autospec=True, side_effect=fail_only_potcar_stat),
+            mock.patch.object(os, "fstat", side_effect=raw_error),
+        ):
             error = self.assert_policy_error("potcar_file_invalid")
 
         self.assertNotIn(str(self.root), str(error))

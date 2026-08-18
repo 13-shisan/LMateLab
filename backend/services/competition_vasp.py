@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import stat
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Final
+from typing import BinaryIO, Final
 
 
 FIXED_STAGE_ORDER: Final = ("relax", "scf", "band", "dos")
@@ -27,9 +29,19 @@ _REQUIRED_FILES: Final = (
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
 _SYMBOL_RE: Final = re.compile(r"^[A-Za-z0-9_]+$")
 _VERSION_RE: Final = re.compile(r"(?<![0-9.])(\d+\.\d+\.\d+)(?![0-9.])")
+_VASPKIT_BANNER_RE: Final = re.compile(
+    r"^VASPKIT Standard Edition (?P<version>\d+\.\d+\.\d+)$"
+)
 _MAX_METADATA_BYTES: Final = 8192
 _MAX_TITLE_LINE_BYTES: Final = 4096
 _HASH_CHUNK_BYTES: Final = 64 * 1024
+_O_BINARY: Final = getattr(os, "O_BINARY", 0)
+_O_CLOEXEC: Final = getattr(os, "O_CLOEXEC", 0)
+_O_NOFOLLOW: Final = getattr(os, "O_NOFOLLOW", 0)
+_O_DIRECTORY: Final = getattr(os, "O_DIRECTORY", 0)
+_HAS_SECURE_DIR_FD: Final = bool(
+    _O_NOFOLLOW and _O_DIRECTORY and os.open in getattr(os, "supports_dir_fd", set())
+)
 
 
 class VaspPolicyError(RuntimeError):
@@ -79,6 +91,12 @@ def _owned_string_tuple(field_name: str, value: object) -> tuple[str, ...]:
     return owned
 
 
+@dataclass(frozen=True)
+class _OpenedEvidence:
+    handle: BinaryIO
+    size_bytes: int
+
+
 DEFAULT_POTCAR_CONTRACT = PotcarContract(
     symbols=("Mo_sv", "S"),
     titles=("PAW_PBE Mo_sv", "PAW_PBE S"),
@@ -98,82 +116,207 @@ def validate_potcar(
 ) -> dict[str, object]:
     """Validate fixed POTCAR evidence without returning source material or paths."""
     root = Path(attempt_directory)
-    _validate_attempt_directory(root)
-    files = {name: _required_regular_file(root / name) for name in _REQUIRED_FILES}
+    root_identity = _validate_attempt_directory(root)
+    with ExitStack() as resources:
+        directory_fd = _open_attempt_directory(root, root_identity, resources)
+        files = {
+            name: _open_required_file(root, name, directory_fd, resources)
+            for name in _REQUIRED_FILES
+        }
+        if directory_fd is None:
+            _verify_attempt_directory_identity(root, root_identity)
 
-    expected_spec = b"".join(symbol.encode("ascii") + b"\n" for symbol in contract.symbols)
-    if _read_metadata(files["POTCAR.spec"]) != expected_spec:
-        raise VaspPolicyError("potcar_spec_invalid", "POTCAR specification does not match policy")
+        expected_spec = b"".join(symbol.encode("ascii") + b"\n" for symbol in contract.symbols)
+        if _read_metadata(files["POTCAR.spec"].handle) != expected_spec:
+            raise VaspPolicyError(
+                "potcar_spec_invalid", "POTCAR specification does not match policy"
+            )
 
-    evidence = _read_metadata(files["potcar-source-sha256.txt"])
-    expected_evidence = b"".join(
-        digest.encode("ascii") + b"  " + symbol.encode("ascii") + b"\n"
-        for digest, symbol in zip(contract.source_sha256, contract.symbols, strict=True)
-    )
-    if evidence != expected_evidence:
-        raise VaspPolicyError(
-            "potcar_source_evidence_invalid",
-            "POTCAR source checksum evidence does not match policy",
+        evidence = _read_metadata(files["potcar-source-sha256.txt"].handle)
+        expected_evidence = b"".join(
+            digest.encode("ascii") + b"  " + symbol.encode("ascii") + b"\n"
+            for digest, symbol in zip(contract.source_sha256, contract.symbols, strict=True)
         )
+        if evidence != expected_evidence:
+            raise VaspPolicyError(
+                "potcar_source_evidence_invalid",
+                "POTCAR source checksum evidence does not match policy",
+            )
 
-    vaspkit_text = _decode_metadata(_read_metadata(files["vaspkit-version.txt"]))
-    expected_banner = f"VASPKIT Standard Edition {contract.vaspkit_version}"
-    if vaspkit_text.splitlines() != [expected_banner]:
-        raise VaspPolicyError("vaspkit_version_invalid", "VASPKIT version does not match policy")
+        vaspkit_text = _decode_metadata(_read_metadata(files["vaspkit-version.txt"].handle))
+        _validate_vaspkit_banner(vaspkit_text, contract.vaspkit_version)
 
-    potcar_path = files["POTCAR"]
+        potcar = files["POTCAR"]
+        if potcar.size_bytes == 0:
+            raise VaspPolicyError("potcar_empty", "POTCAR is empty")
+        titles = _extract_titles(potcar.handle, contract.titles)
+        if titles != list(contract.titles):
+            raise VaspPolicyError("potcar_titles_invalid", "POTCAR titles do not match policy")
+        _rewind(potcar.handle)
+        digest = _sha256_file(potcar.handle)
+        if digest != contract.combined_sha256:
+            raise VaspPolicyError("potcar_sha256_mismatch", "POTCAR checksum does not match policy")
+
+        return {
+            "sha256": digest,
+            "titles": list(contract.titles),
+            "symbols": list(contract.symbols),
+            "source_sha256": list(contract.source_sha256),
+            "vaspkit_version": contract.vaspkit_version,
+            "size_bytes": potcar.size_bytes,
+        }
+
+
+def _validate_attempt_directory(root: Path) -> os.stat_result:
     try:
-        size_bytes = potcar_path.stat().st_size
-    except OSError as error:
-        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from error
-    if size_bytes == 0:
-        raise VaspPolicyError("potcar_empty", "POTCAR is empty")
-    titles = _extract_titles(potcar_path, contract.titles)
-    if titles != list(contract.titles):
-        raise VaspPolicyError("potcar_titles_invalid", "POTCAR titles do not match policy")
-    digest = _sha256_file(potcar_path)
-    if digest != contract.combined_sha256:
-        raise VaspPolicyError("potcar_sha256_mismatch", "POTCAR checksum does not match policy")
-
-    return {
-        "sha256": digest,
-        "titles": list(contract.titles),
-        "symbols": list(contract.symbols),
-        "source_sha256": list(contract.source_sha256),
-        "vaspkit_version": contract.vaspkit_version,
-        "size_bytes": size_bytes,
-    }
-
-
-def _validate_attempt_directory(root: Path) -> None:
-    try:
-        mode = root.lstat().st_mode
-    except OSError as error:
-        raise VaspPolicyError("attempt_directory_invalid", "attempt directory is unavailable") from error
-    if stat.S_ISLNK(mode):
+        identity = root.lstat()
+    except OSError:
+        raise VaspPolicyError(
+            "attempt_directory_invalid", "attempt directory is unavailable"
+        ) from None
+    if stat.S_ISLNK(identity.st_mode):
         raise VaspPolicyError("attempt_directory_symlink", "attempt directory must not be a symlink")
-    if not stat.S_ISDIR(mode):
+    if not stat.S_ISDIR(identity.st_mode):
         raise VaspPolicyError("attempt_directory_invalid", "attempt directory is invalid")
+    return identity
 
 
-def _required_regular_file(path: Path) -> Path:
+def _open_attempt_directory(
+    root: Path,
+    expected_identity: os.stat_result,
+    resources: ExitStack,
+) -> int | None:
+    if not _HAS_SECURE_DIR_FD:
+        return None
+    descriptor: int | None = None
     try:
-        mode = path.lstat().st_mode
-    except OSError as error:
-        raise VaspPolicyError("potcar_file_missing", "required POTCAR evidence is unavailable") from error
-    if stat.S_ISLNK(mode):
+        descriptor = os.open(
+            root,
+            os.O_RDONLY | _O_CLOEXEC | _O_DIRECTORY | _O_NOFOLLOW,
+        )
+        opened_identity = os.fstat(descriptor)
+    except OSError:
+        _close_descriptor(descriptor)
+        raise VaspPolicyError(
+            "attempt_directory_invalid", "attempt directory could not be opened"
+        ) from None
+    if not stat.S_ISDIR(opened_identity.st_mode) or not _same_file_identity(
+        expected_identity, opened_identity
+    ):
+        _close_descriptor(descriptor)
+        raise VaspPolicyError("attempt_directory_invalid", "attempt directory changed")
+    resources.callback(_close_descriptor, descriptor)
+    return descriptor
+
+
+def _verify_attempt_directory_identity(
+    root: Path, expected_identity: os.stat_result
+) -> None:
+    try:
+        current_identity = root.lstat()
+    except OSError:
+        raise VaspPolicyError("attempt_directory_invalid", "attempt directory changed") from None
+    if stat.S_ISLNK(current_identity.st_mode) or not _same_file_identity(
+        expected_identity, current_identity
+    ):
+        raise VaspPolicyError("attempt_directory_invalid", "attempt directory changed")
+
+
+def _open_required_file(
+    root: Path,
+    name: str,
+    directory_fd: int | None,
+    resources: ExitStack,
+) -> _OpenedEvidence:
+    path = root / name
+    try:
+        if directory_fd is None:
+            expected_identity = path.lstat()
+        else:
+            expected_identity = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError:
+        raise VaspPolicyError(
+            "potcar_file_missing", "required POTCAR evidence is unavailable"
+        ) from None
+    if stat.S_ISLNK(expected_identity.st_mode):
         raise VaspPolicyError("potcar_symlink", "POTCAR evidence must not be a symlink")
-    if not stat.S_ISREG(mode):
+    if not stat.S_ISREG(expected_identity.st_mode):
         raise VaspPolicyError("potcar_file_invalid", "POTCAR evidence must be a regular file")
-    return path
 
-
-def _read_metadata(path: Path) -> bytes:
+    flags = os.O_RDONLY | _O_BINARY | _O_CLOEXEC | _O_NOFOLLOW
+    descriptor: int | None = None
     try:
-        with path.open("rb") as handle:
-            content = handle.read(_MAX_METADATA_BYTES + 1)
-    except OSError as error:
-        raise VaspPolicyError("potcar_file_invalid", "POTCAR evidence could not be read") from error
+        if directory_fd is None:
+            descriptor = os.open(path, flags)
+        else:
+            descriptor = os.open(name, flags, dir_fd=directory_fd)
+        opened_identity = os.fstat(descriptor)
+    except OSError:
+        _close_descriptor(descriptor)
+        raise VaspPolicyError(
+            "potcar_file_invalid", "POTCAR evidence could not be opened"
+        ) from None
+
+    if not stat.S_ISREG(opened_identity.st_mode):
+        _close_descriptor(descriptor)
+        raise VaspPolicyError("potcar_file_invalid", "POTCAR evidence must be a regular file")
+    if not _same_file_identity(expected_identity, opened_identity):
+        _close_descriptor(descriptor)
+        raise VaspPolicyError("potcar_file_changed", "POTCAR evidence changed while opening")
+    if directory_fd is None:
+        try:
+            final_identity = path.lstat()
+        except OSError:
+            _close_descriptor(descriptor)
+            raise VaspPolicyError("potcar_file_changed", "POTCAR evidence changed") from None
+        if stat.S_ISLNK(final_identity.st_mode) or not _same_file_identity(
+            opened_identity, final_identity
+        ):
+            _close_descriptor(descriptor)
+            raise VaspPolicyError("potcar_file_changed", "POTCAR evidence changed")
+    try:
+        handle = os.fdopen(descriptor, "rb", closefd=True)
+    except OSError:
+        _close_descriptor(descriptor)
+        raise VaspPolicyError(
+            "potcar_file_invalid", "POTCAR evidence could not be opened"
+        ) from None
+    resources.callback(_close_handle, handle)
+    return _OpenedEvidence(handle=handle, size_bytes=opened_identity.st_size)
+
+
+def _same_file_identity(expected: os.stat_result, opened: os.stat_result) -> bool:
+    return bool(
+        expected.st_ino
+        and opened.st_ino
+        and expected.st_dev == opened.st_dev
+        and expected.st_ino == opened.st_ino
+    )
+
+
+def _close_descriptor(descriptor: int | None) -> None:
+    if descriptor is None:
+        return
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+
+
+def _close_handle(handle: BinaryIO) -> None:
+    try:
+        handle.close()
+    except OSError:
+        pass
+
+
+def _read_metadata(handle: BinaryIO) -> bytes:
+    try:
+        content = handle.read(_MAX_METADATA_BYTES + 1)
+    except OSError:
+        raise VaspPolicyError(
+            "potcar_file_invalid", "POTCAR evidence could not be read"
+        ) from None
     if len(content) > _MAX_METADATA_BYTES:
         raise VaspPolicyError("potcar_metadata_too_large", "POTCAR metadata exceeds the policy limit")
     return content
@@ -182,35 +325,52 @@ def _read_metadata(path: Path) -> bytes:
 def _decode_metadata(content: bytes) -> str:
     try:
         return content.decode("ascii")
-    except UnicodeDecodeError as error:
-        raise VaspPolicyError("vaspkit_version_invalid", "VASPKIT version evidence is invalid") from error
+    except UnicodeDecodeError:
+        raise VaspPolicyError(
+            "vaspkit_version_invalid", "VASPKIT version evidence is invalid"
+        ) from None
 
 
-def _extract_titles(path: Path, expected_titles: tuple[str, ...]) -> list[str]:
+def _validate_vaspkit_banner(content: str, expected_version: str) -> None:
+    lines = content.splitlines()
+    banner_matches = [match for line in lines if (match := _VASPKIT_BANNER_RE.fullmatch(line))]
+    product_lines = [line for line in lines if "VASPKIT" in line]
+    version_identities = _VERSION_RE.findall(content)
+    if (
+        len(banner_matches) != 1
+        or banner_matches[0].group("version") != expected_version
+        or len(product_lines) != 1
+        or version_identities != [expected_version]
+    ):
+        raise VaspPolicyError("vaspkit_version_invalid", "VASPKIT version does not match policy")
+
+
+def _extract_titles(handle: BinaryIO, expected_titles: tuple[str, ...]) -> list[str]:
     titles: list[str] = []
     try:
-        with path.open("rb") as handle:
-            while line := handle.readline(_MAX_TITLE_LINE_BYTES + 1):
-                if len(line) > _MAX_TITLE_LINE_BYTES:
-                    raise VaspPolicyError(
-                        "potcar_titles_invalid", "POTCAR title metadata exceeds the policy limit"
-                    )
-                if not line.startswith(b"TITEL"):
-                    continue
-                try:
-                    text = line.decode("ascii").rstrip("\r\n")
-                except UnicodeDecodeError as error:
-                    raise VaspPolicyError(
-                        "potcar_titles_invalid", "POTCAR title metadata is invalid"
-                    ) from error
-                match = re.fullmatch(r"TITEL\s*=\s*(.+)", text)
-                if match is None:
-                    raise VaspPolicyError("potcar_titles_invalid", "POTCAR title metadata is invalid")
-                titles.append(_canonical_title(match.group(1), expected_titles))
+        while line := handle.readline(_MAX_TITLE_LINE_BYTES + 1):
+            if len(line) > _MAX_TITLE_LINE_BYTES:
+                raise VaspPolicyError(
+                    "potcar_titles_invalid", "POTCAR title metadata exceeds the policy limit"
+                )
+            if not line.startswith(b"TITEL"):
+                continue
+            if len(titles) >= len(expected_titles):
+                raise VaspPolicyError("potcar_titles_invalid", "POTCAR has additional titles")
+            try:
+                text = line.decode("ascii").rstrip("\r\n")
+            except UnicodeDecodeError:
+                raise VaspPolicyError(
+                    "potcar_titles_invalid", "POTCAR title metadata is invalid"
+                ) from None
+            match = re.fullmatch(r"TITEL\s*=\s*(.+)", text)
+            if match is None:
+                raise VaspPolicyError("potcar_titles_invalid", "POTCAR title metadata is invalid")
+            titles.append(_canonical_title(match.group(1), expected_titles))
     except VaspPolicyError:
         raise
-    except OSError as error:
-        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from error
+    except OSError:
+        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from None
     return titles
 
 
@@ -221,12 +381,18 @@ def _canonical_title(value: str, expected_titles: tuple[str, ...]) -> str:
     return value
 
 
-def _sha256_file(path: Path) -> str:
+def _rewind(handle: BinaryIO) -> None:
+    try:
+        handle.seek(0)
+    except OSError:
+        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from None
+
+
+def _sha256_file(handle: BinaryIO) -> str:
     digest = hashlib.sha256()
     try:
-        with path.open("rb") as handle:
-            while chunk := handle.read(_HASH_CHUNK_BYTES):
-                digest.update(chunk)
-    except OSError as error:
-        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from error
+        while chunk := handle.read(_HASH_CHUNK_BYTES):
+            digest.update(chunk)
+    except OSError:
+        raise VaspPolicyError("potcar_file_invalid", "POTCAR could not be read") from None
     return digest.hexdigest()
