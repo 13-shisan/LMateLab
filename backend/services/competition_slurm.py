@@ -15,6 +15,10 @@ from typing import Any, Callable, Iterable
 
 FIXED_STEPS = frozenset({"relax", "scf", "band", "dos"})
 PROBE_MODES = frozenset({"success", "fail", "cancel"})
+RUNNER_MODES = {
+    "probe": PROBE_MODES,
+    "vasp": FIXED_STEPS,
+}
 _JOB_ID_RE = re.compile(r"^([1-9][0-9]*)(?:;[A-Za-z0-9_.-]+)?$")
 _LOG_NAMES = {"stdout": "stdout.log", "stderr": "stderr.log"}
 
@@ -66,23 +70,18 @@ class SlurmSubmission:
     attempt_number: int
     attempt_directory: Path
     script_path: Path
-    probe_mode: str
+    runner_kind: str
+    runner_mode: str
 
     def __post_init__(self) -> None:
-        for name in ("workflow_id", "attempt_id"):
-            value = getattr(self, name)
-            try:
-                parsed = uuid.UUID(value)
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ValueError(f"{name} must be a canonical UUID") from exc
-            if str(parsed) != value:
-                raise ValueError(f"{name} must be a canonical UUID")
+        _validate_canonical_uuid("workflow_id", self.workflow_id)
+        _validate_canonical_uuid("attempt_id", self.attempt_id)
         if self.step_key not in FIXED_STEPS:
             raise ValueError("step_key is not part of the fixed workflow")
         if isinstance(self.attempt_number, bool) or self.attempt_number < 1:
             raise ValueError("attempt_number must be a positive integer")
-        if self.probe_mode not in PROBE_MODES:
-            raise ValueError("probe_mode is not allowed")
+        if self.runner_mode not in RUNNER_MODES.get(self.runner_kind, frozenset()):
+            raise ValueError("runner mode is not allowed")
 
     @property
     def job_name(self) -> str:
@@ -224,7 +223,7 @@ class SlurmClient:
                 f"--output={attempt_directory / 'stdout.log'}",
                 f"--error={attempt_directory / 'stderr.log'}",
                 str(script_path),
-                submission.probe_mode,
+                submission.runner_mode,
                 submission.workflow_id,
                 submission.attempt_id,
             ]

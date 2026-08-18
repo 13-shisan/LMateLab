@@ -93,7 +93,12 @@ class SlurmCommandContractTests(unittest.TestCase):
         self.attempt_dir = self.root / "workflows" / self.workflow_id / "attempts" / self.attempt_id
         self.attempt_dir.mkdir(parents=True)
 
-    def submission(self, *, mode: str = "success") -> SlurmSubmission:
+    def submission(
+        self,
+        *,
+        runner_kind: str = "probe",
+        runner_mode: str = "success",
+    ) -> SlurmSubmission:
         return SlurmSubmission(
             workflow_id=self.workflow_id,
             attempt_id=self.attempt_id,
@@ -101,7 +106,8 @@ class SlurmCommandContractTests(unittest.TestCase):
             attempt_number=1,
             attempt_directory=self.attempt_dir,
             script_path=self.script,
-            probe_mode=mode,
+            runner_kind=runner_kind,
+            runner_mode=runner_mode,
         )
 
     def client(self, executor: RecordingExecutor, *, max_output_bytes: int = 4096) -> SlurmClient:
@@ -149,6 +155,28 @@ class SlurmCommandContractTests(unittest.TestCase):
         self.assertEqual(subprocess.PIPE, kwargs["stdout"])
         self.assertEqual(subprocess.PIPE, kwargs["stderr"])
         self.assertEqual(3.0, kwargs["timeout"])
+
+    def test_submission_accepts_only_fixed_runner_mode_pairs(self):
+        probe = self.submission(runner_kind="probe", runner_mode="success")
+        vasp = self.submission(runner_kind="vasp", runner_mode="scf")
+
+        self.assertEqual(("probe", "success"), (probe.runner_kind, probe.runner_mode))
+        self.assertEqual(("vasp", "scf"), (vasp.runner_kind, vasp.runner_mode))
+        for kind, mode in (("probe", "scf"), ("vasp", "success"), ("shell", "id")):
+            with self.subTest(kind=kind, mode=mode), self.assertRaises(ValueError):
+                self.submission(runner_kind=kind, runner_mode=mode)
+
+    def test_vasp_submission_argv_is_fixed_and_shell_free(self):
+        executor = RecordingExecutor()
+        client = self.client(executor)
+        submission = self.submission(runner_kind="vasp", runner_mode="dos")
+
+        result = client.test_submission(submission)
+
+        self.assertEqual(0, result.returncode)
+        argv = executor.calls[-1][0]
+        self.assertEqual(["dos", submission.workflow_id, submission.attempt_id], argv[-3:])
+        self.assertNotIn("--wrap", argv)
 
     def test_submit_accepts_only_a_numeric_parsable_job_id(self):
         executor = RecordingExecutor(stdout=b"12345;training\n")
@@ -247,7 +275,8 @@ class SlurmFilesystemBoundaryTests(unittest.TestCase):
                     attempt_number=1,
                     attempt_directory=candidate,
                     script_path=script,
-                    probe_mode="success",
+                    runner_kind="probe",
+                    runner_mode="success",
                 )
                 with self.assertRaises(ValueError):
                     client.submit(submission)

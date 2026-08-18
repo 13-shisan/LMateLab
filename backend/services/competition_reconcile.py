@@ -152,7 +152,8 @@ class CompetitionReconciler:
                 attempt_number=attempt_number,
                 attempt_directory=attempt_directory,
                 script_path=self.probe_script,
-                probe_mode=probe_mode,
+                runner_kind="probe",
+                runner_mode=probe_mode,
             )
             session.add(
                 WorkflowAttempt(
@@ -404,7 +405,8 @@ class CompetitionReconciler:
             attempt_number=attempt.attempt_number,
             attempt_directory=Path(expected_directory),
             script_path=self.probe_script,
-            probe_mode=metadata.get("probe_mode"),
+            runner_kind="probe",
+            runner_mode=metadata.get("probe_mode"),
         )
         claim = AttemptClaim(
             workflow_id=run.id,
