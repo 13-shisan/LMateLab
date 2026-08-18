@@ -8,10 +8,11 @@ import shutil
 import stat
 import uuid
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, BinaryIO, Final
+from typing import Any, BinaryIO, Final, Iterator
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -93,11 +94,17 @@ _STAGE5_INPUT_NAMES: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType({
     "band": ("INCAR", "KPOINTS", "POTCAR.spec"),
     "dos": ("INCAR", "KPOINTS", "POTCAR.spec"),
 })
-_PARENT_INPUTS: Final[Mapping[str, tuple[tuple[str, str, str], ...]]] = MappingProxyType({
+_PARENT_INPUTS: Final[Mapping[str, tuple[tuple[str, str, str, str], ...]]] = MappingProxyType({
     "relax": (),
-    "scf": (("relax", "CONTCAR", "POSCAR"),),
-    "band": (("scf", "POSCAR", "POSCAR"), ("scf", "CHGCAR", "CHGCAR")),
-    "dos": (("scf", "POSCAR", "POSCAR"), ("scf", "CHGCAR", "CHGCAR")),
+    "scf": (("relax", "CONTCAR", "POSCAR", "attempt_output"),),
+    "band": (
+        ("scf", "POSCAR", "POSCAR", "attempt_input"),
+        ("scf", "CHGCAR", "CHGCAR", "attempt_output"),
+    ),
+    "dos": (
+        ("scf", "POSCAR", "POSCAR", "attempt_input"),
+        ("scf", "CHGCAR", "CHGCAR", "attempt_output"),
+    ),
 })
 
 
@@ -128,6 +135,30 @@ def prepare_attempt_inputs(
     if not isinstance(release_commit, str) or re.fullmatch(r"[0-9a-f]{40}", release_commit) is None:
         raise VaspPolicyError("workflow_provenance_invalid", "workflow provenance is invalid")
 
+    with _attempt_preparation_lock(root, workflow_id, attempt_id):
+        return _prepare_attempt_inputs_locked(
+            session=session,
+            root=root,
+            owner_id=owner_id,
+            workflow_id=workflow_id,
+            step_key=step_key,
+            attempt_id=attempt_id,
+            template_version=template_version,
+            release_commit=release_commit,
+        )
+
+
+def _prepare_attempt_inputs_locked(
+    *,
+    session: Session,
+    root: Path,
+    owner_id: int,
+    workflow_id: str,
+    step_key: str,
+    attempt_id: str,
+    template_version: str,
+    release_commit: str,
+) -> PreparedAttempt:
     workflow, step, attempt = _owned_attempt(
         session, owner_id, workflow_id, step_key, attempt_id, template_version, release_commit
     )
@@ -219,6 +250,63 @@ def _workflow_root(value: str | os.PathLike[str]) -> Path:
         raise VaspPolicyError("workflow_root_invalid", "workflow root is invalid")
     _make_private_directory(root)
     return root
+
+
+def _attempt_lock_path(root: Path, workflow_id: str, attempt_id: str) -> Path:
+    locks_root = root / ".attempt-locks"
+    workflow_locks = locks_root / workflow_id
+    _make_private_directory(locks_root)
+    _make_private_directory(workflow_locks)
+    return workflow_locks / f"{attempt_id}.lock"
+
+
+@contextmanager
+def _attempt_preparation_lock(
+    root: Path,
+    workflow_id: str,
+    attempt_id: str,
+) -> Iterator[None]:
+    descriptor: int | None = None
+    try:
+        path = _attempt_lock_path(root, workflow_id, attempt_id)
+        descriptor = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | _O_BINARY | _O_CLOEXEC | _O_NOFOLLOW,
+            0o600,
+        )
+        opened = os.fstat(descriptor)
+        identity = path.lstat()
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(identity.st_mode)
+            or opened.st_nlink != 1
+            or not _same_file_identity(identity, opened)
+        ):
+            raise OSError
+        path.chmod(0o600)
+        if opened.st_size < 1:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (ImportError, OSError):
+        _close_descriptor(descriptor)
+        raise VaspPolicyError(
+            "attempt_preparation_in_progress",
+            "attempt preparation is already in progress",
+        ) from None
+    try:
+        yield
+    finally:
+        _close_descriptor(descriptor)
 
 
 def _canonical_uuid(field_name: str, value: object) -> str:
@@ -358,11 +446,15 @@ def _select_input_sources(
             root,
             workflow,
             parent_step_key,
-            tuple(source_name for key, source_name, _ in _PARENT_INPUTS[step.step_key] if key == parent_step_key),
+            tuple(
+                (source_name, source_kind)
+                for key, source_name, _, source_kind in _PARENT_INPUTS[step.step_key]
+                if key == parent_step_key
+            ),
         )
-        for parent_step_key in {key for key, _, _ in _PARENT_INPUTS[step.step_key]}
+        for parent_step_key in {key for key, _, _, _ in _PARENT_INPUTS[step.step_key]}
     }
-    for parent_step_key, source_name, destination_name in _PARENT_INPUTS[step.step_key]:
+    for parent_step_key, source_name, destination_name, _source_kind in _PARENT_INPUTS[step.step_key]:
         parent_attempt, rows = parent_rows[parent_step_key]
         row = rows[source_name]
         sources.append(_InputSource(
@@ -381,7 +473,7 @@ def _accepted_parent_rows(
     root: Path,
     workflow: WorkflowRun,
     expected_step_key: str,
-    expected_names: tuple[str, ...],
+    expected_inputs: tuple[tuple[str, str], ...],
 ) -> tuple[WorkflowAttempt, dict[str, WorkflowFile]]:
     parents = list(session.execute(
         select(WorkflowAttempt, WorkflowStep)
@@ -395,15 +487,20 @@ def _accepted_parent_rows(
     ))
     if not parents:
         raise VaspPolicyError("parent_not_accepted", "parent attempt is not accepted")
-    if not expected_names or len(set(expected_names)) != len(expected_names):
+    expected_kinds = dict(expected_inputs)
+    if (
+        not expected_inputs
+        or len(expected_kinds) != len(expected_inputs)
+        or not set(expected_kinds.values()).issubset({"attempt_input", "attempt_output"})
+    ):
         raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
-    expected_set = set(expected_names)
+    expected_set = set(expected_kinds)
     result: list[tuple[WorkflowAttempt, dict[str, WorkflowFile]]] = []
     for parent, _parent_step in parents:
         rows = list(session.scalars(select(WorkflowFile).where(
             WorkflowFile.workflow_id == workflow.id,
             WorkflowFile.attempt_id == parent.id,
-            WorkflowFile.source_kind == "attempt_output",
+            WorkflowFile.source_kind.in_(set(expected_kinds.values())),
         )))
         matching_rows: dict[str, list[WorkflowFile]] = {}
         for row in rows:
@@ -413,12 +510,16 @@ def _accepted_parent_rows(
             logical_path = metadata.get("logical_path")
             if logical_path not in expected_set:
                 continue
-            if metadata.get("step_key") != expected_step_key or metadata.get("accepted") is not True:
+            if row.source_kind != expected_kinds[logical_path]:
+                continue
+            if metadata.get("step_key") != expected_step_key:
+                raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
+            if row.source_kind == "attempt_output" and metadata.get("accepted") is not True:
                 raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
             _verify_source_row(root, row)
             matching_rows.setdefault(logical_path, []).append(row)
-        if all(len(matching_rows.get(name, ())) == 1 for name in expected_names):
-            result.append((parent, {name: matching_rows[name][0] for name in expected_names}))
+        if all(len(matching_rows.get(name, ())) == 1 for name in expected_kinds):
+            result.append((parent, {name: matching_rows[name][0] for name in expected_kinds}))
     if len(result) != 1:
         raise VaspPolicyError("parent_lineage_invalid", "parent attempt lineage is invalid")
     return result[0]
@@ -810,7 +911,7 @@ def _recover_or_return_published(
         _validate_published_rows(target, rows, step.step_key)
         if journal.exists():
             payload = _validate_journal_identity(_read_recovery_journal(journal), workflow, step, attempt)
-            if tuple(payload.get("rows", ())) != rows:
+            if not _same_published_journal_rows(payload.get("rows"), rows):
                 raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal is invalid")
             _remove_recovery_journal(journal)
         return _prepared_result(attempt.id, target, rows)
@@ -887,6 +988,22 @@ def _same_recovery_rows(actual: tuple[dict[str, Any], ...], expected: tuple[dict
     return True
 
 
+def _same_published_journal_rows(
+    saved: object,
+    current: tuple[dict[str, Any], ...],
+) -> bool:
+    if not isinstance(saved, list) or len(saved) != len(current):
+        return False
+    if not all(isinstance(row, dict) for row in saved):
+        return False
+    try:
+        saved_rows = sorted(_canonical_json_bytes(row) for row in saved)
+        current_rows = sorted(_canonical_json_bytes(row) for row in current)
+    except VaspPolicyError:
+        return False
+    return saved_rows == current_rows
+
+
 def _validate_published_rows(target: Path, rows: tuple[dict[str, Any], ...], step_key: str) -> None:
     expected_names = _expected_destination_names(step_key)
     if len(rows) != len(expected_names) or {Path(row.get("relative_path", "")).name for row in rows} != expected_names:
@@ -909,4 +1026,7 @@ def _validate_published_rows(target: Path, rows: tuple[dict[str, Any], ...], ste
 
 
 def _expected_destination_names(step_key: str) -> set[str]:
-    return set(_STAGE5_INPUT_NAMES[step_key]) | {destination for _parent, _source, destination in _PARENT_INPUTS[step_key]}
+    return set(_STAGE5_INPUT_NAMES[step_key]) | {
+        destination
+        for _parent, _source, destination, _source_kind in _PARENT_INPUTS[step_key]
+    }
