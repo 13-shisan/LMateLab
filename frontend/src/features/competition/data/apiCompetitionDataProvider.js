@@ -3,6 +3,15 @@ import { CompetitionRequestError } from './competitionErrors.js';
 
 const LOG_STREAMS = new Set(['stdout', 'stderr']);
 const SAFE_ROUTE_IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
+const REQUEST_FAILURES = new Map([
+  [400, { message: '请求参数无效', code: 'bad-request' }],
+  [401, { message: '登录状态已失效，请重新登录', code: 'unauthorized' }],
+  [403, { message: '当前身份无权执行此操作', code: 'forbidden' }],
+  [404, { message: '请求的数据不存在', code: 'not-found' }],
+  [409, { message: '当前状态不允许执行此操作', code: 'conflict' }],
+  [422, { message: '请求内容未通过校验', code: 'validation-error' }],
+  [429, { message: '请求过于频繁，请稍后重试', code: 'rate-limited' }],
+]);
 
 function queryString(entries) {
   const params = new URLSearchParams();
@@ -15,12 +24,12 @@ function queryString(entries) {
   return query ? `?${query}` : '';
 }
 
-function errorMessage(data, status) {
-  if (typeof data?.detail === 'string') return data.detail;
-  if (data?.detail !== undefined) return JSON.stringify(data.detail);
-  if (typeof data?.message === 'string') return data.message;
-  if (typeof data === 'string' && data) return data;
-  return `Competition request failed (${status})`;
+function publicRequestFailure(status) {
+  if (REQUEST_FAILURES.has(status)) return REQUEST_FAILURES.get(status);
+  if (status >= 500 && status <= 599) {
+    return { message: '服务暂时不可用，请稍后重试', code: 'server-error' };
+  }
+  return { message: '请求失败，请稍后重试', code: 'request-failed' };
 }
 
 function filenameFromDisposition(disposition, fallback) {
@@ -68,6 +77,11 @@ export function createApiCompetitionDataProvider({
       return { blob: await response.blob(), response };
     }
 
+    if (!response.ok) {
+      const failure = publicRequestFailure(response.status);
+      throw new CompetitionRequestError(failure.message, response.status, failure.code);
+    }
+
     const contentType = response.headers.get('content-type') || '';
     const text = await response.text();
     let data = text;
@@ -75,20 +89,12 @@ export function createApiCompetitionDataProvider({
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
-        const parseError = new CompetitionRequestError('Competition response could not be parsed', response.status, 'parse-error');
-        parseError.details = text;
-        throw parseError;
+        throw new CompetitionRequestError(
+          '响应格式无效，请稍后重试',
+          response.status,
+          'parse-error',
+        );
       }
-    }
-
-    if (!response.ok) {
-      const error = new CompetitionRequestError(
-        errorMessage(data, response.status),
-        response.status,
-        data?.code || 'request-failed',
-      );
-      error.details = data;
-      throw error;
     }
     return data;
   }

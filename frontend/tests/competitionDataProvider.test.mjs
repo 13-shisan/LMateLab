@@ -117,12 +117,120 @@ test('live forbidden responses retain status and never fall back to demo data', 
       assert.equal(error.name, 'CompetitionRequestError');
       assert.equal(error.status, 403);
       assert.equal(error.code, 'forbidden');
-      assert.equal(error.message, 'viewer cannot write');
+      assert.equal(error.message, '当前身份无权执行此操作');
+      assert.equal('details' in error, false);
       assert.equal('data_kind' in error, false);
       assert.doesNotMatch(error.message, /demo|演示/i);
       return true;
     },
   );
+});
+
+test('live request failures expose only stable status-based public errors', async () => {
+  const cases = [
+    {
+      status: 401,
+      body: { detail: '/home/private/initial', code: 'attacker-code' },
+      message: '登录状态已失效，请重新登录',
+      code: 'unauthorized',
+    },
+    {
+      status: 403,
+      body: { message: 'cat /etc/passwd', code: 'run-command' },
+      message: '当前身份无权执行此操作',
+      code: 'forbidden',
+    },
+    {
+      status: 404,
+      body: { detail: '../private/workflow' },
+      message: '请求的数据不存在',
+      code: 'not-found',
+    },
+    {
+      status: 409,
+      body: { detail: `$(scancel 41002)\n${'x'.repeat(5000)}` },
+      message: '当前状态不允许执行此操作',
+      code: 'conflict',
+    },
+    {
+      status: 422,
+      body: { detail: [{ message: 'line one\nline two\n/home/private/input' }] },
+      message: '请求内容未通过校验',
+      code: 'validation-error',
+    },
+    {
+      status: 503,
+      body: { detail: '/home/private/service', code: 'internal-trace-code' },
+      message: '服务暂时不可用，请稍后重试',
+      code: 'server-error',
+    },
+    {
+      status: 418,
+      body: { detail: 'unexpected\nserver\nbody' },
+      message: '请求失败，请稍后重试',
+      code: 'request-failed',
+    },
+  ];
+
+  for (const expected of cases) {
+    const rawBody = JSON.stringify(expected.body);
+    const provider = createApiCompetitionDataProvider({
+      authHeaders: () => ({}),
+      fetchImpl: async () => new Response(rawBody, {
+        status: expected.status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    });
+    await assert.rejects(
+      () => provider.getWorkflow('wf-1'),
+      (error) => {
+        assert.equal(error.name, 'CompetitionRequestError');
+        assert.equal(error.status, expected.status);
+        assert.equal(error.code, expected.code);
+        assert.equal(error.message, expected.message);
+        assert.equal('details' in error, false);
+        const publicError = `${error.message}\n${JSON.stringify(error)}`;
+        for (const secret of [
+          '/home/private', 'cat /etc/passwd', 'scancel', 'line one',
+          'internal-trace-code', 'attacker-code', 'unexpected',
+        ]) {
+          assert.equal(publicError.includes(secret), false, `${expected.status}: ${secret}`);
+        }
+        assert.ok(publicError.length < 300);
+        return true;
+      },
+    );
+  }
+});
+
+test('live malformed JSON responses never retain the response text', async () => {
+  const privateResponse = '{"detail":"/home/private/sensitive-response-marker\n$(scancel 1)"';
+  for (const status of [200, 503]) {
+    const provider = createApiCompetitionDataProvider({
+      authHeaders: () => ({}),
+      fetchImpl: async () => new Response(privateResponse, {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    });
+    await assert.rejects(
+      () => provider.getWorkflow('wf-1'),
+      (error) => {
+        assert.equal(error.status, status);
+        assert.equal(
+          error.message,
+          status === 200
+            ? '响应格式无效，请稍后重试'
+            : '服务暂时不可用，请稍后重试',
+        );
+        assert.equal(error.code, status === 200 ? 'parse-error' : 'server-error');
+        assert.equal('details' in error, false);
+        const publicError = `${error.message}\n${JSON.stringify(error)}`;
+        assert.doesNotMatch(publicError, /home\/private|scancel|sensitive-response-marker/i);
+        return true;
+      },
+    );
+  }
 });
 
 test('demo database pagination is stable and reports the full total', async () => {
