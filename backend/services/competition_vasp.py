@@ -141,7 +141,7 @@ class AcceptanceReport:
             if self.reason_code is not None or failed_checks:
                 raise ValueError("accepted reports cannot contain failures")
         elif (
-            not isinstance(self.reason_code, str)
+            type(self.reason_code) is not str
             or not self.reason_code
             or not frozen_checks
             or not failed_checks

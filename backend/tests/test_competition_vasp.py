@@ -572,6 +572,24 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     AcceptanceReport(accepted, reason_code, checks, {}, ())
 
+    def test_acceptance_report_reason_code_requires_builtin_string(self):
+        class CustomReason(str):
+            pass
+
+        failed_checks = ({"name": "x", "passed": False},)
+        with self.assertRaises(ValueError):
+            AcceptanceReport(False, CustomReason("failure"), failed_checks, {}, ())
+
+        accepted = AcceptanceReport(
+            True,
+            None,
+            ({"name": "x", "passed": True},),
+            {},
+            (),
+        )
+        self.assertTrue(accepted.accepted)
+        self.assertIsNone(accepted.reason_code)
+
     def test_acceptance_report_rejects_values_outside_canonical_json_domain(self):
         class MutableBox:
             def __init__(self):
