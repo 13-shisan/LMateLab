@@ -1,8 +1,10 @@
 import hashlib
 import json
 import tempfile
+import threading
 import unittest
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -542,6 +544,83 @@ class CompetitionCoordinatorTests(unittest.TestCase):
         self.assertEqual(["relax"], self.slurm.submitted_steps)
         self.assertEqual(0, self.attempt_count("scf"))
         self.assertEqual("cancelled", self.run_status())
+
+    def test_concurrent_cancel_commit_wins_over_stale_reconciliation(self):
+        self.start()
+        relax = self.latest_attempt("relax")
+        self.slurm.set_state(
+            relax.id,
+            "running",
+            raw_state="RUNNING",
+            exit_code="0:0",
+        )
+
+        reconciliation_observed = threading.Event()
+        release_reconciliation = threading.Event()
+        original_observe = self.slurm.observe
+        cancelled_jobs = []
+
+        def interleaved_observe(job_id):
+            observation = original_observe(job_id)
+            if threading.current_thread().name != "stale-reconciliation":
+                return observation
+            reconciliation_observed.set()
+            if not release_reconciliation.wait(timeout=5):
+                raise TimeoutError("concurrent cancellation did not commit")
+            now = datetime.now(timezone.utc)
+            return replace(
+                observation,
+                raw_state="COMPLETED",
+                state="succeeded",
+                exit_code="0:0",
+                observed_at=now,
+                finished_at=now,
+            )
+
+        self.slurm.observe = interleaved_observe
+        self.slurm.inspect_job = original_observe
+        self.slurm.cancel = cancelled_jobs.append
+        tick_results = []
+
+        worker = threading.Thread(
+            target=lambda: tick_results.append(self.coordinator.tick_once()),
+            name="stale-reconciliation",
+        )
+        worker.start()
+        self.assertTrue(reconciliation_observed.wait(timeout=5))
+        try:
+            with self.SessionLocal() as session:
+                cancellation = self.reconciler.cancel_attempt(
+                    session,
+                    self.workflow_id,
+                    relax.id,
+                )
+        finally:
+            release_reconciliation.set()
+            worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(("requested", "cancelling"), (cancellation.result, cancellation.status))
+        self.assertEqual([relax.slurm_job_id], cancelled_jobs)
+        self.assertEqual(1, len(tick_results))
+        self.assertEqual(0, tick_results[0].failures)
+        with self.SessionLocal() as session:
+            attempt = session.get(WorkflowAttempt, relax.id)
+            step = session.get(WorkflowStep, attempt.step_id)
+            run = session.get(WorkflowRun, self.workflow_id)
+            metadata = json.loads(attempt.metadata_json)
+            cancel_result = metadata.get("cancel_result")
+            self.assertEqual(
+                "requested",
+                cancel_result.get("result") if isinstance(cancel_result, dict) else None,
+            )
+            self.assertEqual(
+                ("cancelling", "cancelling", "cancelling"),
+                (attempt.status, step.status, run.status),
+            )
+        self.assertEqual([], self.acceptance.calls)
+        self.assertEqual(["relax"], self.slurm.submitted_steps)
+        self.assertEqual(0, self.attempt_count("scf"))
 
     def test_repeated_ticks_two_instances_and_duplicate_start_cannot_duplicate(self):
         first = self.start()

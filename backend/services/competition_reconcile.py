@@ -1208,6 +1208,8 @@ class CompetitionReconciler:
                 "attempt does not have a workflow ledger",
             )
 
+        expected_status = attempt.status
+        expected_metadata_json = attempt.metadata_json
         metadata = self._decoded_attempt_metadata(attempt)
         try:
             contract = self._runner_contract_from_metadata(
@@ -1275,13 +1277,44 @@ class CompetitionReconciler:
         status = self._workload_scheduler_status(runner_kind, observation.state)
 
         now = self._clock()
-        attempt.metadata_json = metadata
-        attempt.status = status
-        attempt.updated_at = now
+        attempt_values = {
+            "metadata_json": metadata,
+            "status": status,
+            "updated_at": now,
+        }
         if observation.started_at is not None:
-            attempt.started_at = observation.started_at
+            attempt_values["started_at"] = observation.started_at
         if observation.state in {"succeeded", "failed", "cancelled"}:
-            attempt.finished_at = observation.finished_at or observation.observed_at
+            attempt_values["finished_at"] = observation.finished_at or observation.observed_at
+
+        transitioned = session.execute(
+            update(WorkflowAttempt)
+            .where(
+                WorkflowAttempt.id == attempt.id,
+                WorkflowAttempt.slurm_job_id == attempt.slurm_job_id,
+                WorkflowAttempt.status == expected_status,
+                WorkflowAttempt.metadata_json == expected_metadata_json,
+            )
+            .values(**attempt_values)
+            .execution_options(synchronize_session=False)
+        )
+        if transitioned.rowcount != 1:
+            workflow_id = run.id
+            session.rollback()
+            current = session.get(WorkflowAttempt, attempt_id)
+            if current is None or not current.slurm_job_id:
+                raise ReconcileError(
+                    "attempt_not_reconcilable",
+                    "attempt does not have a scheduler job",
+                )
+            return ReconciliationOutcome(
+                workflow_id=workflow_id,
+                attempt_id=current.id,
+                job_id=current.slurm_job_id,
+                raw_state=observation.raw_state,
+                status=current.status,
+                stale=observation.stale,
+            )
 
         step.status = status
         step.updated_at = now
