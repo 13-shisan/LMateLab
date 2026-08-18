@@ -37,6 +37,7 @@ _MAX_TITLE_LINE_BYTES: Final = 4096
 _HASH_CHUNK_BYTES: Final = 64 * 1024
 _O_BINARY: Final = getattr(os, "O_BINARY", 0)
 _O_CLOEXEC: Final = getattr(os, "O_CLOEXEC", 0)
+_O_NONBLOCK: Final = getattr(os, "O_NONBLOCK", 0)
 _O_NOFOLLOW: Final = getattr(os, "O_NOFOLLOW", 0)
 _O_DIRECTORY: Final = getattr(os, "O_DIRECTORY", 0)
 _HAS_SECURE_DIR_FD: Final = bool(
@@ -243,7 +244,7 @@ def _open_required_file(
     if not stat.S_ISREG(expected_identity.st_mode):
         raise VaspPolicyError("potcar_file_invalid", "POTCAR evidence must be a regular file")
 
-    flags = os.O_RDONLY | _O_BINARY | _O_CLOEXEC | _O_NOFOLLOW
+    flags = os.O_RDONLY | _O_BINARY | _O_CLOEXEC | _O_NONBLOCK | _O_NOFOLLOW
     descriptor: int | None = None
     try:
         if directory_fd is None:

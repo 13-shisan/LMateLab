@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import tempfile
 import traceback
 import unittest
@@ -282,14 +283,14 @@ class PotcarPolicyTests(unittest.TestCase):
         self.write_valid_inputs()
         secret = "SYNTHETIC-PRIVATE-CONTENT"
         raw_error = OSError(f"{secret} at {self.root / 'POTCAR'}")
-        original_lstat = Path.lstat
+        original_os_open = os.open
 
-        def fail_potcar_lstat(path, *args, **kwargs):
-            if path.name == "POTCAR":
+        def fail_potcar_open(path, flags, *args, **kwargs):
+            if Path(os.fspath(path)).name == "POTCAR":
                 raise raw_error
-            return original_lstat(path, *args, **kwargs)
+            return original_os_open(path, flags, *args, **kwargs)
 
-        with mock.patch.object(Path, "lstat", autospec=True, side_effect=fail_potcar_lstat):
+        with mock.patch("services.competition_vasp.os.open", side_effect=fail_potcar_open):
             with self.assertRaises(VaspPolicyError) as raised:
                 validate_potcar(self.root, contract=self.contract)
 
@@ -304,39 +305,80 @@ class PotcarPolicyTests(unittest.TestCase):
 
     def test_required_file_replacement_after_path_check_keeps_opened_identity(self):
         self.write_valid_inputs()
-        path_replacement = self.write("path-replacement", b"replaced\n")
-        descriptor_replacement = self.write("descriptor-replacement", b"replaced\n")
-        original_path_open = Path.open
+        self.write("descriptor-replacement", b"replaced\n")
         original_os_open = os.open
-        path_swapped = False
         descriptor_swapped = False
-
-        def race_path_open(path, *args, **kwargs):
-            nonlocal path_swapped
-            if path.name == "POTCAR.spec" and not path_swapped:
-                os.replace(path_replacement, path)
-                path_swapped = True
-            return original_path_open(path, *args, **kwargs)
 
         def race_descriptor_open(path, flags, *args, **kwargs):
             nonlocal descriptor_swapped
-            descriptor = original_os_open(path, flags, *args, **kwargs)
-            if (
-                os.name != "nt"
-                and Path(path).name == "POTCAR.spec"
-                and not descriptor_swapped
-            ):
-                os.replace(descriptor_replacement, path)
+            if Path(os.fspath(path)).name != "POTCAR.spec" or descriptor_swapped:
+                return original_os_open(path, flags, *args, **kwargs)
+
+            directory_fd = kwargs.get("dir_fd")
+            if directory_fd is None:
+                os.replace(self.root / "descriptor-replacement", self.root / "POTCAR.spec")
                 descriptor_swapped = True
+                return original_os_open(path, flags, *args, **kwargs)
+
+            descriptor = original_os_open(path, flags, *args, **kwargs)
+            try:
+                os.replace(
+                    "descriptor-replacement",
+                    "POTCAR.spec",
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                )
+            except BaseException:
+                os.close(descriptor)
+                raise
+            descriptor_swapped = True
             return descriptor
 
-        with (
-            mock.patch.object(Path, "open", autospec=True, side_effect=race_path_open),
-            mock.patch.object(os, "open", side_effect=race_descriptor_open),
+        with mock.patch(
+            "services.competition_vasp.os.open", side_effect=race_descriptor_open
         ):
-            result = validate_potcar(self.root, contract=self.contract)
+            if competition_vasp._HAS_SECURE_DIR_FD:
+                result = validate_potcar(self.root, contract=self.contract)
+            else:
+                with self.assertRaises(VaspPolicyError) as raised:
+                    validate_potcar(self.root, contract=self.contract)
 
-        self.assertEqual(self.contract.combined_sha256, result["sha256"])
+        self.assertTrue(descriptor_swapped)
+        if competition_vasp._HAS_SECURE_DIR_FD:
+            self.assertEqual(self.contract.combined_sha256, result["sha256"])
+        else:
+            self.assertEqual("potcar_file_changed", raised.exception.code)
+
+    def test_required_file_open_flags_include_nonblocking_guard(self):
+        self.write_valid_inputs()
+        original_os_open = os.open
+        actual_nonblock = getattr(os, "O_NONBLOCK", 0)
+        required_nonblock = actual_nonblock or (1 << 29)
+        evidence_flags = []
+
+        def capture_open_flags(path, flags, *args, **kwargs):
+            if Path(os.fspath(path)).name in {
+                "POTCAR.spec",
+                "POTCAR",
+                "vaspkit-version.txt",
+                "potcar-source-sha256.txt",
+            }:
+                evidence_flags.append(flags)
+            delegated_flags = flags if actual_nonblock else flags & ~required_nonblock
+            return original_os_open(path, delegated_flags, *args, **kwargs)
+
+        with (
+            mock.patch.object(
+                competition_vasp, "_O_NONBLOCK", required_nonblock, create=True
+            ),
+            mock.patch(
+                "services.competition_vasp.os.open", side_effect=capture_open_flags
+            ),
+        ):
+            validate_potcar(self.root, contract=self.contract)
+
+        self.assertEqual(4, len(evidence_flags))
+        self.assertTrue(all(flags & required_nonblock for flags in evidence_flags))
 
     def test_additional_titles_are_rejected_before_unbounded_accumulation(self):
         self.write_valid_inputs()
@@ -353,23 +395,24 @@ class PotcarPolicyTests(unittest.TestCase):
 
         self.assertEqual(len(self.contract.titles), canonical_title.call_count)
 
-    def test_potcar_stat_failure_is_sanitized(self):
+    def test_potcar_fstat_failure_is_sanitized(self):
         self.write_valid_inputs()
         raw_error = OSError(f"synthetic stat failure at {self.root}")
-        original_stat = Path.stat
+        original_fstat = os.fstat
 
-        def fail_only_potcar_stat(path, *args, **kwargs):
-            if path.name == "POTCAR" and kwargs.get("follow_symlinks", True):
+        def fail_regular_fstat(descriptor):
+            identity = original_fstat(descriptor)
+            if stat.S_ISREG(identity.st_mode):
                 raise raw_error
-            return original_stat(path, *args, **kwargs)
+            return identity
 
-        with (
-            mock.patch.object(Path, "stat", autospec=True, side_effect=fail_only_potcar_stat),
-            mock.patch.object(os, "fstat", side_effect=raw_error),
+        with mock.patch(
+            "services.competition_vasp.os.fstat", side_effect=fail_regular_fstat
         ):
             error = self.assert_policy_error("potcar_file_invalid")
 
         self.assertNotIn(str(self.root), str(error))
+        self.assertIsNone(error.__cause__)
 
     def test_contract_rejects_malformed_injected_values(self):
         with self.assertRaises(ValueError):
