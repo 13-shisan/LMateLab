@@ -10,7 +10,7 @@ import uuid
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from ase import Atoms
@@ -386,6 +386,8 @@ def materialize_inputs(
     workflow_root: str | os.PathLike[str],
     structure: ParsedStructure | None,
     payload: dict[str, Any],
+    *,
+    _scf_incar_transform: Callable[[bytes], bytes] | None = None,
 ) -> dict[str, Any]:
     payload_to_validate = {key: value for key, value in payload.items() if key != "canonical_json"}
     validated = validate_draft_payload(payload_to_validate)
@@ -433,6 +435,11 @@ def materialize_inputs(
                 "POSCAR": parsed_structure.canonical_poscar,
                 "POTCAR.spec": ("\n".join(template["potcar_symbols"]) + "\n").encode("ascii"),
             }
+            if step == "scf" and _scf_incar_transform is not None:
+                transformed = _scf_incar_transform(contents["INCAR"])
+                if not isinstance(transformed, bytes) or transformed == contents["INCAR"]:
+                    raise InputValidationError("internal SCF transform is invalid")
+                contents["INCAR"] = transformed
             for filename, content in contents.items():
                 path = step_dir / filename
                 _ensure_inside(path, root)

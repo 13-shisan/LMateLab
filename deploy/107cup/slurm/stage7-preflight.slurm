@@ -40,6 +40,12 @@ printf '%s  Mo_sv\n%s  S\n' "$mo_source_sha" "$s_source_sha" > potcar-source-sha
 
 /home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103 \
   2>&1 | tee vaspkit-version.txt
+vaspkit_banner='VASPKIT Standard Edition 1.5.1'
+mapfile -t vaspkit_markers < <(
+  grep -E 'VASPKIT[[:space:]]+Standard[[:space:]]+Edition' vaspkit-version.txt || true
+)
+test "${#vaspkit_markers[@]}" -eq 1
+test "${vaspkit_markers[0]}" = "$vaspkit_banner"
 test "$(sha256sum POTCAR | cut -d ' ' -f 1)" = 509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045
 mapfile -t potcar_titles < <(sed -n 's/^[[:space:]]*TITEL[[:space:]]*=[[:space:]]*//p' POTCAR)
 test "${#potcar_titles[@]}" -eq 2

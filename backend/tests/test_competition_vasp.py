@@ -32,7 +32,7 @@ from models_workflow import (
     canonical_json,
 )
 from schemas_workflow import DraftCreateRequest
-from services import competition_vasp
+from services import competition_inputs, competition_vasp, competition_workflows
 from services.competition_attempt_inputs import prepare_attempt_inputs
 from services.competition_vasp import (
     AcceptanceReport,
@@ -595,6 +595,16 @@ class InternalAcceptanceProfileIntegrationTests(unittest.TestCase):
                 release_commit=self.release_commit,
             ).id
 
+    def _create_acceptance_draft(self, session, *, profile=None):
+        return competition_workflows.create_internal_acceptance_draft(
+            session,
+            self.root,
+            owner_id=self.owner_id,
+            payload=self._payload(),
+            release_commit=self.release_commit,
+            profile=profile or self.profile,
+        )
+
     def _snapshot(self, workflow_id):
         with Session(self.engine) as session:
             run = session.get(WorkflowRun, workflow_id)
@@ -710,20 +720,42 @@ class InternalAcceptanceProfileIntegrationTests(unittest.TestCase):
                 }
             )
 
-        workflow_id = self._create_draft()
-        before = self._snapshot(workflow_id)
-        self.assertEqual(16, len(before["files"]))
-
         with Session(self.engine) as session:
-            returned_sha256 = self.acceptance.apply_internal_profile(
+            ordinary_id = create_draft(
                 session,
                 self.root,
                 owner_id=self.owner_id,
-                workflow_id=workflow_id,
-                profile=self.profile,
-            )
+                payload=self._payload(),
+                release_commit=self.release_commit,
+            ).id
+        before = self._snapshot(ordinary_id)
+        materialized_incars = {}
+        write_private = competition_inputs._write_private
+
+        def observe_materialized_incar(path, content):
+            if path.name == "INCAR":
+                materialized_incars[path.parent.name] = content
+            return write_private(path, content)
+
+        with Session(self.engine) as session:
+            with mock.patch.object(
+                competition_inputs,
+                "_write_private",
+                side_effect=observe_materialized_incar,
+            ):
+                draft = self._create_acceptance_draft(session)
+        workflow_id = draft.id
+
+        self.assertEqual({"relax", "scf", "band", "dos"}, set(materialized_incars))
+        self.assertIn(b"EDIFF = 1E-20", materialized_incars["scf"])
+        self.assertIn(b"NELM = 1", materialized_incars["scf"])
+        for step in ("relax", "band", "dos"):
+            lines = materialized_incars[step].splitlines()
+            self.assertNotIn(b"EDIFF = 1E-20", lines)
+            self.assertNotIn(b"NELM = 1", lines)
 
         after = self._snapshot(workflow_id)
+        self.assertEqual(16, len(after["files"]))
         changed_paths = [
             logical_path
             for logical_path in before["files"]
@@ -745,7 +777,15 @@ class InternalAcceptanceProfileIntegrationTests(unittest.TestCase):
         self.assertEqual(manifest, after["metadata"]["input_manifest"])
         self.assertEqual(self.profile, after["metadata"]["acceptance_profile"])
         self.assertEqual(manifest_sha256, after["input_sha256"])
-        self.assertEqual(manifest_sha256, returned_sha256)
+        self.assertEqual(manifest_sha256, draft.input_sha256)
+        self.assertEqual(
+            ["draft_created", "acceptance_profile_configured"],
+            [event_type for event_type, _payload in after["events"]],
+        )
+        self.assertEqual(
+            manifest_sha256,
+            after["events"][0][1]["input_sha256"],
+        )
         profile_events = [
             payload
             for event_type, payload in after["events"]
@@ -806,50 +846,156 @@ class InternalAcceptanceProfileIntegrationTests(unittest.TestCase):
             self.root.joinpath(*Path(incar_row.relative_path).parts).read_bytes(),
         )
 
-    def test_internal_profile_rejects_invalid_scope_or_state_without_mutation(self):
-        scenarios = (
-            ("invalid profile", self.owner_id, "unknown", None),
-            ("foreign owner", self.other_owner_id, self.profile, None),
-            ("non-draft", self.owner_id, self.profile, "validated"),
+    def test_internal_profile_rejects_unknown_profile_before_writing(self):
+        with Session(self.engine) as session:
+            with self.assertRaises(competition_workflows.WorkflowServiceError) as raised:
+                self._create_acceptance_draft(session, profile="unknown")
+        self.assertEqual("invalid_acceptance_profile", raised.exception.code)
+        with Session(self.engine) as session:
+            self.assertEqual([], list(session.scalars(select(WorkflowRun))))
+        self.assertFalse(self.root.exists())
+
+    def test_internal_profile_rejects_nonbuiltin_payload_before_writing(self):
+        upload_payload = DraftCreateRequest.model_validate(
+            {
+                **self._payload().model_dump(),
+                "source_kind": "upload",
+                "structure_upload_id": "33333333-3333-4333-8333-333333333333",
+            }
         )
-        for label, owner_id, profile, status in scenarios:
-            with self.subTest(label=label):
-                workflow_id = self._create_draft()
-                if status is not None:
-                    with Session(self.engine) as session:
-                        session.get(WorkflowRun, workflow_id).status = status
-                        session.commit()
-                before = self._snapshot(workflow_id)
-                with Session(self.engine) as session:
-                    with self.assertRaises(RuntimeError):
-                        self.acceptance.apply_internal_profile(
-                            session,
-                            self.root,
-                            owner_id=owner_id,
-                            workflow_id=workflow_id,
-                            profile=profile,
-                        )
-                self.assertEqual(before, self._snapshot(workflow_id))
+        with Session(self.engine) as session:
+            with self.assertRaises(competition_workflows.WorkflowServiceError) as raised:
+                competition_workflows.create_internal_acceptance_draft(
+                    session,
+                    self.root,
+                    owner_id=self.owner_id,
+                    payload=upload_payload,
+                    release_commit=self.release_commit,
+                    profile=self.profile,
+                )
+        self.assertEqual("invalid_acceptance_profile", raised.exception.code)
+        with Session(self.engine) as session:
+            self.assertEqual([], list(session.scalars(select(WorkflowRun))))
+        self.assertFalse(self.root.exists())
 
-    def test_internal_profile_commit_failure_restores_file_and_ledger(self):
-        workflow_id = self._create_draft()
-        before = self._snapshot(workflow_id)
-
+    def test_internal_profile_commit_failure_retains_unreferenced_directory(self):
         with Session(self.engine) as session:
             with mock.patch.object(
                 session, "commit", side_effect=RuntimeError("database unavailable")
             ):
                 with self.assertRaisesRegex(RuntimeError, "database unavailable"):
-                    self.acceptance.apply_internal_profile(
-                        session,
-                        self.root,
-                        owner_id=self.owner_id,
-                        workflow_id=workflow_id,
-                        profile=self.profile,
-                    )
+                    self._create_acceptance_draft(session)
 
-        self.assertEqual(before, self._snapshot(workflow_id))
-        self.assertEqual([], list(self.root.rglob(".*.profile-*")))
+        with Session(self.engine) as session:
+            self.assertEqual([], list(session.scalars(select(WorkflowRun))))
+        retained = [path for path in self.root.iterdir() if path.is_dir()]
+        self.assertEqual(1, len(retained))
+        self.assertEqual(16, len([path for path in retained[0].rglob("*") if path.is_file()]))
+        scf_incar = (retained[0] / "scf" / "INCAR").read_bytes()
+        self.assertIn(b"EDIFF = 1E-20", scf_incar)
+        self.assertIn(b"NELM = 1", scf_incar)
+
+    def test_internal_profile_commit_before_raise_returns_exact_committed_draft(self):
+        with Session(self.engine) as session:
+            real_commit = session.commit
+
+            def commit_then_raise():
+                real_commit()
+                raise RuntimeError("commit outcome unavailable")
+
+            with mock.patch.object(session, "commit", side_effect=commit_then_raise):
+                draft = self._create_acceptance_draft(session)
+
+        snapshot = self._snapshot(draft.id)
+        self.assertEqual(self.profile, snapshot["metadata"]["acceptance_profile"])
+        self.assertEqual(draft.input_sha256, snapshot["input_sha256"])
+        self.assertEqual(
+            ["draft_created", "acceptance_profile_configured"],
+            [event_type for event_type, _payload in snapshot["events"]],
+        )
+
+    def test_internal_profile_verifier_unavailable_retains_evidence_and_fails_closed(self):
+        with Session(self.engine) as session:
+            real_commit = session.commit
+
+            def commit_then_raise():
+                real_commit()
+                raise RuntimeError("commit outcome unavailable")
+
+            with mock.patch.object(session, "commit", side_effect=commit_then_raise):
+                with mock.patch.object(
+                    competition_workflows,
+                    "Session",
+                    side_effect=RuntimeError("verification database unavailable"),
+                ):
+                    with self.assertRaises(
+                        competition_workflows.WorkflowServiceError
+                    ) as raised:
+                        self._create_acceptance_draft(session)
+
+        self.assertEqual("draft_commit_outcome_ambiguous", raised.exception.code)
+        with Session(self.engine) as session:
+            run = session.scalar(select(WorkflowRun))
+            self.assertIsNotNone(run)
+            files = list(
+                session.scalars(
+                    select(WorkflowFile).where(
+                        WorkflowFile.workflow_id == run.id,
+                        WorkflowFile.source_kind == "generated",
+                    )
+                )
+            )
+        self.assertEqual(16, len(files))
+        self.assertTrue(
+            all(self.root.joinpath(*Path(row.relative_path).parts).is_file() for row in files)
+        )
+
+    def test_internal_profile_ambiguous_file_owner_retains_evidence_and_fails_closed(self):
+        committed_id = None
+        with Session(self.engine) as session:
+            real_commit = session.commit
+
+            def commit_then_corrupt_and_raise():
+                nonlocal committed_id
+                real_commit()
+                with Session(self.engine) as corrupting_session:
+                    run = corrupting_session.scalar(select(WorkflowRun))
+                    committed_id = run.id
+                    generated = corrupting_session.scalar(
+                        select(WorkflowFile).where(
+                            WorkflowFile.workflow_id == run.id,
+                            WorkflowFile.source_kind == "generated",
+                        )
+                    )
+                    generated.owner_id = self.other_owner_id
+                    corrupting_session.commit()
+                raise RuntimeError("commit outcome unavailable")
+
+            with mock.patch.object(
+                session,
+                "commit",
+                side_effect=commit_then_corrupt_and_raise,
+            ):
+                with self.assertRaises(
+                    competition_workflows.WorkflowServiceError
+                ) as raised:
+                    self._create_acceptance_draft(session)
+
+        self.assertEqual("draft_commit_outcome_ambiguous", raised.exception.code)
+        self.assertIsNotNone(committed_id)
+        with Session(self.engine) as session:
+            self.assertIsNotNone(session.get(WorkflowRun, committed_id))
+            paths = [
+                self.root.joinpath(*Path(row.relative_path).parts)
+                for row in session.scalars(
+                    select(WorkflowFile).where(
+                        WorkflowFile.workflow_id == committed_id,
+                        WorkflowFile.source_kind == "generated",
+                    )
+                )
+            ]
+        self.assertEqual(16, len(paths))
+        self.assertTrue(all(path.is_file() for path in paths))
 
 
 class ScientificAcceptanceTests(unittest.TestCase):
