@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from fastapi import HTTPException, Request
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
@@ -54,6 +56,9 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
         cls.environment.start()
         sys.modules.pop("main_107cup", None)
         cls.main = importlib.import_module("main_107cup")
+        cls.workflow_router = importlib.import_module(
+            "routers.competition_workflows"
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -64,6 +69,107 @@ class CompetitionLifespanTests(unittest.IsolatedAsyncioTestCase):
     async def _run_lifespan(self, app, duration=0.04):
         async with app.router.lifespan_context(app):
             await asyncio.sleep(duration)
+
+    @staticmethod
+    def _request_for(app):
+        return Request({"type": "http", "app": app})
+
+    def _assert_coordinator_unavailable(self, app):
+        with self.assertRaises(HTTPException) as raised:
+            self.workflow_router.get_competition_coordinator(
+                self._request_for(app)
+            )
+        self.assertEqual(503, raised.exception.status_code)
+        self.assertEqual(
+            "workflow coordinator unavailable",
+            raised.exception.detail,
+        )
+        self.assertEqual(
+            "coordinator_unavailable",
+            raised.exception.headers["X-Error-Code"],
+        )
+
+    async def test_task9_dependency_uses_enabled_worker_public_contract(self):
+        coordinator = _FakeCoordinator()
+        app = self.main.build_app(
+            coordinator_factory=lambda: coordinator,
+            coordinator_enabled=True,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
+        )
+        self._assert_coordinator_unavailable(app)
+
+        async with app.router.lifespan_context(app):
+            worker = app.state.coordinator_worker
+            self.assertIs(coordinator, worker.coordinator)
+            self.assertIs(
+                coordinator,
+                self.workflow_router.get_competition_coordinator(
+                    self._request_for(app)
+                ),
+            )
+
+        self._assert_coordinator_unavailable(app)
+
+    async def test_task9_dependency_is_unavailable_when_lifespan_is_disabled(self):
+        app = self.main.build_app(
+            coordinator_factory=Mock(
+                side_effect=AssertionError("disabled factory must not run")
+            ),
+            coordinator_enabled=False,
+            coordinator_interval=2.0,
+            coordinator_wait=_fast_wait,
+        )
+        self._assert_coordinator_unavailable(app)
+        async with app.router.lifespan_context(app):
+            self._assert_coordinator_unavailable(app)
+        self._assert_coordinator_unavailable(app)
+
+    async def test_task9_dependency_keeps_timed_out_live_worker_truthful(self):
+        tick_started = threading.Event()
+        release_tick = threading.Event()
+
+        def blocking_tick():
+            tick_started.set()
+            release_tick.wait(2.0)
+
+        coordinator = _FakeCoordinator(blocking_tick)
+        app = self.main.build_app(
+            coordinator_factory=lambda: coordinator,
+            coordinator_enabled=True,
+            coordinator_interval=2.0,
+            coordinator_drain_timeout=0.02,
+            coordinator_wait=_fast_wait,
+        )
+        lifespan = app.router.lifespan_context(app)
+        await lifespan.__aenter__()
+        for _ in range(100):
+            if tick_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        self.assertTrue(tick_started.is_set())
+        worker = app.state.coordinator_worker
+        with patch.object(self.main.logger, "error") as log_error:
+            await lifespan.__aexit__(None, None, None)
+            log_error.assert_any_call("competition coordinator drain timed out")
+
+        self.assertIs(worker, app.state.coordinator_worker)
+        self.assertFalse(worker.is_closed())
+        self.assertIs(coordinator, worker.coordinator)
+        self.assertIs(
+            coordinator,
+            self.workflow_router.get_competition_coordinator(
+                self._request_for(app)
+            ),
+        )
+
+        release_tick.set()
+        for _ in range(100):
+            if worker.is_closed():
+                break
+            await asyncio.sleep(0.001)
+        self.assertTrue(worker.is_closed())
+        self._assert_coordinator_unavailable(app)
 
     async def test_app_construction_does_not_start_coordinator(self):
         coordinator = _FakeCoordinator()

@@ -103,6 +103,10 @@ class CoordinatorWorker:
     def request_stop(self) -> None:
         self._stop.set()
 
+    @property
+    def coordinator(self) -> Any:
+        return self._coordinator
+
     def is_closed(self) -> bool:
         return self._closed.is_set()
 

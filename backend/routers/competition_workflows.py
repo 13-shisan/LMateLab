@@ -53,7 +53,7 @@ _MAX_LOG_TAIL_BYTES = 64 * 1024
 _MAX_LOG_RESPONSE_OVERHEAD = 64
 
 
-class CancellationRequest(BaseModel):
+class EmptyCommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
@@ -72,10 +72,15 @@ def get_competition_reconciler() -> CompetitionReconciler:
 
 
 def get_competition_coordinator(request: Request) -> CompetitionCoordinator:
-    coordinator = getattr(request.app.state, "competition_coordinator", None)
-    if coordinator is None:
-        worker = getattr(request.app.state, "coordinator_worker", None)
-        coordinator = getattr(worker, "_coordinator", None)
+    worker = getattr(request.app.state, "coordinator_worker", None)
+    is_closed = getattr(worker, "is_closed", None)
+    if worker is None or not callable(is_closed) or is_closed():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="workflow coordinator unavailable",
+            headers={"X-Error-Code": "coordinator_unavailable"},
+        )
+    coordinator = getattr(worker, "coordinator", None)
     if coordinator is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -235,7 +240,11 @@ def _list_item(run: WorkflowRun) -> dict[str, Any]:
         "source": _source_label(run.source_kind),
         "status": run.status,
         "current_step": latest[0].step_key if latest is not None else None,
-        "latest_job_id": latest[1].slurm_job_id if latest is not None else None,
+        "latest_job_id": (
+            _safe_match(latest[1].slurm_job_id, _SAFE_JOB_ID)
+            if latest is not None
+            else None
+        ),
         "updated_at": _timestamp(run.updated_at),
         "data_kind": "live",
     }
@@ -478,6 +487,7 @@ def submit_workflow(
 @router.post("/workflows/{workflow_id}/start")
 def start_workflow(
     workflow_id: UUID,
+    _payload: EmptyCommandRequest | None = None,
     current_user: User = Depends(require_operator),
     coordinator: CompetitionCoordinator = Depends(get_competition_coordinator),
 ):
@@ -492,6 +502,7 @@ def start_workflow(
 def retry_workflow_step(
     workflow_id: UUID,
     step_key: Literal["relax", "scf", "band", "dos"],
+    _payload: EmptyCommandRequest | None = None,
     current_user: User = Depends(require_operator),
     coordinator: CompetitionCoordinator = Depends(get_competition_coordinator),
 ):
@@ -505,7 +516,7 @@ def retry_workflow_step(
 @router.post("/workflows/{workflow_id}/cancel")
 def cancel_workflow(
     workflow_id: UUID,
-    _payload: CancellationRequest | None = None,
+    _payload: EmptyCommandRequest | None = None,
     current_user: User = Depends(require_operator),
     coordinator: CompetitionCoordinator = Depends(get_competition_coordinator),
 ):
@@ -750,7 +761,7 @@ def _raise_reconcile_error(exc: ReconcileError) -> None:
 def cancel_attempt(
     workflow_id: str,
     attempt_id: str,
-    _payload: CancellationRequest | None = None,
+    _payload: EmptyCommandRequest | None = None,
     current_user: User = Depends(require_operator),
     db: Session = Depends(get_db),
     reconciler: CompetitionReconciler = Depends(get_competition_reconciler),

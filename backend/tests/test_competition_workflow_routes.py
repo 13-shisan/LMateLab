@@ -23,6 +23,7 @@ from models_workflow import (
     canonical_json,
 )
 from routers.competition_workflows import (
+    get_competition_coordinator,
     get_competition_reconciler,
     router,
     upload_structure,
@@ -132,7 +133,9 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.coordinator = mock.Mock()
         self.slurm_client = mock.Mock()
         self.coordinator.reconciler.slurm = self.slurm_client
-        self.app.state.competition_coordinator = self.coordinator
+        self.app.dependency_overrides[get_competition_coordinator] = (
+            lambda: self.coordinator
+        )
         self.cancel_service = mock.Mock()
         self.app.dependency_overrides[get_competition_reconciler] = lambda: self.cancel_service
         self.client = TestClient(self.app)
@@ -411,6 +414,35 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual("41050", item["latest_job_id"])
         self.assertEqual("relax", item["current_step"])
 
+    def test_list_and_dashboard_reject_tampered_historical_job_ids(self):
+        draft, attempt_id = self.create_validated_attempt(status="running")
+        private_job_id = "/home/private/job-41050\nraw scheduler text"
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            attempt.slurm_job_id = private_job_id
+            run = session.get(WorkflowRun, draft["id"])
+            run.status = "running"
+            session.commit()
+
+        listing = self.client.get("/api/competition/workflows")
+        dashboard = self.client.get("/api/competition/dashboard")
+
+        self.assertEqual(200, listing.status_code, listing.text)
+        self.assertEqual(200, dashboard.status_code, dashboard.text)
+        item = next(row for row in listing.json()["items"] if row["id"] == draft["id"])
+        self.assertIsNone(item["latest_job_id"])
+        recent = next(
+            row
+            for row in dashboard.json()["recent_workflows"]
+            if row["id"] == draft["id"]
+        )
+        self.assertIsNone(recent["latest_job_id"])
+        self.assertIsNone(dashboard.json()["active_workflow"]["latest_job_id"])
+        self.assertNotIn(private_job_id, listing.text)
+        self.assertNotIn(private_job_id, dashboard.text)
+        self.assertNotIn("/home/private", listing.text)
+        self.assertNotIn("/home/private", dashboard.text)
+
     def test_dashboard_uses_real_owner_scoped_counts(self):
         draft = self.create_draft()
         validated = self.create_draft()
@@ -454,13 +486,13 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             f"/api/competition/workflows/{draft['id']}/start", json={}
         )
         start_second = self.client.post(
-            f"/api/competition/workflows/{draft['id']}/start", json={}
+            f"/api/competition/workflows/{draft['id']}/start"
         )
         retry_first = self.client.post(
             f"/api/competition/workflows/{draft['id']}/steps/relax/retry", json={}
         )
         retry_second = self.client.post(
-            f"/api/competition/workflows/{draft['id']}/steps/relax/retry", json={}
+            f"/api/competition/workflows/{draft['id']}/steps/relax/retry"
         )
         cancel_first = self.client.post(
             f"/api/competition/workflows/{draft['id']}/cancel", json={}
@@ -499,6 +531,26 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(422, injected.status_code, injected.text)
         self.assertEqual(2, self.coordinator.cancel.call_count)
 
+    def test_workflow_commands_reject_every_body_override_before_coordinator(self):
+        workflow_id = str(uuid.uuid4())
+        for suffix in ("start", "steps/scf/retry", "cancel"):
+            for key, value in (
+                ("job_id", "99999"),
+                ("path", "/home/private"),
+                ("filename", "private.out"),
+                ("limit", 999999),
+                ("unknown", "private scheduler input"),
+            ):
+                with self.subTest(suffix=suffix, key=key):
+                    response = self.client.post(
+                        f"/api/competition/workflows/{workflow_id}/{suffix}",
+                        json={key: value},
+                    )
+                    self.assertEqual(422, response.status_code, response.text)
+        self.coordinator.start.assert_not_called()
+        self.coordinator.retry.assert_not_called()
+        self.coordinator.cancel.assert_not_called()
+
     def test_workflow_commands_authenticate_before_lookup_and_validate_paths(self):
         workflow_id = str(uuid.uuid4())
         self.identity_id = self.viewer_id
@@ -515,10 +567,29 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
 
         unauthenticated = FastAPI()
         unauthenticated.include_router(router, prefix="/api")
-        response = TestClient(unauthenticated).post(
-            f"/api/competition/workflows/{workflow_id}/start", json={}
-        )
-        self.assertEqual(401, response.status_code, response.text)
+        unauthenticated_client = TestClient(unauthenticated)
+        for suffix in (
+            "not-a-uuid/start",
+            f"{workflow_id}/steps/foreign/retry",
+            "not-a-uuid/cancel",
+        ):
+            with self.subTest(actor="unauthenticated", suffix=suffix):
+                response = unauthenticated_client.post(
+                    f"/api/competition/workflows/{suffix}", json={}
+                )
+                self.assertEqual(401, response.status_code, response.text)
+
+        self.identity_id = self.viewer_id
+        for suffix in (
+            "not-a-uuid/start",
+            f"{workflow_id}/steps/foreign/retry",
+            "not-a-uuid/cancel",
+        ):
+            with self.subTest(actor="viewer", suffix=suffix):
+                response = self.client.post(
+                    f"/api/competition/workflows/{suffix}", json={}
+                )
+                self.assertEqual(403, response.status_code, response.text)
 
         self.identity_id = self.operator_id
         malformed = self.client.post(
@@ -619,6 +690,16 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         bounded = self.client.get(path)
         self.assertEqual(200, bounded.status_code, bounded.text[:500])
         self.assertLessEqual(len(bounded.content), 64 * 1024 + 64)
+
+        multibyte = ('\u6c49\u5b57"\\\n\U0001f642' * 20000) + "UTF8-tail"
+        self.slurm_client.read_log_tail.return_value = multibyte
+        escaped = self.client.get(path)
+        self.assertEqual(200, escaped.status_code, escaped.text[:500])
+        self.assertLessEqual(len(escaped.content), 64 * 1024 + 64)
+        escaped.content.decode("utf-8")
+        returned = escaped.json()["content"]
+        self.assertTrue(multibyte.endswith(returned))
+        self.assertTrue(returned.endswith("UTF8-tail"))
 
     def test_log_route_fails_closed_before_any_unsafe_read(self):
         own, own_attempt = self.create_validated_attempt()
@@ -732,6 +813,35 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
                 self.assertNotIn(str(self.workflow_root), serialized)
                 self.assertNotIn("private reason", serialized)
                 self.assertNotIn("POTCAR content", serialized)
+
+    def test_tampered_acceptance_sha_and_status_fail_closed_without_leaks(self):
+        secret = f"private acceptance at {self.workflow_root}"
+        bad_sha = self.acceptance_metadata(accepted=True)
+        bad_sha["scientific_acceptance_sha256"] = "0" * 64
+        bad_sha["private"] = secret
+        bad_status = self.acceptance_metadata(accepted=True)
+        bad_status["private"] = secret
+        cases = (
+            ("succeeded", bad_sha),
+            ("scientific_failed", bad_status),
+        )
+        for attempt_status, metadata in cases:
+            with self.subTest(attempt_status=attempt_status):
+                draft, _attempt_id = self.create_validated_attempt(
+                    status=attempt_status,
+                    metadata=metadata,
+                )
+                response = self.client.get(
+                    f"/api/competition/workflows/{draft['id']}"
+                )
+                self.assertEqual(200, response.status_code, response.text)
+                step = response.json()["steps"][0]
+                self.assertIsNone(step["accepted"])
+                self.assertIsNone(step["acceptance"])
+                self.assertEqual({}, step["resources"])
+                self.assertIsNone(step["reason"])
+                self.assertNotIn(secret, response.text)
+                self.assertNotIn(str(self.workflow_root), response.text)
 
     def test_cancel_endpoint_is_operator_owned_and_rejects_arbitrary_job_id(self):
         draft, attempt_id = self.create_validated_attempt()
