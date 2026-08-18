@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from typing import BinaryIO, Callable, Final
 
@@ -40,6 +41,7 @@ _MAX_TITLE_LINE_BYTES: Final = 4096
 _HASH_CHUNK_BYTES: Final = 64 * 1024
 _MAX_ACCEPTANCE_OUTPUT_BYTES: Final = 2 * 1024 * 1024 * 1024
 _MAX_ACCEPTANCE_TEXT_BYTES: Final = 64 * 1024 * 1024
+_MAX_VASPRUN_XML_BYTES: Final = 256 * 1024 * 1024
 _MAX_OUTPUT_LINE_BYTES: Final = 64 * 1024
 _OUTCAR_COMPLETION_MARKER: Final = (
     b" General timing and accounting informations for this job:"
@@ -136,17 +138,67 @@ class AcceptanceReport:
             isinstance(artifact, Mapping) for artifact in frozen_artifacts
         ):
             raise ValueError("artifacts must be a sequence of mappings")
-        failed_checks = [check for check in frozen_checks if check.get("passed") is False]
+
+        if not frozen_checks:
+            raise ValueError("reports require at least one check")
+        check_names: set[str] = set()
+        failed_checks: list[Mapping[str, object]] = []
+        for check in frozen_checks:
+            name = check.get("name")
+            passed = check.get("passed")
+            if type(name) is not str or not name or name in check_names:
+                raise ValueError("check names must be unique nonempty strings")
+            if type(passed) is not bool:
+                raise ValueError("check passed values must be boolean")
+            check_names.add(name)
+            if passed:
+                if "reason_code" in check:
+                    raise ValueError("passed checks cannot contain a reason")
+                continue
+            check_reason = check.get("reason_code")
+            if type(check_reason) is not str or not check_reason:
+                raise ValueError("failed checks require a reason")
+            failed_checks.append(check)
+
         if self.accepted:
             if self.reason_code is not None or failed_checks:
                 raise ValueError("accepted reports cannot contain failures")
+            if not frozen_artifacts:
+                raise ValueError("accepted reports require artifacts")
         elif (
             type(self.reason_code) is not str
             or not self.reason_code
-            or not frozen_checks
             or not failed_checks
+            or failed_checks[0]["reason_code"] != self.reason_code
         ):
-            raise ValueError("failed reports require a reason and failed check")
+            raise ValueError("failed reports require a matching first failure")
+
+        artifact_names: set[str] = set()
+        for artifact in frozen_artifacts:
+            if set(artifact) != {"name", "sha256", "size_bytes"}:
+                raise ValueError("artifacts require the canonical schema")
+            name = artifact["name"]
+            digest = artifact["sha256"]
+            size_bytes = artifact["size_bytes"]
+            if (
+                type(name) is not str
+                or not name
+                or name in {".", ".."}
+                or "/" in name
+                or "\\" in name
+                or "\0" in name
+                or name in artifact_names
+            ):
+                raise ValueError("artifact names must be unique safe basenames")
+            if type(digest) is not str or _SHA256_RE.fullmatch(digest) is None:
+                raise ValueError("artifact SHA-256 values must be canonical")
+            if type(size_bytes) is not int or size_bytes <= 0:
+                raise ValueError("artifact sizes must be positive integers")
+            artifact_names.add(name)
+
+        frozen_artifacts = tuple(
+            sorted(frozen_artifacts, key=lambda artifact: artifact["name"])
+        )
         object.__setattr__(self, "checks", frozen_checks)
         object.__setattr__(self, "measurements", frozen_measurements)
         object.__setattr__(self, "artifacts", frozen_artifacts)
@@ -214,6 +266,10 @@ class _OpenedAcceptanceEvidence:
     path_identity: os.stat_result
     maximum_bytes: int
 
+    @property
+    def size_bytes(self) -> int:
+        return self.identity.st_size
+
 
 DEFAULT_POTCAR_CONTRACT = PotcarContract(
     symbols=("Mo_sv", "S"),
@@ -241,48 +297,57 @@ def validate_potcar(
             name: _open_required_file(root, name, directory_fd, resources)
             for name in _REQUIRED_FILES
         }
-        if directory_fd is None:
-            _verify_attempt_directory_identity(root, root_identity)
+        result = _validate_opened_potcar(files, contract)
+        _verify_attempt_directory_identity(root, root_identity, directory_fd)
+        return result
 
-        expected_spec = b"".join(symbol.encode("ascii") + b"\n" for symbol in contract.symbols)
-        if _read_metadata(files["POTCAR.spec"].handle) != expected_spec:
-            raise VaspPolicyError(
-                "potcar_spec_invalid", "POTCAR specification does not match policy"
-            )
 
-        evidence = _read_metadata(files["potcar-source-sha256.txt"].handle)
-        expected_evidence = b"".join(
-            digest.encode("ascii") + b"  " + symbol.encode("ascii") + b"\n"
-            for digest, symbol in zip(contract.source_sha256, contract.symbols, strict=True)
+def _validate_opened_potcar(
+    files: Mapping[str, _OpenedEvidence | _OpenedAcceptanceEvidence],
+    contract: PotcarContract,
+) -> dict[str, object]:
+    for opened in files.values():
+        _rewind(opened.handle)
+
+    expected_spec = b"".join(symbol.encode("ascii") + b"\n" for symbol in contract.symbols)
+    if _read_metadata(files["POTCAR.spec"].handle) != expected_spec:
+        raise VaspPolicyError(
+            "potcar_spec_invalid", "POTCAR specification does not match policy"
         )
-        if evidence != expected_evidence:
-            raise VaspPolicyError(
-                "potcar_source_evidence_invalid",
-                "POTCAR source checksum evidence does not match policy",
-            )
 
-        vaspkit_text = _decode_metadata(_read_metadata(files["vaspkit-version.txt"].handle))
-        _validate_vaspkit_banner(vaspkit_text, contract.vaspkit_version)
+    evidence = _read_metadata(files["potcar-source-sha256.txt"].handle)
+    expected_evidence = b"".join(
+        digest.encode("ascii") + b"  " + symbol.encode("ascii") + b"\n"
+        for digest, symbol in zip(contract.source_sha256, contract.symbols, strict=True)
+    )
+    if evidence != expected_evidence:
+        raise VaspPolicyError(
+            "potcar_source_evidence_invalid",
+            "POTCAR source checksum evidence does not match policy",
+        )
 
-        potcar = files["POTCAR"]
-        if potcar.size_bytes == 0:
-            raise VaspPolicyError("potcar_empty", "POTCAR is empty")
-        titles = _extract_titles(potcar.handle, contract.titles)
-        if titles != list(contract.titles):
-            raise VaspPolicyError("potcar_titles_invalid", "POTCAR titles do not match policy")
-        _rewind(potcar.handle)
-        digest = _sha256_file(potcar.handle)
-        if digest != contract.combined_sha256:
-            raise VaspPolicyError("potcar_sha256_mismatch", "POTCAR checksum does not match policy")
+    vaspkit_text = _decode_metadata(_read_metadata(files["vaspkit-version.txt"].handle))
+    _validate_vaspkit_banner(vaspkit_text, contract.vaspkit_version)
 
-        return {
-            "sha256": digest,
-            "titles": list(contract.titles),
-            "symbols": list(contract.symbols),
-            "source_sha256": list(contract.source_sha256),
-            "vaspkit_version": contract.vaspkit_version,
-            "size_bytes": potcar.size_bytes,
-        }
+    potcar = files["POTCAR"]
+    if potcar.size_bytes == 0:
+        raise VaspPolicyError("potcar_empty", "POTCAR is empty")
+    titles = _extract_titles(potcar.handle, contract.titles)
+    if titles != list(contract.titles):
+        raise VaspPolicyError("potcar_titles_invalid", "POTCAR titles do not match policy")
+    _rewind(potcar.handle)
+    digest = _sha256_file(potcar.handle)
+    if digest != contract.combined_sha256:
+        raise VaspPolicyError("potcar_sha256_mismatch", "POTCAR checksum does not match policy")
+
+    return {
+        "sha256": digest,
+        "titles": list(contract.titles),
+        "symbols": list(contract.symbols),
+        "source_sha256": list(contract.source_sha256),
+        "vaspkit_version": contract.vaspkit_version,
+        "size_bytes": potcar.size_bytes,
+    }
 
 
 def _default_vasprun_loader(path: Path) -> object:
@@ -327,7 +392,7 @@ def _failed_acceptance(
     measurements: dict[str, object],
     artifacts: list[dict[str, object]],
 ) -> AcceptanceReport:
-    checks.append({"name": check_name, "passed": False})
+    checks.append({"name": check_name, "passed": False, "reason_code": reason_code})
     return _acceptance_report(
         accepted=False,
         reason_code=reason_code,
@@ -365,6 +430,8 @@ def _acceptance_size_limit(name: str) -> int:
         return _MAX_METADATA_BYTES
     if name in {"CONTCAR", "OSZICAR", "OUTCAR"}:
         return _MAX_ACCEPTANCE_TEXT_BYTES
+    if name == "vasprun.xml":
+        return _MAX_VASPRUN_XML_BYTES
     return _MAX_ACCEPTANCE_OUTPUT_BYTES
 
 
@@ -451,6 +518,16 @@ def _evidence_signature(identity: os.stat_result) -> tuple[int, int, int, int, i
     )
 
 
+def _directory_signature(identity: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        identity.st_dev,
+        identity.st_ino,
+        identity.st_mode,
+        identity.st_size,
+        identity.st_mtime_ns,
+    )
+
+
 def _verify_evidence_unchanged(opened: _OpenedAcceptanceEvidence) -> None:
     try:
         descriptor_identity = os.fstat(opened.handle.fileno())
@@ -499,6 +576,86 @@ def _hash_opened_evidence(opened: _OpenedAcceptanceEvidence) -> dict[str, object
         "sha256": digest.hexdigest(),
         "size_bytes": size_bytes,
     }
+
+
+def _create_parser_snapshot_directory(resources: ExitStack) -> Path:
+    try:
+        directory = Path(
+            resources.enter_context(TemporaryDirectory(prefix="lmatelab-vasp-parser-"))
+        )
+        directory.chmod(0o700)
+    except OSError:
+        raise VaspPolicyError(
+            "evidence_snapshot_failed", "parser evidence snapshot could not be created"
+        ) from None
+    return directory
+
+
+def _snapshot_opened_evidence(
+    opened: _OpenedAcceptanceEvidence,
+    expected_artifact: Mapping[str, object],
+    snapshot_directory: Path,
+) -> Path:
+    _verify_evidence_unchanged(opened)
+    expected_size = opened.identity.st_size
+    if expected_size <= 0 or expected_size > opened.maximum_bytes:
+        raise VaspPolicyError("evidence_changed", "required evidence changed")
+
+    snapshot_path = snapshot_directory / opened.name
+    descriptor: int | None = None
+    snapshot_handle: BinaryIO | None = None
+    digest = hashlib.sha256()
+    copied_size = 0
+    try:
+        descriptor = os.open(
+            snapshot_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY | _O_CLOEXEC,
+            0o600,
+        )
+        snapshot_handle = os.fdopen(descriptor, "wb", closefd=True)
+        descriptor = None
+        _rewind_acceptance(opened)
+        remaining = expected_size
+        while remaining:
+            chunk = opened.handle.read(min(_HASH_CHUNK_BYTES, remaining))
+            if not chunk:
+                raise VaspPolicyError("evidence_changed", "required evidence changed")
+            if snapshot_handle.write(chunk) != len(chunk):
+                raise OSError("short snapshot write")
+            digest.update(chunk)
+            copied_size += len(chunk)
+            remaining -= len(chunk)
+        if opened.handle.read(1):
+            raise VaspPolicyError("evidence_changed", "required evidence changed")
+        snapshot_handle.close()
+        snapshot_handle = None
+        snapshot_path.chmod(0o600)
+        snapshot_identity = snapshot_path.lstat()
+    except VaspPolicyError:
+        raise
+    except (OSError, ValueError):
+        raise VaspPolicyError(
+            "evidence_snapshot_failed", "parser evidence snapshot could not be created"
+        ) from None
+    finally:
+        if snapshot_handle is not None:
+            _close_handle(snapshot_handle)
+        _close_descriptor(descriptor)
+
+    _verify_evidence_unchanged(opened)
+    copied_artifact = {
+        "name": opened.name,
+        "sha256": digest.hexdigest(),
+        "size_bytes": copied_size,
+    }
+    if (
+        copied_artifact != dict(expected_artifact)
+        or not stat.S_ISREG(snapshot_identity.st_mode)
+        or not _private_evidence_mode(snapshot_identity)
+        or snapshot_identity.st_size != expected_size
+    ):
+        raise VaspPolicyError("evidence_changed", "required evidence changed")
+    return snapshot_path
 
 
 def _read_acceptance_metadata(opened: _OpenedAcceptanceEvidence) -> bytes:
@@ -620,23 +777,23 @@ def _parse_outcar(opened: _OpenedAcceptanceEvidence) -> str:
     return versions[0]
 
 
-def _parse_vasprun_xml(opened: _OpenedAcceptanceEvidence) -> None:
-    _rewind_acceptance(opened)
+def _parse_vasprun_xml(snapshot_path: Path) -> None:
     try:
-        ElementTree.parse(opened.handle)
-    except (ElementTree.ParseError, OSError, ValueError):
+        for _event, element in ElementTree.iterparse(snapshot_path, events=("end",)):
+            element.clear()
+    except (ElementTree.ParseError, OSError, ValueError, MemoryError):
         raise VaspPolicyError("vasprun_unparseable", "vasprun.xml is incomplete or invalid") from None
-    _verify_evidence_unchanged(opened)
 
 
 def _load_vasprun(
     opened: _OpenedAcceptanceEvidence,
+    snapshot_path: Path,
     loader: Callable[[Path], object],
 ) -> object:
     _verify_evidence_unchanged(opened)
     try:
-        parsed = loader(opened.path)
-    except Exception:
+        parsed = loader(snapshot_path)
+    except (Exception, MemoryError):
         raise VaspPolicyError("vasprun_unparseable", "vasprun.xml could not be parsed") from None
     _verify_evidence_unchanged(opened)
     return parsed
@@ -644,11 +801,12 @@ def _load_vasprun(
 
 def _load_contcar(
     opened: _OpenedAcceptanceEvidence,
+    snapshot_path: Path,
     loader: Callable[[Path], object],
 ) -> None:
     _verify_evidence_unchanged(opened)
     try:
-        loader(opened.path)
+        loader(snapshot_path)
     except Exception:
         raise VaspPolicyError("contcar_unparseable", "CONTCAR could not be parsed") from None
     _verify_evidence_unchanged(opened)
@@ -738,6 +896,7 @@ def accept_vasp_attempt(
             opened_files[name] = opened
             artifacts.append(artifact)
             _passed_check(checks, f"artifact:{name}")
+        artifacts_by_name = {artifact["name"]: artifact for artifact in artifacts}
 
         try:
             vasp_exit_code = _parse_vasp_exit(
@@ -770,16 +929,15 @@ def accept_vasp_attempt(
         _passed_check(checks, "vaspkit_version")
 
         try:
-            potcar_result = validate_potcar(root, contract=potcar_contract)
+            potcar_files = {name: opened_files[name] for name in _REQUIRED_FILES}
+            _validate_opened_potcar(potcar_files, potcar_contract)
+            for name in _REQUIRED_FILES:
+                current_artifact = _hash_opened_evidence(opened_files[name])
+                if current_artifact != artifacts_by_name[name]:
+                    raise VaspPolicyError("evidence_changed", "required evidence changed")
         except VaspPolicyError as error:
             return _failed_acceptance(
                 check_name="potcar", reason_code=error.code, checks=checks,
-                measurements=measurements, artifacts=artifacts,
-            )
-        potcar_artifact = next(item for item in artifacts if item["name"] == "POTCAR")
-        if potcar_result["sha256"] != potcar_artifact["sha256"]:
-            return _failed_acceptance(
-                check_name="potcar", reason_code="evidence_changed", checks=checks,
                 measurements=measurements, artifacts=artifacts,
             )
         _passed_check(checks, "potcar")
@@ -808,9 +966,28 @@ def accept_vasp_attempt(
         _passed_check(checks, "outcar")
 
         try:
-            _parse_vasprun_xml(opened_files["vasprun.xml"])
+            snapshot_directory = _create_parser_snapshot_directory(resources)
+            parser_snapshot_names = (
+                ("vasprun.xml", "CONTCAR") if stage == "relax" else ("vasprun.xml",)
+            )
+            parser_snapshots = {
+                name: _snapshot_opened_evidence(
+                    opened_files[name], artifacts_by_name[name], snapshot_directory
+                )
+                for name in parser_snapshot_names
+            }
+        except VaspPolicyError as error:
+            return _failed_acceptance(
+                check_name="parser_snapshot", reason_code=error.code, checks=checks,
+                measurements=measurements, artifacts=artifacts,
+            )
+
+        try:
+            _parse_vasprun_xml(parser_snapshots["vasprun.xml"])
             vasprun = _load_vasprun(
-                opened_files["vasprun.xml"], vasprun_loader or _default_vasprun_loader
+                opened_files["vasprun.xml"],
+                parser_snapshots["vasprun.xml"],
+                vasprun_loader or _default_vasprun_loader,
             )
         except VaspPolicyError as error:
             return _failed_acceptance(
@@ -835,7 +1012,9 @@ def accept_vasp_attempt(
             _passed_check(checks, "ionic_convergence")
             try:
                 _load_contcar(
-                    opened_files["CONTCAR"], structure_loader or _default_structure_loader
+                    opened_files["CONTCAR"],
+                    parser_snapshots["CONTCAR"],
+                    structure_loader or _default_structure_loader,
                 )
             except VaspPolicyError as error:
                 return _failed_acceptance(
@@ -902,14 +1081,13 @@ def accept_vasp_attempt(
                     check_name="evidence_stability", reason_code=error.code, checks=checks,
                     measurements=measurements, artifacts=artifacts,
                 )
-        if directory_fd is None:
-            try:
-                _verify_attempt_directory_identity(root, root_identity)
-            except VaspPolicyError as error:
-                return _failed_acceptance(
-                    check_name="evidence_stability", reason_code=error.code, checks=checks,
-                    measurements=measurements, artifacts=artifacts,
-                )
+        try:
+            _verify_attempt_directory_identity(root, root_identity, directory_fd)
+        except VaspPolicyError as error:
+            return _failed_acceptance(
+                check_name="evidence_stability", reason_code=error.code, checks=checks,
+                measurements=measurements, artifacts=artifacts,
+            )
         _passed_check(checks, "evidence_stability")
 
     return _acceptance_report(
@@ -964,14 +1142,29 @@ def _open_attempt_directory(
 
 
 def _verify_attempt_directory_identity(
-    root: Path, expected_identity: os.stat_result
+    root: Path,
+    expected_identity: os.stat_result,
+    directory_fd: int | None = None,
 ) -> None:
     try:
         current_identity = root.lstat()
+        descriptor_identity = os.fstat(directory_fd) if directory_fd is not None else None
     except OSError:
         raise VaspPolicyError("attempt_directory_invalid", "attempt directory changed") from None
-    if stat.S_ISLNK(current_identity.st_mode) or not _same_file_identity(
-        expected_identity, current_identity
+    if (
+        stat.S_ISLNK(current_identity.st_mode)
+        or not stat.S_ISDIR(current_identity.st_mode)
+        or not _same_file_identity(expected_identity, current_identity)
+        or _directory_signature(expected_identity) != _directory_signature(current_identity)
+        or (
+            descriptor_identity is not None
+            and (
+                not stat.S_ISDIR(descriptor_identity.st_mode)
+                or not _same_file_identity(expected_identity, descriptor_identity)
+                or _directory_signature(expected_identity)
+                != _directory_signature(descriptor_identity)
+            )
+        )
     ):
         raise VaspPolicyError("attempt_directory_invalid", "attempt directory changed")
 

@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import stat
 import tempfile
 import traceback
@@ -508,6 +509,10 @@ class ScientificAcceptanceTests(unittest.TestCase):
             parameters=parameters or {},
         )
 
+    @staticmethod
+    def valid_artifact(name="OUTCAR", digest="a" * 64, size_bytes=1):
+        return {"name": name, "sha256": digest, "size_bytes": size_bytes}
+
     def accept(self, stage: str, **kwargs):
         scheduler_state = kwargs.pop("scheduler_state", "COMPLETED")
         scheduler_exit_code = kwargs.pop("scheduler_exit_code", "0:0")
@@ -528,6 +533,24 @@ class ScientificAcceptanceTests(unittest.TestCase):
             potcar_contract=self.contract,
             **kwargs,
         )
+
+    def swap_attempt_directory_while_reading(
+        self, loader_path: Path, filename: str, alternate_content: bytes
+    ) -> bytes:
+        held = self.root.with_name(self.root.name + "-held")
+        alternate = self.root.with_name(self.root.name + "-alternate")
+        alternate.mkdir(mode=0o700)
+        alternate_file = alternate / filename
+        alternate_file.write_bytes(alternate_content)
+        alternate_file.chmod(0o600)
+        os.replace(self.root, held)
+        os.replace(alternate, self.root)
+        try:
+            return loader_path.read_bytes()
+        finally:
+            os.replace(self.root, alternate)
+            os.replace(held, self.root)
+            shutil.rmtree(alternate)
 
     def assert_rejected(self, code: str, stage: str = "scf", **kwargs):
         report = self.accept(stage, **kwargs)
@@ -576,7 +599,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
         class CustomReason(str):
             pass
 
-        failed_checks = ({"name": "x", "passed": False},)
+        failed_checks = ({"name": "x", "passed": False, "reason_code": "failure"},)
         with self.assertRaises(ValueError):
             AcceptanceReport(False, CustomReason("failure"), failed_checks, {}, ())
 
@@ -585,7 +608,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
             None,
             ({"name": "x", "passed": True},),
             {},
-            (),
+            (self.valid_artifact(),),
         )
         self.assertTrue(accepted.accepted)
         self.assertIsNone(accepted.reason_code)
@@ -625,7 +648,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
             None,
             ({"name": "valid", "passed": True},),
             {"nested": mutable_array},
-            (),
+            (self.valid_artifact(),),
         )
         expected = report.as_dict()
         mutable_array[0]["z"] = 99
@@ -636,6 +659,95 @@ class ScientificAcceptanceTests(unittest.TestCase):
             json.dumps(expected, allow_nan=False, sort_keys=True),
             json.dumps(report.as_dict(), allow_nan=False, sort_keys=True),
         )
+
+    def test_acceptance_report_enforces_canonical_check_schema(self):
+        class CustomString(str):
+            pass
+
+        artifact = (self.valid_artifact(),)
+        malformed = (
+            (True, None, (), artifact),
+            (True, None, ({"name": "", "passed": True},), artifact),
+            (True, None, ({"name": CustomString("x"), "passed": True},), artifact),
+            (True, None, ({"name": 1, "passed": True},), artifact),
+            (True, None, ({"name": "x"},), artifact),
+            (True, None, ({"name": "x", "passed": 1},), artifact),
+            (True, None, ({"name": "x", "passed": True, "reason_code": "bad"},), artifact),
+            (
+                True,
+                None,
+                ({"name": "x", "passed": True}, {"name": "x", "passed": True}),
+                artifact,
+            ),
+            (False, "failure", ({"name": "x", "passed": False},), ()),
+            (
+                False,
+                "failure",
+                ({"name": "x", "passed": False, "reason_code": ""},),
+                (),
+            ),
+            (
+                False,
+                "failure",
+                ({"name": "x", "passed": False, "reason_code": CustomString("failure")},),
+                (),
+            ),
+            (
+                False,
+                "first",
+                ({"name": "x", "passed": False, "reason_code": "second"},),
+                (),
+            ),
+        )
+        for accepted, reason_code, checks, artifacts in malformed:
+            with self.subTest(accepted=accepted, reason_code=reason_code, checks=checks):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(accepted, reason_code, checks, {}, artifacts)
+
+        partial = AcceptanceReport(
+            False,
+            "failure",
+            ({"name": "x", "passed": False, "reason_code": "failure"},),
+            {},
+            (),
+        )
+        self.assertFalse(partial.accepted)
+
+    def test_acceptance_report_enforces_canonical_artifact_schema_and_order(self):
+        checks = ({"name": "x", "passed": True},)
+        malformed_artifacts = (
+            (),
+            ({"name": "", "sha256": "a" * 64, "size_bytes": 1},),
+            ({"name": "../OUTCAR", "sha256": "a" * 64, "size_bytes": 1},),
+            ({"name": "dir/OUTCAR", "sha256": "a" * 64, "size_bytes": 1},),
+            ({"name": "dir\\OUTCAR", "sha256": "a" * 64, "size_bytes": 1},),
+            ({"name": 1, "sha256": "a" * 64, "size_bytes": 1},),
+            ({"name": "OUTCAR", "sha256": "A" * 64, "size_bytes": 1},),
+            ({"name": "OUTCAR", "sha256": "a" * 63, "size_bytes": 1},),
+            ({"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 0},),
+            ({"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": -1},),
+            ({"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": True},),
+            (
+                {"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 1, "extra": None},
+            ),
+            (self.valid_artifact(), self.valid_artifact()),
+        )
+        for artifacts in malformed_artifacts:
+            with self.subTest(artifacts=artifacts):
+                with self.assertRaises(ValueError):
+                    AcceptanceReport(True, None, checks, {}, artifacts)
+
+        report = AcceptanceReport(
+            True,
+            None,
+            checks,
+            {},
+            (
+                self.valid_artifact("vasprun.xml", "b" * 64, 2),
+                self.valid_artifact("OUTCAR", "a" * 64, 1),
+            ),
+        )
+        self.assertEqual(["OUTCAR", "vasprun.xml"], [item["name"] for item in report.artifacts])
 
     def test_each_fixed_stage_accepts_complete_evidence_and_hashes_all_artifacts(self):
         for stage in FIXED_STAGE_ORDER:
@@ -820,6 +932,120 @@ class ScientificAcceptanceTests(unittest.TestCase):
             raise ValueError("synthetic parser detail")
         report = self.assert_rejected("vasprun_unparseable", vasprun_loader=reject_loader)
         self.assertNotIn("synthetic", json.dumps(report.as_dict()))
+
+    def test_vasprun_uses_streaming_fixed_scope_snapshot(self):
+        self.assertEqual(256 * 1024 * 1024, competition_vasp._MAX_VASPRUN_XML_BYTES)
+        self.assertEqual(
+            competition_vasp._MAX_VASPRUN_XML_BYTES,
+            competition_vasp._acceptance_size_limit("vasprun.xml"),
+        )
+        self.assertLess(
+            competition_vasp._acceptance_size_limit("vasprun.xml"),
+            competition_vasp._acceptance_size_limit("WAVECAR"),
+        )
+
+        self.write_complete_outputs("scf")
+        with mock.patch.object(
+            competition_vasp.ElementTree,
+            "parse",
+            side_effect=AssertionError("full-tree XML parse is forbidden"),
+        ), mock.patch.object(
+            competition_vasp.ElementTree,
+            "iterparse",
+            wraps=competition_vasp.ElementTree.iterparse,
+        ) as iterparse:
+            report = self.accept("scf")
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertTrue(iterparse.called)
+
+    def test_vasprun_xml_rejects_policy_oversize_before_reading(self):
+        self.write_complete_outputs("scf")
+        with (self.root / "vasprun.xml").open("wb") as handle:
+            handle.truncate(256 * 1024 * 1024 + 1)
+        self.assert_rejected("evidence_too_large")
+
+    def test_streaming_xml_memory_error_is_sanitized(self):
+        self.write_complete_outputs("scf")
+        with mock.patch.object(
+            competition_vasp.ElementTree, "iterparse", side_effect=MemoryError("raw")
+        ):
+            report = self.assert_rejected("vasprun_unparseable")
+        self.assertNotIn("raw", json.dumps(report.as_dict()))
+
+    def test_acceptance_parsers_receive_ephemeral_pinned_snapshots(self):
+        self.write_complete_outputs("relax")
+        original_xml = (self.root / "vasprun.xml").read_bytes()
+        original_contcar = (self.root / "CONTCAR").read_bytes()
+        observed = {}
+
+        def vasprun_loader(path):
+            observed["vasprun_path"] = path
+            observed["vasprun_bytes"] = path.read_bytes()
+            return self.fake_vasprun()
+
+        def structure_loader(path):
+            observed["contcar_path"] = path
+            observed["contcar_bytes"] = path.read_bytes()
+            return object()
+
+        report = self.accept(
+            "relax", vasprun_loader=vasprun_loader, structure_loader=structure_loader
+        )
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertEqual(original_xml, observed["vasprun_bytes"])
+        self.assertEqual(original_contcar, observed["contcar_bytes"])
+        self.assertNotEqual(self.root, observed["vasprun_path"].parent)
+        self.assertNotEqual(self.root, observed["contcar_path"].parent)
+        self.assertFalse(observed["vasprun_path"].exists())
+        self.assertFalse(observed["contcar_path"].exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory replacement required")
+    def test_vasprun_loader_is_anchored_during_attempt_directory_swap_restore(self):
+        self.write_complete_outputs("scf")
+        original = (self.root / "vasprun.xml").read_bytes()
+        observed = {}
+
+        def swapping_loader(path):
+            observed["path"] = path
+            observed["bytes"] = self.swap_attempt_directory_while_reading(
+                path, "vasprun.xml", b"<modeling><alternate/></modeling>\n"
+            )
+            return self.fake_vasprun()
+
+        report = self.accept("scf", vasprun_loader=swapping_loader)
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertEqual(original, observed["bytes"])
+        self.assertNotEqual(self.root, observed["path"].parent)
+        self.assertFalse(observed["path"].exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory replacement required")
+    def test_contcar_loader_is_anchored_during_attempt_directory_swap_restore(self):
+        self.write_complete_outputs("relax")
+        original = (self.root / "CONTCAR").read_bytes()
+        observed = {}
+
+        def swapping_loader(path):
+            observed["path"] = path
+            observed["bytes"] = self.swap_attempt_directory_while_reading(
+                path, "CONTCAR", b"alternate structure\n"
+            )
+            return object()
+
+        report = self.accept("relax", structure_loader=swapping_loader)
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertEqual(original, observed["bytes"])
+        self.assertNotEqual(self.root, observed["path"].parent)
+        self.assertFalse(observed["path"].exists())
+
+    def test_acceptance_does_not_reopen_potcar_policy_paths(self):
+        self.write_complete_outputs("scf")
+        with mock.patch.object(
+            competition_vasp,
+            "validate_potcar",
+            side_effect=AssertionError("acceptance must use pinned POTCAR descriptors"),
+        ):
+            report = self.accept("scf")
+        self.assertTrue(report.accepted, report.as_dict())
 
     def test_scf_rejects_slurm_success_when_electronic_convergence_is_false(self):
         self.write_complete_outputs("scf")
