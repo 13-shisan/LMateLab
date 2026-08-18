@@ -342,6 +342,13 @@ def _select_input_sources(
         if len(matches) != 1:
             raise VaspPolicyError("stage5_inputs_invalid", "fixed Stage 5 inputs are invalid")
         row = matches[0]
+        if (
+            row.workflow_id != workflow.id
+            or row.owner_id != workflow.owner_id
+            or row.attempt_id is not None
+            or row.source_kind != "generated"
+        ):
+            raise VaspPolicyError("stage5_inputs_invalid", "fixed Stage 5 inputs are invalid")
         _verify_source_row(root, row)
         sources.append(_InputSource(filename, f"stage5_{filename.lower()}", row, None))
 
@@ -689,7 +696,6 @@ def _publish_staging_directory(staging: Path, target: Path) -> None:
         raise VaspPolicyError("attempt_target_exists", "attempt directory already exists")
     try:
         os.replace(staging, target)
-        target.chmod(0o700)
     except OSError:
         raise OSError("attempt input publish failed") from None
 
@@ -746,6 +752,13 @@ def _recover_or_return_published(
         raise VaspPolicyError("input_publication_mismatch", "attempt publication is incomplete")
     if existing_rows:
         rows = tuple(_payload_from_existing(row, workflow, attempt, template_version, release_commit) for row in existing_rows)
+        expected_sources = _select_input_sources(session, root, workflow, step, attempt)
+        expected_rows = _row_payloads(
+            workflow=workflow, attempt=attempt, step_key=step.step_key, sources=expected_sources,
+            template_version=template_version, release_commit=release_commit,
+        )
+        if not _same_recovery_rows(rows, expected_rows):
+            raise VaspPolicyError("input_publication_mismatch", "attempt publication does not match current lineage")
         _validate_published_rows(target, rows, step.step_key)
         if journal.exists():
             payload = _validate_journal_identity(_read_recovery_journal(journal), workflow.id, attempt.id)

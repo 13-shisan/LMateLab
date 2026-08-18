@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import Base
@@ -53,9 +54,17 @@ class AttemptInputTests(unittest.TestCase):
                 alias="",
                 role="operator",
             )
-            session.add(owner)
+            other_owner = User(
+                email="other@example.com",
+                password_hash="hash",
+                name="Other",
+                alias="",
+                role="operator",
+            )
+            session.add_all((owner, other_owner))
             session.flush()
             self.owner_id = owner.id
+            self.other_owner_id = other_owner.id
             self.workflow_id = str(uuid.uuid4())
             session.add(
                 WorkflowRun(
@@ -287,22 +296,37 @@ class AttemptInputTests(unittest.TestCase):
         source.mkdir()
         self.assert_policy_error("input_source_invalid", "relax")
 
-    def test_rejects_existing_target_content_and_destination_alias(self):
+    def test_rejects_hardlink_at_actual_exclusive_destination_creation_path(self):
         attempt_id = self._target_attempt("relax")
-        target = self.root / self.workflow_id / "attempts" / attempt_id
-        target.mkdir(mode=0o700, parents=True)
-        source = self.root / self._stage5_directory_id / "relax" / "INCAR"
-        try:
-            os.link(source, target / "INCAR")
-        except OSError as error:
-            self.skipTest(f"hardlink creation unavailable: {error}")
-        with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
-            prepare_attempt_inputs(
+        original_copy = competition_attempt_inputs.copy_verified_input
+        injected = False
+
+        def inject_hardlink(*args, **kwargs):
+            nonlocal injected
+            if not injected:
+                os.link(kwargs["source"], kwargs["destination"])
+                injected = True
+            return original_copy(*args, **kwargs)
+
+        with mock.patch(
+            "services.competition_attempt_inputs.copy_verified_input",
+            side_effect=inject_hardlink,
+        ):
+            with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                prepare_attempt_inputs(
+                    session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                    step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                    release_commit=self.release_commit,
+        )
+        self.assertTrue(injected)
+        self.assertEqual("input_destination_exists", raised.exception.code)
+        with Session(self.engine) as session:
+            recovered = prepare_attempt_inputs(
                 session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
                 step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
                 release_commit=self.release_commit,
             )
-        self.assertEqual("input_recovery_invalid", raised.exception.code)
+        self.assertTrue(recovered.directory.is_dir())
 
     def test_rejects_unexpected_parent_step_attempt_or_acceptance_status(self):
         for metadata, status, expected in (
@@ -357,6 +381,90 @@ class AttemptInputTests(unittest.TestCase):
             session.commit()
         self.assert_policy_error("stage5_inputs_invalid", "relax")
 
+    def test_stage5_relative_path_unique_constraint_rejects_duplicate_evidence(self):
+        with Session(self.engine) as session:
+            original = self._file_with_logical_path(session, "relax/INCAR")
+            session.add(WorkflowFile(
+                id=str(uuid.uuid4()), workflow_id=self.workflow_id, owner_id=self.owner_id,
+                relative_path=original.relative_path, size_bytes=original.size_bytes,
+                sha256=original.sha256, source_kind="generated",
+                metadata_json={"logical_path": "relax/INCAR-copy", "step_key": "relax"},
+            ))
+            with self.assertRaises(IntegrityError):
+                session.commit()
+            session.rollback()
+
+    def test_rejects_foreign_owned_or_attempt_attached_stage5_rows(self):
+        for mutation in ("owner", "attempt"):
+            with self.subTest(mutation=mutation):
+                with Session(self.engine) as session:
+                    row = self._file_with_logical_path(session, "relax/INCAR")
+                    if mutation == "owner":
+                        row.owner_id = self.other_owner_id
+                    else:
+                        row.attempt_id = self._target_attempt("relax")
+                    session.commit()
+                self.assert_policy_error("stage5_inputs_invalid", "relax")
+                with Session(self.engine) as session:
+                    row = self._file_with_logical_path(session, "relax/INCAR")
+                    row.owner_id = self.owner_id
+                    row.attempt_id = None
+                    session.commit()
+
+    def test_existing_publication_rejects_mutated_lineage_without_touching_evidence(self):
+        for field, value in (
+            ("input_role", "tampered_role"),
+            ("source_file_id", str(uuid.uuid4())),
+            ("source_sha256", "0" * 64),
+            ("logical_path", "tampered"),
+            ("step_key", "scf"),
+            ("relative_path", "tampered/path/INCAR"),
+        ):
+            with self.subTest(field=field):
+                prepared = self.prepare("relax")
+                original = (prepared.directory / "INCAR").read_bytes()
+                with Session(self.engine) as session:
+                    row = session.scalar(select(WorkflowFile).where(WorkflowFile.attempt_id == prepared.attempt_id))
+                    if field == "relative_path":
+                        row.relative_path = value
+                    else:
+                        metadata = (
+                            dict(row.metadata_json)
+                            if isinstance(row.metadata_json, dict)
+                            else json.loads(row.metadata_json)
+                        )
+                        metadata[field] = value
+                        row.metadata_json = metadata
+                    session.commit()
+                with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                    prepare_attempt_inputs(
+                        session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                        step_key="relax", attempt_id=prepared.attempt_id, template_version=self.template_version,
+                        release_commit=self.release_commit,
+                    )
+                self.assertEqual("input_publication_mismatch", raised.exception.code)
+                self.assertEqual(original, (prepared.directory / "INCAR").read_bytes())
+
+    def test_crash_before_publish_retry_rebuilds_cleanly(self):
+        attempt_id = self._target_attempt("relax")
+        with mock.patch("services.competition_attempt_inputs._publish_staging_directory", side_effect=OSError("synthetic")):
+            with Session(self.engine) as session, self.assertRaises(OSError):
+                prepare_attempt_inputs(
+                    session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                    step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                    release_commit=self.release_commit,
+                )
+        target = self.root / self.workflow_id / "attempts" / attempt_id
+        self.assertFalse(target.exists())
+        with Session(self.engine) as session:
+            self.assertEqual([], list(session.scalars(select(WorkflowFile).where(WorkflowFile.attempt_id == attempt_id))))
+            prepared = prepare_attempt_inputs(
+                session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                release_commit=self.release_commit,
+            )
+        self.assertEqual(target, prepared.directory)
+
     def test_rejects_traversing_or_absolute_database_relative_path(self):
         for relative_path in ("../outside", "/absolute", "C:\\outside"):
             with self.subTest(relative_path=relative_path):
@@ -383,20 +491,18 @@ class AttemptInputTests(unittest.TestCase):
         with Session(self.engine) as session:
             self.assertEqual([], list(session.scalars(select(WorkflowFile).where(WorkflowFile.attempt_id == attempt_id))))
 
-    def test_preparing_retry_returns_identical_immutable_publication(self):
+    def test_preparing_retry_revalidates_source_without_touching_publication(self):
         prepared = self.prepare("relax")
         original = (prepared.directory / "INCAR").read_bytes()
         (self.root / self._stage5_directory_id / "relax" / "INCAR").write_bytes(b"later tamper")
-        with Session(self.engine) as session:
-            recovered = prepare_attempt_inputs(
+        with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+            prepare_attempt_inputs(
                 session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
                 step_key="relax", attempt_id=prepared.attempt_id, template_version=self.template_version,
                 release_commit=self.release_commit,
             )
-            rows = list(session.scalars(select(WorkflowFile).where(WorkflowFile.attempt_id == prepared.attempt_id)))
-        self.assertEqual(prepared.directory, recovered.directory)
-        self.assertEqual(original, (recovered.directory / "INCAR").read_bytes())
-        self.assertEqual(4, len(rows))
+        self.assertEqual("input_source_integrity", raised.exception.code)
+        self.assertEqual(original, (prepared.directory / "INCAR").read_bytes())
 
     def test_copied_bytes_hashes_and_modes_are_private_and_independent(self):
         prepared = self.prepare("band", parent_outputs={"POSCAR": b"poscar", "CHGCAR": b"charge"})
@@ -423,11 +529,56 @@ class AttemptInputTests(unittest.TestCase):
                     release_commit=self.release_commit,
                 )
         self.assertEqual("input_ledger_recovery_required", raised.exception.code)
-        self.assertTrue((self.root / self.workflow_id / "attempts" / attempt_id).is_dir())
+        target = self.root / self.workflow_id / "attempts" / attempt_id
+        self.assertTrue(target.is_dir())
+        if os.name != "nt":
+            self.assertEqual(0o700, stat.S_IMODE(target.stat().st_mode))
         journal = competition_attempt_inputs._recovery_journal_path(self.root, self.workflow_id, attempt_id)
         self.assertTrue(journal.is_file())
         with Session(self.engine) as session:
             self.assertEqual([], list(session.scalars(select(WorkflowFile).where(WorkflowFile.attempt_id == attempt_id))))
+
+    def test_post_rename_failure_cannot_destroy_journal_recovery(self):
+        attempt_id = self._target_attempt("relax")
+        target = self.root / self.workflow_id / "attempts" / attempt_id
+        journal = competition_attempt_inputs._recovery_journal_path(
+            self.root, self.workflow_id, attempt_id
+        )
+        original_chmod = Path.chmod
+
+        def fail_target_chmod(path, mode, *args, **kwargs):
+            if path == target and target.exists():
+                raise OSError("synthetic post-rename mode failure")
+            return original_chmod(path, mode, *args, **kwargs)
+
+        with (
+            mock.patch(
+                "services.competition_attempt_inputs.Path.chmod",
+                autospec=True,
+                side_effect=fail_target_chmod,
+            ),
+            mock.patch(
+                "services.competition_attempt_inputs._commit_prepared_rows",
+                side_effect=RuntimeError("synthetic database failure"),
+            ),
+        ):
+            with Session(self.engine) as session, self.assertRaises(VaspPolicyError) as raised:
+                prepare_attempt_inputs(
+                    session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                    step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                    release_commit=self.release_commit,
+                )
+        self.assertEqual("input_ledger_recovery_required", raised.exception.code)
+        self.assertTrue(target.is_dir())
+        self.assertTrue(journal.is_file())
+        with Session(self.engine) as session:
+            recovered = prepare_attempt_inputs(
+                session, self.root, owner_id=self.owner_id, workflow_id=self.workflow_id,
+                step_key="relax", attempt_id=attempt_id, template_version=self.template_version,
+                release_commit=self.release_commit,
+            )
+        self.assertEqual(target, recovered.directory)
+        self.assertFalse(journal.exists())
 
     def test_journal_recovers_exact_rows_without_recopying_published_evidence(self):
         attempt_id = self._target_attempt("relax")
