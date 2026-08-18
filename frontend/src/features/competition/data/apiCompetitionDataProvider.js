@@ -2,6 +2,7 @@ import { getAuthHeaders } from '../../../api/auth.js';
 import { CompetitionRequestError } from './competitionErrors.js';
 
 const LOG_STREAMS = new Set(['stdout', 'stderr']);
+const SAFE_ROUTE_IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
 
 function queryString(entries) {
   const params = new URLSearchParams();
@@ -34,15 +35,13 @@ function filenameFromDisposition(disposition, fallback) {
   return disposition?.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
 }
 
+function isSafeRouteIdentifier(value) {
+  return typeof value === 'string' && SAFE_ROUTE_IDENTIFIER.test(value);
+}
+
 function validateAttemptLogRoute(workflowId, attemptId, stream) {
-  const identifiers = [workflowId, attemptId];
-  const invalidIdentifier = identifiers.some((value) => (
-    typeof value !== 'string'
-    || value.trim() === ''
-    || value !== value.trim()
-    || /^[\\/]/.test(value)
-    || /^[A-Za-z]:[\\/]/.test(value)
-  ));
+  const invalidIdentifier = !isSafeRouteIdentifier(workflowId)
+    || !isSafeRouteIdentifier(attemptId);
   if (invalidIdentifier || !LOG_STREAMS.has(stream)) {
     throw new CompetitionRequestError(
       'Attempt log request is invalid',

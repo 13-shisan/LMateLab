@@ -126,6 +126,17 @@ function shouldPollWorkflow(mode, status) {
     ].includes(status);
 }
 
+function createAttemptLogRequestKey(workflowId, attemptId, stream) {
+  if (
+    typeof workflowId !== 'string'
+    || workflowId.trim() === ''
+    || workflowId !== workflowId.trim()
+    || !isSafeAttemptIdentifier(attemptId)
+    || !['stdout', 'stderr'].includes(stream)
+  ) return null;
+  return JSON.stringify([workflowId, attemptId, stream]);
+}
+
 function isSafeAttemptIdentifier(value) {
   return typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
@@ -143,12 +154,18 @@ function selectLatestAttemptStep(steps, selectedStepKey) {
   return selected || candidates[candidates.length - 1] || null;
 }
 
-function normalizeAttemptLogState(resource, expectedStream, attemptId) {
+function normalizeAttemptLogState(resource, expectedStream, attemptId, expectedRequestKey) {
   if (!isSafeAttemptIdentifier(attemptId)) {
     return { status: 'empty', message: '当前步骤暂无日志', content: '' };
   }
   if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
     return { status: 'error', message: '日志暂时不可用', content: '' };
+  }
+  if (
+    typeof expectedRequestKey !== 'string'
+    || resource.requestKey !== expectedRequestKey
+  ) {
+    return { status: 'loading', message: '日志加载中', content: '' };
   }
   if (resource.status === 'loading') {
     return { status: 'loading', message: '日志加载中', content: '' };
@@ -188,6 +205,7 @@ export default function CompetitionWorkflowDetail() {
   );
   const state = useCompetitionPollingResource(loadWorkflow, {
     enabled: (current) => shouldPollWorkflow(mode, current?.status),
+    requestKey: workflowId ? `workflow:${workflowId}` : null,
   });
   const detailState = normalizeWorkflowDetailState(state, workflowId);
   const workflow = detailState.status === 'ready' ? detailState.workflow : null;
@@ -195,6 +213,11 @@ export default function CompetitionWorkflowDetail() {
   const loggableSteps = workflowSteps.filter((step) => isSafeAttemptIdentifier(step?.attempt_id));
   const selectedAttemptStep = selectLatestAttemptStep(workflowSteps, selectedStepKey);
   const selectedAttemptId = selectedAttemptStep?.attempt_id || null;
+  const logRequestKey = createAttemptLogRequestKey(
+    workflow?.id,
+    selectedAttemptId,
+    logStream,
+  );
   const loadAttemptLog = useCallback(
     () => (
       workflow && selectedAttemptId
@@ -203,8 +226,13 @@ export default function CompetitionWorkflowDetail() {
     ),
     [provider, workflow, selectedAttemptId, logStream],
   );
-  const logResource = useCompetitionResource(loadAttemptLog);
-  const logState = normalizeAttemptLogState(logResource, logStream, selectedAttemptId);
+  const logResource = useCompetitionResource(loadAttemptLog, { requestKey: logRequestKey });
+  const logState = normalizeAttemptLogState(
+    logResource,
+    logStream,
+    selectedAttemptId,
+    logRequestKey,
+  );
 
   if (detailState.status !== 'ready') {
     return (

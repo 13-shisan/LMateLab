@@ -428,10 +428,24 @@ test('attempt log providers use only safe fixed stdout and stderr routes', async
     ['/home/private/workflow', 'attempt-1', 'stdout'],
     ['wf-1', '/home/private/attempt', 'stdout'],
     ['wf-1', 'C:\\private\\attempt', 'stderr'],
+    ['.', 'attempt-1', 'stdout'],
+    ['..', 'attempt-1', 'stdout'],
+    ['wf/child', 'attempt-1', 'stdout'],
+    ['wf\\child', 'attempt-1', 'stdout'],
+    ['wf-1', '../attempt', 'stdout'],
+    ['wf-1', 'attempt/child', 'stdout'],
+    ['wf-1', 'attempt\\child', 'stdout'],
+    ['wf-1', 'attempt id', 'stdout'],
+    ['wf-1', 'attempt\tid', 'stdout'],
+    ['wf-1', 'attempt\nid', 'stdout'],
+    ['wf-1', 'attempt%2Fchild', 'stdout'],
     ['wf-1', 'attempt-1', 'combined'],
     ['wf-1', 'attempt-1', '../../stdout'],
   ]) {
-    await assert.rejects(() => live.getAttemptLog(...args), /invalid|不受支持/i);
+    await assert.rejects(
+      () => live.getAttemptLog(...args),
+      (error) => error?.status === 400 && error?.code === 'invalid-log-request',
+    );
   }
   assert.equal(requests.length, requestCount);
 
@@ -446,8 +460,17 @@ test('attempt log providers use only safe fixed stdout and stderr routes', async
   assert.equal(demoLog.stream, 'stdout');
   assert.match(demoLog.content, /DEMO/);
   assert.ok(new TextEncoder().encode(demoLog.content).byteLength <= 64 * 1024);
-  await assert.rejects(
-    () => demo.getAttemptLog(demoWorkflow.id, demoAttemptId, 'stdin'),
-    /invalid|不受支持/i,
-  );
+  for (const args of [
+    ['..', demoAttemptId, 'stdout'],
+    ['wf-demo/child', demoAttemptId, 'stdout'],
+    ['wf-demo\\child', demoAttemptId, 'stdout'],
+    [demoWorkflow.id, '../attempt', 'stdout'],
+    [demoWorkflow.id, 'attempt id', 'stdout'],
+    [demoWorkflow.id, demoAttemptId, 'stdin'],
+  ]) {
+    await assert.rejects(
+      () => demo.getAttemptLog(...args),
+      (error) => error?.status === 400 && error?.code === 'invalid-log-request',
+    );
+  }
 });

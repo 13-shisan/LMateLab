@@ -12,7 +12,13 @@ import { competitionDataProvider } from './data/competitionDataProvider.js';
 
 
 const CompetitionDataContext = createContext(null);
-const loadingResource = Object.freeze({ status: 'loading', data: null, error: null });
+const loadingResource = Object.freeze({
+  status: 'loading',
+  data: null,
+  error: null,
+  refreshing: false,
+  requestKey: null,
+});
 
 
 export function CompetitionDataProvider({ children, provider = competitionDataProvider }) {
@@ -39,16 +45,38 @@ export function useCompetitionData() {
 }
 
 
-export function useCompetitionResource(loader) {
-  const [resource, setResource] = useState(loadingResource);
+export function beginCompetitionResourceLoad(
+  resource,
+  { preserveReady = false, requestKey = null } = {},
+) {
+  if (
+    preserveReady
+    && resource?.status === 'ready'
+    && resource.requestKey === requestKey
+  ) {
+    return { ...resource, error: null, refreshing: true };
+  }
+  return { ...loadingResource, requestKey };
+}
+
+
+export function useCompetitionResource(
+  loader,
+  { preserveReady = false, requestKey = null } = {},
+) {
+  const [resource, setResource] = useState(
+    () => beginCompetitionResourceLoad(loadingResource, { requestKey }),
+  );
 
   useEffect(() => {
     let active = true;
 
     async function loadResource() {
-      await Promise.resolve();
       if (!active) return;
-      setResource(loadingResource);
+      setResource((current) => beginCompetitionResourceLoad(current, {
+        preserveReady,
+        requestKey,
+      }));
 
       try {
         const data = await loader();
@@ -57,6 +85,8 @@ export function useCompetitionResource(loader) {
           status: data == null ? 'empty' : 'ready',
           data: data ?? null,
           error: null,
+          refreshing: false,
+          requestKey,
         });
       } catch (error) {
         if (!active) return;
@@ -64,6 +94,8 @@ export function useCompetitionResource(loader) {
           status: error?.code === 'forbidden' ? 'forbidden' : 'error',
           data: null,
           error,
+          refreshing: false,
+          requestKey,
         });
       }
     }
@@ -72,27 +104,31 @@ export function useCompetitionResource(loader) {
     return () => {
       active = false;
     };
-  }, [loader]);
+  }, [loader, preserveReady, requestKey]);
 
   return resource;
 }
 
 
-export function useCompetitionPollingResource(loader, { enabled, intervalMs = 10000 } = {}) {
+export function useCompetitionPollingResource(
+  loader,
+  { enabled, intervalMs = 10000, requestKey = null } = {},
+) {
   const [refreshKey, setRefreshKey] = useState(0);
   const resource = useCompetitionResource(
     useCallback(() => loader(refreshKey), [loader, refreshKey]),
+    { preserveReady: true, requestKey },
   );
   const pollingEnabled = typeof enabled === 'function' ? enabled(resource.data) : enabled;
 
   useEffect(() => {
-    if (!pollingEnabled) return undefined;
-    const timer = globalThis.setInterval(
+    if (!pollingEnabled || resource.refreshing) return undefined;
+    const timer = globalThis.setTimeout(
       () => setRefreshKey((value) => value + 1),
       intervalMs,
     );
-    return () => globalThis.clearInterval(timer);
-  }, [pollingEnabled, intervalMs]);
+    return () => globalThis.clearTimeout(timer);
+  }, [pollingEnabled, intervalMs, resource.refreshing]);
 
   return resource;
 }

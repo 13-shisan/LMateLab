@@ -1681,6 +1681,19 @@ test('new draft invalidation clears prior start uncertainty', () => {
 test('workflow polling runs only for live active scientific states', () => {
   const contextSource = read('../src/features/competition/CompetitionDataContext.jsx');
   const detailSource = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
+  const beginCompetitionResourceLoad = loadFunction(
+    contextSource,
+    'beginCompetitionResourceLoad',
+    {
+      loadingResource: {
+        status: 'loading',
+        data: null,
+        error: null,
+        refreshing: false,
+        requestKey: null,
+      },
+    },
+  );
   const shouldPollWorkflow = loadFunction(detailSource, 'shouldPollWorkflow');
 
   for (const status of [
@@ -1695,10 +1708,37 @@ test('workflow polling runs only for live active scientific states', () => {
     assert.equal(shouldPollWorkflow('live', status), false, String(status));
   }
 
+  const ready = {
+    status: 'ready',
+    data: { id: 'wf-1', status: 'running' },
+    error: null,
+    refreshing: false,
+    requestKey: 'workflow:wf-1',
+  };
+  assert.deepEqual(beginCompetitionResourceLoad(ready, {
+    preserveReady: true,
+    requestKey: 'workflow:wf-1',
+  }), {
+    ...ready,
+    refreshing: true,
+  });
+  assert.deepEqual(beginCompetitionResourceLoad(ready, {
+    preserveReady: true,
+    requestKey: 'workflow:wf-2',
+  }), {
+    status: 'loading',
+    data: null,
+    error: null,
+    refreshing: false,
+    requestKey: 'workflow:wf-2',
+  });
+
   assert.match(contextSource, /export\s+function\s+useCompetitionPollingResource\(/);
   assert.match(contextSource, /useCompetitionResource\(\s*useCallback\(/);
-  assert.match(contextSource, /globalThis\.setInterval\(/);
-  assert.match(contextSource, /return\s*\(\)\s*=>\s*globalThis\.clearInterval\(timer\)/);
+  assert.match(contextSource, /preserveReady:\s*true/);
+  assert.match(contextSource, /globalThis\.setTimeout\(/);
+  assert.match(contextSource, /return\s*\(\)\s*=>\s*globalThis\.clearTimeout\(timer\)/);
+  assert.doesNotMatch(contextSource, /globalThis\.setInterval\(/);
   assert.match(contextSource, /let\s+active\s*=\s*true/);
   assert.match(contextSource, /if\s*\(!active\)\s*return/g);
   assert.match(detailSource, /useCompetitionPollingResource\(loadWorkflow,/);
@@ -1769,16 +1809,20 @@ test('workflow evidence hides unexpected absolute attempt directories', () => {
 test('workflow log selection uses only safe latest attempt identifiers', () => {
   const source = read('../src/pages/competition/CompetitionWorkflowDetail.jsx');
   const {
+    createAttemptLogRequestKey,
     isSafeAttemptIdentifier,
     selectLatestAttemptStep,
     normalizeAttemptLogState,
   } = loadFunctions(source, [
+    'createAttemptLogRequestKey',
     'isSafeAttemptIdentifier',
     'selectLatestAttemptStep',
     'normalizeAttemptLogState',
   ]);
   const relaxAttempt = 'b1f1d2a8-7689-4dd4-802c-ff17c3eecb65';
   const scfAttempt = '09dfc066-82df-4727-ac95-54aa2be24231';
+  const scfStdoutKey = createAttemptLogRequestKey('wf-1', scfAttempt, 'stdout');
+  const relaxStdoutKey = createAttemptLogRequestKey('wf-1', relaxAttempt, 'stdout');
   const steps = [
     { key: 'relax', attempt: 1, attempt_id: relaxAttempt, job_id: '41001' },
     { key: 'scf', attempt: 2, attempt_id: scfAttempt, job_id: '41002' },
@@ -1800,31 +1844,58 @@ test('workflow log selection uses only safe latest attempt identifiers', () => {
   ], 'dos'), steps[1]);
 
   assert.deepEqual(normalizeAttemptLogState(
-    { status: 'loading', data: null, error: null }, 'stdout', scfAttempt,
+    {
+      status: 'loading', data: null, error: null, requestKey: scfStdoutKey,
+    }, 'stdout', scfAttempt, scfStdoutKey,
   ), { status: 'loading', message: '日志加载中', content: '' });
   assert.deepEqual(normalizeAttemptLogState(
-    { status: 'ready', data: { stream: 'stdout', content: '' }, error: null },
-    'stdout', scfAttempt,
+    {
+      status: 'ready', data: { stream: 'stdout', content: '' }, error: null,
+      requestKey: scfStdoutKey,
+    },
+    'stdout', scfAttempt, scfStdoutKey,
   ), { status: 'empty', message: '当前日志为空', content: '' });
   assert.deepEqual(normalizeAttemptLogState(
-    { status: 'ready', data: { stream: 'stdout', content: 'bounded tail\n' }, error: null },
-    'stdout', scfAttempt,
+    {
+      status: 'ready', data: { stream: 'stdout', content: 'bounded tail\n' }, error: null,
+      requestKey: scfStdoutKey,
+    },
+    'stdout', scfAttempt, scfStdoutKey,
   ), { status: 'ready', message: '', content: 'bounded tail\n' });
+  assert.deepEqual(normalizeAttemptLogState(
+    {
+      status: 'ready', data: { stream: 'stdout', content: 'prior attempt tail\n' }, error: null,
+      requestKey: relaxStdoutKey,
+    },
+    'stdout', scfAttempt, scfStdoutKey,
+  ), { status: 'loading', message: '日志加载中', content: '' });
   for (const resource of [
-    { status: 'error', data: null, error: new Error('/home/private/log') },
-    { status: 'ready', data: { stream: 'stderr', content: 'wrong stream' }, error: null },
-    { status: 'ready', data: { stream: 'stdout', content: {} }, error: null },
+    {
+      status: 'error', data: null, error: new Error('/home/private/log'),
+      requestKey: scfStdoutKey,
+    },
+    {
+      status: 'ready', data: { stream: 'stderr', content: 'wrong stream' }, error: null,
+      requestKey: scfStdoutKey,
+    },
+    {
+      status: 'ready', data: { stream: 'stdout', content: {} }, error: null,
+      requestKey: scfStdoutKey,
+    },
   ]) {
     assert.deepEqual(
-      normalizeAttemptLogState(resource, 'stdout', scfAttempt),
+      normalizeAttemptLogState(resource, 'stdout', scfAttempt, scfStdoutKey),
       { status: 'error', message: '日志暂时不可用', content: '' },
     );
   }
   assert.deepEqual(normalizeAttemptLogState(
-    { status: 'ready', data: null, error: null }, 'stdout', null,
+    {
+      status: 'ready', data: null, error: null, requestKey: null,
+    }, 'stdout', null, null,
   ), { status: 'empty', message: '当前步骤暂无日志', content: '' });
 
   assert.match(source, /provider\.getAttemptLog\(workflow\.id,\s*selectedAttemptId,\s*logStream\)/);
+  assert.match(source, /useCompetitionResource\(loadAttemptLog,\s*\{\s*requestKey:\s*logRequestKey\s*\}\)/);
   assert.match(source, /['"]stdout['"][\s\S]*?['"]stderr['"]/);
   assert.match(source, /<pre\s+className=['"]competition-result-log['"]>/);
   assert.doesNotMatch(source, /attempt_dir\.(?:split|match)/);
