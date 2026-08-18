@@ -189,6 +189,142 @@ class CompetitionDeployContractTests(unittest.TestCase):
         )
         self.assertIn("find source frontend-dist deploy -type f", source)
 
+    def test_stage7_vasp_runner_has_only_fixed_resources_identity_and_commands(self):
+        source = self.read_required("slurm/vasp-stage.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=16",
+            "#SBATCH --gres=gpu:RTX5090:1",
+            "#SBATCH --mem=32G",
+            "#SBATCH --time=06:00:00",
+            'test "$#" -eq 3',
+            "case \"$stage\" in relax|scf|band|dos)",
+            "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            'test "$PWD" = "$LMATELAB_WORKFLOW_ROOT/$workflow_id/attempts/$attempt_id"',
+            "test \"$(<POTCAR.spec)\" = $'Mo_sv\\nS'",
+            "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
+            "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+            "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+            "PAW_PBE\\ Mo_sv*",
+            "PAW_PBE\\ S\\ *",
+            "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103",
+            "/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh",
+            "/usr/bin/time -v -o runtime-time.txt",
+            'mpirun --bind-to none -np "$SLURM_NTASKS" vasp_std',
+            "umask 077",
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("eval ", "bash -c", "sh -c", "docker", "singularity", "srun --pty"):
+            self.assertNotIn(forbidden, source)
+
+    def test_stage7_vasp_runner_preserves_common_evidence_and_vasp_exit_status(self):
+        source = self.read_required("slurm/vasp-stage.slurm")
+        for evidence_name in (
+            "POTCAR",
+            "potcar-source-sha256.txt",
+            "vaspkit-version.txt",
+            "vasp-exit-code.txt",
+            "runtime-time.txt",
+        ):
+            self.assertIn(evidence_name, source)
+
+        allow_nonzero = source.index("set +e")
+        execute_vasp = source.index("/usr/bin/time -v -o runtime-time.txt", allow_nonzero)
+        capture_status = source.index("vasp_status=$?", execute_vasp)
+        restore_errexit = source.index("set -e", capture_status)
+        write_status = source.index('> vasp-exit-code.txt', restore_errexit)
+        preserve_status = source.index('exit "$vasp_status"', write_status)
+        self.assertLess(allow_nonzero, execute_vasp)
+        self.assertLess(execute_vasp, capture_status)
+        self.assertLess(capture_status, restore_errexit)
+        self.assertLess(restore_errexit, write_status)
+        self.assertLess(write_status, preserve_status)
+
+    def test_stage7_preflight_is_short_private_fixed_and_never_executes_vasp(self):
+        source = self.read_required("slurm/stage7-preflight.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --time=00:05:00",
+            "SLURM_JOB_ID",
+            "umask 077",
+            'evidence/stage7/preflight-$SLURM_JOB_ID',
+            "competition_templates/mos2_v1",
+            '"$template/POSCAR"',
+            "POTCAR.spec",
+            "vaspkit -task 103",
+            "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
+            "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+            "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+            "PAW_PBE\\ Mo_sv*",
+            "PAW_PBE\\ S\\ *",
+            "env-nvhpc.sh",
+            "command -v vasp_std",
+            'ldd "$(command -v vasp_std)"',
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("mpirun", "/usr/bin/time", "srun "):
+            self.assertNotIn(forbidden, source)
+
+    def test_stage7_internal_acceptance_creator_is_fixed_short_and_nonpublic(self):
+        python_source = self.read_required("slurm/stage7-acceptance.py")
+        slurm_source = self.read_required("slurm/stage7-acceptance.slurm")
+        for required in (
+            'parser.add_argument("--profile", choices=("scf_nonconvergence_v1",), required=True)',
+            'parser.add_argument("--operator-alias", default="pb23030683")',
+            "DraftCreateRequest",
+            "create_draft",
+            "confirm_workflow",
+            "render_acceptance_scf_incar",
+            'logical_path == "scf/INCAR"',
+            "hashlib.sha256(rendered).hexdigest()",
+            'metadata["input_manifest"]',
+            "run.input_sha256",
+            'event_type="acceptance_profile_configured"',
+            '"profile": "scf_nonconvergence_v1"',
+            "build_production_coordinator",
+            "coordinator.start",
+        ):
+            self.assertIn(required, python_source)
+        for forbidden in (
+            "shell=True",
+            "subprocess",
+            "os.system",
+            "/home/scc/pb23030683/POTCAR",
+            "TITEL  =",
+        ):
+            self.assertNotIn(forbidden, python_source)
+
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --time=00:05:00",
+            "SLURM_JOB_ID",
+            "runtime.env",
+            "envs/python",
+            "stage7-acceptance.py",
+            "--profile scf_nonconvergence_v1",
+        ):
+            self.assertIn(required, slurm_source)
+        for forbidden in ("vasp_std", "vasp_gam", "vasp_ncl", "mpirun", "vaspkit"):
+            self.assertNotIn(forbidden, slurm_source.lower())
+
+    def test_formal_build_runs_stage7_backend_suites(self):
+        source = self.read_required("build.slurm")
+        for suite in (
+            "tests.test_competition_attempt_inputs",
+            "tests.test_competition_vasp",
+            "tests.test_competition_coordinator",
+            "tests.test_competition_lifespan",
+        ):
+            self.assertIn(suite, source)
+
     def test_build_job_uses_module_python_with_a_valid_pip_environment(self):
         source = self.read_required("build.slurm")
         module_init = "source /etc/profile.d/modules.sh"

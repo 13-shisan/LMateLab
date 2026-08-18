@@ -38,6 +38,7 @@ _VASPKIT_BANNER_RE: Final = re.compile(
     r"^VASPKIT Standard Edition (?P<version>\d+\.\d+\.\d+)$"
 )
 _MAX_METADATA_BYTES: Final = 8192
+_MAX_ACCEPTANCE_SCF_INCAR_BYTES: Final = 8192
 _MAX_TITLE_LINE_BYTES: Final = 4096
 _HASH_CHUNK_BYTES: Final = 64 * 1024
 _MAX_ACCEPTANCE_OUTPUT_BYTES: Final = 2 * 1024 * 1024 * 1024
@@ -382,6 +383,49 @@ DEFAULT_POTCAR_CONTRACT = PotcarContract(
     combined_sha256="509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
     vaspkit_version="1.5.1",
 )
+
+
+def render_acceptance_scf_incar(content: bytes) -> bytes:
+    """Apply the one internal Stage 7 non-convergence profile to a fixed SCF INCAR."""
+    if (
+        type(content) is not bytes
+        or not content
+        or len(content) > _MAX_ACCEPTANCE_SCF_INCAR_BYTES
+        or not content.endswith(b"\n")
+        or b"\r" in content
+        or b"\x00" in content
+    ):
+        raise VaspPolicyError(
+            "acceptance_profile_input_invalid",
+            "acceptance profile input is invalid",
+        )
+    try:
+        lines = content.decode("ascii").splitlines(keepends=True)
+    except UnicodeDecodeError:
+        raise VaspPolicyError(
+            "acceptance_profile_input_invalid",
+            "acceptance profile input is invalid",
+        ) from None
+
+    replacements = {"EDIFF": "EDIFF = 1E-20\n", "NELM": "NELM = 1\n"}
+    seen = {key: 0 for key in replacements}
+    rendered: list[str] = []
+    assignment = re.compile(r"^[ \t]*(EDIFF|NELM)[ \t]*=", re.IGNORECASE)
+    for line in lines:
+        match = assignment.match(line)
+        if match is None:
+            rendered.append(line)
+            continue
+        key = match.group(1).upper()
+        seen[key] += 1
+        rendered.append(replacements[key])
+
+    if seen != {"EDIFF": 1, "NELM": 1}:
+        raise VaspPolicyError(
+            "acceptance_profile_input_invalid",
+            "acceptance profile input is invalid",
+        )
+    return "".join(rendered).encode("ascii")
 
 
 def validate_potcar(

@@ -279,6 +279,14 @@ class CompetitionPreviewDeployContractTests(unittest.TestCase):
         self.assertGreater(source.index(jwt_assignment), runtime_source)
         self.assertNotIn(': "${JWT_SECRET:?JWT_SECRET must be configured}"', source)
 
+    def test_workflow_preview_service_disables_the_stage7_coordinator(self):
+        source = self.read_required("workflow-preview-service.slurm")
+        runtime_source = source.index('source "$runtime_env"')
+        assignment = "export LMATELAB_COORDINATOR_ENABLED=0"
+        self.assertIn(assignment, source)
+        self.assertGreater(source.index(assignment), runtime_source)
+        self.assertNotIn('LMATELAB_COORDINATOR_ENABLED="${LMATELAB_COORDINATOR_ENABLED:-1}"', source)
+
     def test_workflow_preview_login_helpers_only_fetch_submit_and_verify(self):
         for name in (
             "submit-workflow-preview-build.sh",

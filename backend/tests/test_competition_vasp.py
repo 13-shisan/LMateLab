@@ -13,6 +13,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from pydantic import ValidationError
+
+from schemas_workflow import DraftCreateRequest
 from services import competition_vasp
 from services.competition_vasp import (
     AcceptanceReport,
@@ -100,6 +103,52 @@ class PotcarPolicyTests(unittest.TestCase):
             DEFAULT_POTCAR_CONTRACT.combined_sha256,
         )
         self.assertEqual("1.5.1", DEFAULT_POTCAR_CONTRACT.vaspkit_version)
+
+    def test_scf_nonconvergence_profile_is_fixed_and_not_public_input(self):
+        original = (
+            b"SYSTEM = MoS2 SCF\n"
+            b"ENCUT = 520\n"
+            b"EDIFF = 1E-7\n"
+            b"NELM = 120\n"
+            b"LWAVE = .TRUE.\n"
+        )
+
+        rendered = competition_vasp.render_acceptance_scf_incar(original)
+
+        self.assertEqual(
+            (
+                b"SYSTEM = MoS2 SCF\n"
+                b"ENCUT = 520\n"
+                b"EDIFF = 1E-20\n"
+                b"NELM = 1\n"
+                b"LWAVE = .TRUE.\n"
+            ),
+            rendered,
+        )
+        self.assertNotEqual(hashlib.sha256(original).digest(), hashlib.sha256(rendered).digest())
+        with self.assertRaises(ValidationError):
+            DraftCreateRequest.model_validate(
+                {
+                    "template_version": "mos2_v1",
+                    "source_kind": "builtin",
+                    "steps": ["relax", "scf", "band", "dos"],
+                    "parameters": {},
+                    "acceptance_profile": "scf_nonconvergence_v1",
+                }
+            )
+
+    def test_scf_nonconvergence_profile_rejects_ambiguous_or_unexpected_input(self):
+        for content in (
+            b"EDIFF = 1E-7\n",
+            b"NELM = 120\n",
+            b"EDIFF = 1E-7\nEDIFF = 1E-8\nNELM = 120\n",
+            b"EDIFF = 1E-7\nNELM = 120\nNELM = 121\n",
+            b"EDIFF = 1E-7\nNELM = 120\n\x00",
+        ):
+            with self.subTest(content=content):
+                with self.assertRaises(VaspPolicyError) as raised:
+                    competition_vasp.render_acceptance_scf_incar(content)
+                self.assertEqual("acceptance_profile_input_invalid", raised.exception.code)
 
     def test_fixed_stage_output_mapping_is_immutable(self):
         with self.assertRaises(TypeError):
