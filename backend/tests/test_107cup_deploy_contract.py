@@ -16,6 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_ROOT = REPO_ROOT / "deploy" / "107cup"
 VALID_WORKFLOW_ID = "11111111-1111-4111-8111-111111111111"
 VALID_ATTEMPT_ID = "22222222-2222-4222-8222-222222222222"
+REAL_VASPKIT_BANNER = (
+    "|         VASPKIT Standard Edition 1.5.1 "
+    "(27 Jan. 2024)         |\n"
+)
 
 
 class VaspStageFixture:
@@ -249,7 +253,7 @@ exit "$status"
                 "FIXTURE_PUBLISH_COLLISION": publish_collision or "",
                 "FIXTURE_VASPKIT_OUTPUT": vaspkit_output
                 if vaspkit_output is not None
-                else "VASPKIT Standard Edition 1.5.1\n",
+                else REAL_VASPKIT_BANNER,
                 "FIXTURE_VASP_STATUS": str(vasp_status),
                 "FIXTURE_STAGE": values["stage"],
                 "FIXTURE_SCONTROL_RECORD": scontrol_record
@@ -376,8 +380,8 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
                 self._assert_reserved_symlinks_are_rejected(names, stage=stage)
 
     def test_vaspkit_banner_must_be_exact_and_unique(self):
-        banner = "VASPKIT Standard Edition 1.5.1\n"
-        for output in ("VASPKIT Standard Edition 1.5.0\n", banner + banner):
+        wrong_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.0")
+        for output in (wrong_banner, REAL_VASPKIT_BANNER + REAL_VASPKIT_BANNER):
             with self.subTest(output=output):
                 result = self.fixture.run(vaspkit_output=output)
                 self.assertNotEqual(0, result.returncode, result)
@@ -717,30 +721,30 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn('test "${vaspkit_markers[0]}" = "$vaspkit_banner"', preflight)
         self.assertLess(preflight.index("mapfile -t vaspkit_markers"), preflight.index("env-nvhpc.sh"))
 
-    def test_stage7_preflight_extracts_real_vaspkit_banner_as_one_exact_token(self):
-        source = self.read_required("slurm/stage7-preflight.slurm")
-        real_banner = (
-            "|         VASPKIT Standard Edition 1.5.1 "
-            "(27 Jan. 2024)         |"
-        )
+    def test_stage7_scripts_extract_real_vaspkit_banner_as_one_exact_token(self):
         canonical_banner = "VASPKIT Standard Edition 1.5.1"
         self.assertEqual(
             [canonical_banner],
             re.findall(
                 r"VASPKIT\s+Standard\s+Edition\s+[0-9]+\.[0-9]+\.[0-9]+",
-                real_banner,
+                REAL_VASPKIT_BANNER,
             ),
         )
+        banner_assignment = "vaspkit_banner='VASPKIT Standard Edition 1.5.1'"
         extraction = (
             "grep -Eo "
             "'VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+"
             "[0-9]+\\.[0-9]+\\.[0-9]+' vaspkit-version.txt"
         )
-        self.assertEqual(1, source.count(extraction))
-        self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', source)
-        self.assertIn(
-            'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
-        )
+        for script_name in ("slurm/stage7-preflight.slurm", "slurm/vasp-stage.slurm"):
+            with self.subTest(script_name=script_name):
+                source = self.read_required(script_name)
+                self.assertEqual(1, source.count(banner_assignment))
+                self.assertEqual(1, source.count(extraction))
+                self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', source)
+                self.assertIn(
+                    'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
+                )
 
     def test_stage7_preflight_hashes_all_evidence_with_self_checked_manifests(self):
         source = self.read_required("slurm/stage7-preflight.slurm")

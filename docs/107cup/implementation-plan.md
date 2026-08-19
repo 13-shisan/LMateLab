@@ -780,4 +780,4 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 上述只证明本地源码和合同门禁。分支尚未合并，107 未构建或部署该实现，本次没有连接 107、提交 Slurm 或执行 VASPKIT/VASP，因而没有真实 VASP Job ID、正常结束标记、四步文件集合或人为失败链证据。阶段 7 仅改为 `PARTIAL`，阶段 8 继续为 `PENDING`；必须在实现 PR 合并并同步固定提交后，再按 Task 13 和 Task 14 完成真实 107 验收。
 - 阶段 7 实现 PR #30 已合并；107 预检 Job `39373` 在 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/preflight-39373` 以 `FAILED/1:0` 结束。真实 VASPKIT 输出为 `|         VASPKIT Standard Edition 1.5.1 (27 Jan. 2024)         |`，旧脚本由 `grep` 保留整行后与 `VASPKIT Standard Edition 1.5.1` 严格比较，因边框和日期必然不匹配。
 - Job `39373` 在该版本门禁处停止，没有执行 `vasp_std`，也没有进入正式构建；不得将该保留失败现场记为 VASP 成功或四步链证据。
-- 预检修复在 `codex/107cup-stage7-preflight-fix` 严格按 TDD 仅在本地完成：受限提取唯一 VASPKIT 规范版本令牌并仍严格等于 `1.5.1`，在所有证据生成后写入不自包含的 `manifest.txt` 和仅哈希该文件的 `manifest.sha256`，两层均在作业内自校验。阶段 7 保持 `PARTIAL`；该修复必须经 PR 合并并在 107 重新提交预检通过后，才能继续。
+- 预检修复在 `codex/107cup-stage7-preflight-fix` 严格按 TDD 仅在本地完成：受限提取唯一 VASPKIT 规范版本令牌并仍严格等于 `1.5.1`，在所有证据生成后写入不自包含的 `manifest.txt` 和仅哈希该文件的 `manifest.sha256`，两层均在作业内自校验；正式 `vasp-stage.slurm` runner 的同根因整行比较也已同步为完全相同的受限提取。阶段 7 保持 `PARTIAL`；该修复必须经 PR 合并并在 107 重新提交预检通过后，才能继续。
