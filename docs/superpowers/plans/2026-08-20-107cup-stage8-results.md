@@ -75,22 +75,22 @@ Operator 只能读取自己的工作流；Viewer 可读取竞赛演示工作流�
 **Files:**
 - Create: `backend/tests/test_competition_results.py`
 
-- [ ] 建立成功、科学失败、文件缺失、哈希变化、路径逃逸和解析异常 fixtures。
-- [ ] 固定四步成功详情、失败详情和列表筛选合同。
-- [ ] 固定结构/BAND/DOS artifact 与 plot 响应合同。
-- [ ] 固定 Operator/Viewer 可见性及相同证据包字节。
-- [ ] 先运行定向测试并确认因服务和路由未实现而 RED。
+- [x] 建立成功、科学失败、文件缺失、哈希变化、路径逃逸和解析异常 fixtures。
+- [x] 固定四步成功详情、失败详情和列表筛选合同。
+- [x] 固定结构/BAND/DOS artifact 与 plot 响应合同。
+- [x] 固定 Operator/Viewer 可见性及相同证据包字节。
+- [x] 先运行定向测试并确认因服务和路由未实现而 RED。
 
 ### Task 2: Implement a fail-closed workflow result ledger
 
 **Files:**
 - Create: `backend/services/competition_results.py`
 
-- [ ] 只接受 terminal run 和固定四步键，选取每步最终 attempt。
-- [ ] 重算 acceptance canonical SHA-256，并核对 scheduler、状态、Job ID 与 attempt 目录。
-- [ ] 通过 `WorkflowFile` 定位所需文件，拒绝绝对路径、`..`、错误 attempt、符号链接、非普通文件、size/hash 不一致。
-- [ ] 提供安全失败原因映射，不向 API 暴露绝对路径或异常内部文本。
-- [ ] 生成共享的 list/detail/database payload，避免三套状态判断。
+- [x] 只接受 terminal run 和固定四步键，选取每步最终 attempt。
+- [x] 重算 acceptance canonical SHA-256，并核对 scheduler、状态、Job ID 与 attempt 目录。
+- [x] 通过 `WorkflowFile` 定位所需文件，拒绝绝对路径、`..`、错误 attempt、符号链接、非普通文件、size/hash 不一致。
+- [x] 提供安全失败原因映射，不向 API 暴露绝对路径或异常内部文本。
+- [x] 生成共享的 list/detail/database payload，避免三套状态判断。
 
 ### Task 3: Reuse the existing scientific parsers
 
@@ -98,22 +98,22 @@ Operator 只能读取自己的工作流；Viewer 可读取竞赛演示工作流�
 - Modify: `backend/routers/vasp_db.py` only if a pure parser adapter is required
 - Modify: `backend/services/competition_results.py`
 
-- [ ] 复用现有 BAND/DOS 图、`band.dat` 和 DOS ZIP 解析函数，不复制解析算法。
-- [ ] 从已验收 Relax `CONTCAR` 构建 ASE 结构、CIF/POSCAR、晶格、密度、维度和分数坐标。
-- [ ] 从已验收输出提取总能、带隙、VBM、CBM 和空间群；所有数值必须有限。
-- [ ] 每次解析前后核对源文件 SHA-256；解析器异常转为 `parse-error`。
-- [ ] 给每个科学输出附加 source attempt、relative path、size 和 SHA-256 provenance。
+- [x] 复用现有 BAND/DOS 图、`band.dat` 和 DOS ZIP 解析函数，不复制解析算法。
+- [x] 从已验收 Relax `CONTCAR` 构建 ASE 结构、CIF/POSCAR、晶格、密度、维度和分数坐标。
+- [x] 从已验收输出提取总能、带隙、VBM、CBM 和空间群；所有数值必须有限。
+- [x] 每次解析前后核对源文件 SHA-256；解析器异常转为 `parse-error`。
+- [x] 给每个科学输出附加 source attempt、relative path、size 和 SHA-256 provenance。
 
 ### Task 4: Build deterministic evidence bundles
 
 **Files:**
 - Create: `backend/services/competition_bundle.py`
 
-- [ ] 收集 run、steps、attempts、events、template、file ledger 和解析 provenance。
-- [ ] 从工作流 `release_commit` 对应 release 读取并核验 `manifest.sha256` 与 `manifest.txt`。
-- [ ] 核验所有纳入包的文件账本；缺失或变化时不生成 bundle。
-- [ ] 排序并 canonicalize JSON，计算 payload SHA-256，禁止绝对路径和秘密字段。
-- [ ] 重复生成及 Viewer/Operator 下载必须字节一致。
+- [x] 收集 run、steps、attempts、events、template、file ledger 和解析 provenance。
+- [x] 从工作流 `release_commit` 对应 release 读取并核验 `manifest.sha256` 与 `manifest.txt`。
+- [x] 核验所有纳入包的文件账本；缺失或变化时不生成 bundle。
+- [x] 排序并 canonicalize JSON，计算 payload SHA-256，禁止绝对路径和秘密字段。
+- [x] 重复生成及 Viewer/Operator 下载必须字节一致。
 
 ### Task 5: Connect the live FastAPI routes
 
@@ -121,11 +121,11 @@ Operator 只能读取自己的工作流；Viewer 可读取竞赛演示工作流�
 - Modify: `backend/routers/competition_workflows.py`
 - Modify: `backend/tests/test_competition_workflow_routes.py`
 
-- [ ] 实现结果列表、结果详情、VASP 记录列表和记录详情。
-- [ ] 实现 BAND/DOS plot 与五种固定 artifact 下载。
-- [ ] 路由复用现有 `_visible_runs_statement`，不得绕过 Operator 所有权边界。
-- [ ] 固定下载 filename、media type、`Content-Disposition` 和 `Cache-Control: no-store`。
-- [ ] 对未知 kind、非终态工作流和不可信文件返回 4xx/安全错误码。
+- [x] 实现结果列表、结果详情、VASP 记录列表和记录详情。
+- [x] 实现 BAND/DOS plot 与五种固定 artifact 下载。
+- [x] 路由复用现有 `_visible_runs_statement`，不得绕过 Operator 所有权边界。
+- [x] 固定下载 filename、media type、`Content-Disposition` 和 `Cache-Control: no-store`。
+- [x] 对未知 kind、非终态工作流和不可信文件返回 4xx/安全错误码。
 
 ### Task 6: Verify the existing frontend contract
 
@@ -136,32 +136,32 @@ Operator 只能读取自己的工作流；Viewer 可读取竞赛演示工作流�
   - `frontend/src/pages/competition/CompetitionVaspDatabase.jsx`
   - `frontend/src/features/competition/data/apiCompetitionDataProvider.js`
 
-- [ ] 保持同一页面同时服务 demo/live，不复制页面。
-- [ ] 成功详情显示 3D 结构、晶体参数、BAND/DOS tab 和导出。
-- [ ] 失败或解析错误只显示 `failure_evidence`，不挂载成功科学组件。
-- [ ] 运行现有前端测试、定向 ESLint 和 107cup live build。
+- [x] 保持同一页面同时服务 demo/live，不复制页面。
+- [x] 成功详情显示 3D 结构、晶体参数、BAND/DOS tab 和导出。
+- [x] 失败或解析错误只显示 `failure_evidence`，不挂载成功科学组件。
+- [x] 运行现有前端测试、定向 ESLint 和 107cup live build。
 
 ### Task 7: Run local regression and repository checks
 
-- [ ] 运行 Stage 8 定向后端测试。
-- [ ] 运行完整后端测试集并记录 pass/skip 数。
-- [ ] 运行完整前端测试、定向 ESLint 和 live build。
-- [ ] 运行 `python -m compileall`、`git diff --check` 和仓库秘密/大文件检查。
-- [ ] 只有全部通过后才推送 `codex/107cup-stage8-results`。
+- [x] 运行 Stage 8 定向后端测试。
+- [x] 运行完整后端测试集并记录 pass/skip 数。
+- [x] 运行完整前端测试、定向 ESLint 和 live build。
+- [x] 运行 `python -m compileall`、`git diff --check` 和仓库秘密/大文件检查。
+- [x] 只有全部通过后才推送 `codex/107cup-stage8-results`。
 
 ### Task 8: Merge through the authorized Gitea API
 
-- [ ] 使用本机已保存 Token，仅为本代理的 `codex/107cup-stage8-results` 创建 PR。
-- [ ] 检查 PR 无冲突且测试通过后合并到受保护 `main`。
-- [ ] 同步 Windows `main`、Gitea `main` 和 107 只读 checkout 到同一合并提交。
+- [x] 使用本机已保存 Token，仅为本代理的 `codex/107cup-stage8-results` 创建 PR。
+- [x] 检查 PR 无冲突且测试通过后合并到受保护 `main`。
+- [x] 同步 Windows `main`、Gitea `main` 和 107 只读 checkout 到同一合并提交。
 
 ### Task 9: Validate on a Slurm compute node without rerunning VASP
 
-- [ ] 提交 Stage 8 短时验收 Job，在计算节点运行完整构建/测试和真实解析。
-- [ ] 对成功工作流验证详情、BAND/DOS plot、四种科学 artifact 和证据包。
-- [ ] 对失败工作流验证只显示 SCF 失败，BAND/DOS 无 attempt/Job 且无科学成功区。
-- [ ] 重复下载并比较 Viewer/Operator 证据包 SHA-256。
-- [ ] 保存 Job ID、节点、ExitCode、测试输出和验收 manifest。
+- [x] 提交 Stage 8 短时验收 Job，在计算节点运行完整构建/测试和真实解析。
+- [x] 对成功工作流验证详情、BAND/DOS plot、四种科学 artifact 和证据包。
+- [x] 对失败工作流验证只显示 SCF 失败，BAND/DOS 无 attempt/Job 且无科学成功区。
+- [x] 重复下载并比较 Viewer/Operator 证据包 SHA-256。
+- [x] 保存 Job ID、节点、ExitCode、测试输出和验收 manifest。
 
 ### Task 10: Deploy and record Stage 8 evidence
 
@@ -169,10 +169,11 @@ Operator 只能读取自己的工作流；Viewer 可读取竞赛演示工作流�
 - Modify: `docs/107cup/implementation-plan.md`
 - Create: `docs/107cup/stage8-results-evidence.md`
 
-- [ ] 从合并后的 `main` 构建新 release 并原子切换稳定服务。
-- [ ] 核对公网、Windows Operator 和 107 内部入口指向同一 Job/commit/manifest。
+- [x] 从合并后的 `main` 构建新 release 并原子切换稳定服务。
+- [x] 核对公网、Windows Operator 和 107 内部入口指向同一 Job/commit/manifest。
 - [ ] 以 Viewer 和 Operator 浏览器验收结果列表、成功详情、失败详情、数据库和下载。
-- [ ] 记录原始证据路径和 SHA-256；完成全部门禁后才把 Stage 8 改为 `DONE`。
+- [x] 记录原始证据路径和 SHA-256。
+- [ ] 完成全部门禁后才把 Stage 8 改为 `DONE`。
 
 ## Completion Gate
 
