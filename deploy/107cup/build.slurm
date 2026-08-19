@@ -121,6 +121,8 @@ python -m unittest \
   tests.test_competition_vasp \
   tests.test_competition_coordinator \
   tests.test_competition_lifespan \
+  tests.test_competition_results \
+  tests.test_107cup_stage8_acceptance_contract \
   -v
 
 cd "$project/frontend"
