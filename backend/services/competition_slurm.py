@@ -7,6 +7,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import uuid
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
@@ -152,22 +153,67 @@ def _copy_script_descriptor(source: int, destination: int) -> str:
     return digest.hexdigest()
 
 
+def _linux_memfd_sealing_available() -> bool:
+    required_fcntl_names = (
+        "F_ADD_SEALS",
+        "F_GET_SEALS",
+        "F_SEAL_WRITE",
+        "F_SEAL_GROW",
+        "F_SEAL_SHRINK",
+        "F_SEAL_SEAL",
+    )
+    return (
+        _IS_LINUX
+        and getattr(os, "memfd_create", None) is not None
+        and getattr(os, "MFD_ALLOW_SEALING", None) is not None
+        and getattr(os, "MFD_CLOEXEC", None) is not None
+        and _fcntl is not None
+        and all(hasattr(_fcntl, name) for name in required_fcntl_names)
+    )
+
+
 def _create_private_snapshot_descriptor() -> int:
-    if _IS_LINUX:
-        memfd_create = getattr(os, "memfd_create", None)
-        allow_sealing = getattr(os, "MFD_ALLOW_SEALING", None)
-        close_on_exec = getattr(os, "MFD_CLOEXEC", None)
-        if memfd_create is None or allow_sealing is None or close_on_exec is None:
-            raise ValueError("submission script snapshot is unavailable")
+    if not _IS_LINUX:
+        raise ValueError("submission script snapshot is unavailable")
+    if _linux_memfd_sealing_available():
         try:
-            return memfd_create(
+            return os.memfd_create(
                 "lmatelab-slurm-script",
-                allow_sealing | close_on_exec,
+                os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC,
             )
         except (OSError, TypeError, ValueError) as exc:
             raise ValueError("submission script snapshot is unavailable") from exc
 
-    raise ValueError("submission script snapshot is unavailable")
+    anonymous = getattr(os, "O_TMPFILE", None)
+    if anonymous is None:
+        raise ValueError("submission script snapshot is unavailable")
+    flags = anonymous | os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+    try:
+        return os.open(tempfile.gettempdir(), flags, 0o600)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script snapshot is unavailable") from exc
+
+
+def _reopen_linux_snapshot_read_only(descriptor: int) -> int:
+    reopened = None
+    try:
+        os.fsync(descriptor)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("submission script snapshot is invalid")
+        reopened = os.open(
+            f"/proc/self/fd/{descriptor}",
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
+        )
+        after = os.fstat(reopened)
+        if _script_stat_signature(before) != _script_stat_signature(after):
+            raise ValueError("submission script snapshot identity changed")
+        os.lseek(reopened, 0, os.SEEK_SET)
+        return reopened
+    except (OSError, TypeError, ValueError) as exc:
+        if reopened is not None:
+            os.close(reopened)
+        raise ValueError("submission script snapshot is unavailable") from exc
 
 
 def _seal_linux_snapshot(descriptor: int) -> None:
@@ -201,11 +247,17 @@ def _seal_linux_snapshot(descriptor: int) -> None:
 def _snapshot_script_descriptor(
     source: int,
 ) -> tuple[int, str]:
+    use_memfd_sealing = _linux_memfd_sealing_available()
     snapshot = _create_private_snapshot_descriptor()
     try:
         digest = _copy_script_descriptor(source, snapshot)
         if _IS_LINUX:
-            _seal_linux_snapshot(snapshot)
+            if use_memfd_sealing:
+                _seal_linux_snapshot(snapshot)
+            else:
+                read_only_snapshot = _reopen_linux_snapshot_read_only(snapshot)
+                os.close(snapshot)
+                snapshot = read_only_snapshot
             if _hash_script_descriptor(snapshot) != digest:
                 raise ValueError("submission script snapshot identity changed")
         os.lseek(snapshot, 0, os.SEEK_SET)

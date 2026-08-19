@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 try:
     import fcntl
@@ -27,6 +28,7 @@ _HAS_LINUX_MEMFD_SEALING = (
     and fcntl is not None
     and hasattr(fcntl, "F_ADD_SEALS")
 )
+_HAS_LINUX_OTMPFILE = sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE")
 
 
 @unittest.skipUnless(_HAS_LINUX_MEMFD_SEALING, "Linux memfd sealing is required")
@@ -98,6 +100,69 @@ if len(blocked) != 2:
             [["write", errno.EPERM], ["truncate", errno.EPERM]],
             child_evidence["blocked"],
         )
+        expected_digest = hashlib.sha256(payload).hexdigest()
+        self.assertEqual(expected_digest, source_digest)
+        self.assertEqual(expected_digest, snapshot_digest)
+
+
+@unittest.skipUnless(_HAS_LINUX_OTMPFILE, "Linux O_TMPFILE is required")
+class LinuxAnonymousSubmissionSnapshotProcessTests(unittest.TestCase):
+    def test_child_consumes_read_only_anonymous_snapshot_without_memfd_symbols(self):
+        payload = b"#!/bin/bash\necho anonymous-child-regression\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script_path = Path(temp_dir) / "runner.slurm"
+            script_path.write_bytes(payload)
+            source, source_digest = _open_hashed_script(script_path)
+            try:
+                with (
+                    mock.patch.object(os, "memfd_create", None, create=True),
+                    mock.patch.object(os, "MFD_ALLOW_SEALING", None, create=True),
+                    mock.patch.object(os, "MFD_CLOEXEC", None, create=True),
+                ):
+                    snapshot, snapshot_digest = _snapshot_script_descriptor(source)
+            finally:
+                os.close(source)
+
+        child_code = r"""
+import json
+import os
+import sys
+
+descriptor = int(sys.argv[1])
+path = f"/proc/self/fd/{descriptor}"
+with open(path, "rb", buffering=0) as handle:
+    consumed = handle.read()
+blocked = []
+for name, operation in (
+    ("write", lambda: os.write(descriptor, b"changed")),
+    ("truncate", lambda: os.ftruncate(descriptor, 0)),
+):
+    try:
+        operation()
+    except OSError as exc:
+        blocked.append([name, exc.errno])
+print(json.dumps({"blocked": blocked, "payload_hex": consumed.hex()}, sort_keys=True))
+if len(blocked) != 2:
+    raise SystemExit(12)
+"""
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", child_code, str(snapshot)],
+                pass_fds=(snapshot,),
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        finally:
+            os.close(snapshot)
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        child_evidence = json.loads(completed.stdout)
+        self.assertEqual(payload, bytes.fromhex(child_evidence["payload_hex"]))
+        self.assertEqual(["write", errno.EBADF], child_evidence["blocked"][0])
+        self.assertEqual("truncate", child_evidence["blocked"][1][0])
+        self.assertIn(child_evidence["blocked"][1][1], (errno.EBADF, errno.EINVAL))
         expected_digest = hashlib.sha256(payload).hexdigest()
         self.assertEqual(expected_digest, source_digest)
         self.assertEqual(expected_digest, snapshot_digest)

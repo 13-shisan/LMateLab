@@ -494,6 +494,18 @@ class SlurmCommandContractTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 os.fstat(descriptor)
 
+    def test_linux_snapshot_fails_closed_without_anonymous_descriptor_support(self):
+        with (
+            mock.patch.object(competition_slurm, "_IS_LINUX", True),
+            mock.patch.object(competition_slurm, "_fcntl", None),
+            mock.patch.object(competition_slurm.os, "memfd_create", None, create=True),
+            mock.patch.object(competition_slurm.os, "MFD_ALLOW_SEALING", None, create=True),
+            mock.patch.object(competition_slurm.os, "MFD_CLOEXEC", None, create=True),
+            mock.patch.object(competition_slurm.os, "O_TMPFILE", None, create=True),
+            self.assertRaisesRegex(ValueError, "submission script snapshot is unavailable"),
+        ):
+            self.production_snapshot_creator()
+
     def test_linux_submission_rejects_snapshot_modified_before_sealing(self):
         replacement = b"#!/bin/bash\necho pre-seal mutation\n"
 
