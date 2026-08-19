@@ -39,13 +39,15 @@ test "$s_source_sha" = 0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a
 printf '%s  Mo_sv\n%s  S\n' "$mo_source_sha" "$s_source_sha" > potcar-source-sha256.txt
 
 /home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103 \
-  2>&1 | tee vaspkit-version.txt
+  2>&1 | tee vaspkit-output.txt
 vaspkit_banner='VASPKIT Standard Edition 1.5.1'
 mapfile -t vaspkit_markers < <(
-  sed -En 's/^[[:space:]]*\|[[:space:]]+VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]+\([0-9]{2}[[:space:]][[:alpha:]]{3}\.[[:space:]][0-9]{4}\)[[:space:]]+\|[[:space:]]*$/VASPKIT Standard Edition \1/p' vaspkit-version.txt
+  sed -En 's/^[[:space:]]*\|[[:space:]]+VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]+\([0-9]{2}[[:space:]][[:alpha:]]{3}\.[[:space:]][0-9]{4}\)[[:space:]]+\|[[:space:]]*$/VASPKIT Standard Edition \1/p' vaspkit-output.txt
 )
 test "${#vaspkit_markers[@]}" -eq 1
 test "${vaspkit_markers[0]}" = "$vaspkit_banner"
+printf '%s\n' "$vaspkit_banner" > vaspkit-version.txt
+rm -- vaspkit-output.txt
 test "$(sha256sum POTCAR | cut -d ' ' -f 1)" = 509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045
 mapfile -t potcar_titles < <(sed -n 's/^[[:space:]]*TITEL[[:space:]]*=[[:space:]]*//p' POTCAR)
 test "${#potcar_titles[@]}" -eq 2
