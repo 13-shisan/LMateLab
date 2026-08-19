@@ -17,13 +17,13 @@
 | 独立验收脚本注册 `models.User` | `#43` | 合并提交 `2735dd6e93333121e6934819182dd27754153a10` |
 | ASE CIF 导出改用二进制缓冲区 | `#44` | 合并提交 `db05369fe3d0b86844d1242d5ec7a37195cf37e4` |
 
-当前固定 release commit：
+Stage 8 功能验收和当前运行 release 固定为：
 
 ```text
 db05369fe3d0b86844d1242d5ec7a37195cf37e4
 ```
 
-107 只读 checkout、Gitea `main` 和运行 release 均已核对到该提交；107 checkout 工作树为空。
+证据 PR `#45` 已合并为 `d32aafd57a8a5032d52c1edab81e0802e332a967`。Windows 本地 `main`、Gitea `main` 和 107 只读 checkout 均已同步到该文档提交且工作树为空；运行中的不可变 release 继续固定为上面的 `db05369...`，文档提交不会触发重建或重启。
 
 ## 3. 构建与测试
 
@@ -169,6 +169,6 @@ Manifest SHA-256: e12ad90ba9bb8e4af00c90926bf9ba834267828db9fafde84e1fb7b0139a40
 - [ ] 检查失败详情 `/dashboard/results/db9c793d-cf8f-4207-823b-5943d825f21d` 不挂载科学成功区。
 - [ ] 检查 `/dashboard/database/vasp` 的真实只读记录。
 - [ ] 浏览器验收后停止旧 Job `40273`、撤销临时 `18741`，并复核三处正式入口不变。
-- [ ] 合并本证据 PR，使 Windows `main`、Gitea `main` 和 107 checkout 再次固定到同一提交。
+- [x] 证据 PR `#45` 已合并，Windows `main`、Gitea `main` 和 107 checkout 均固定到 `d32aafd57a8a5032d52c1edab81e0802e332a967`。
 
 上述全部完成后，才把 Stage 8 从 `PARTIAL` 更新为 `DONE`。

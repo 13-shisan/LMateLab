@@ -144,7 +144,7 @@
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
-| 8. 结果解析与证据包 | PARTIAL | PR `#42-#44` 已合并；Job `40307` 构建、Job `40308` 真实只读解析及 Job `40309` 稳定部署通过，结构/BAND/DOS/五种下载和确定性证据包均有真实 SHA-256 | 完成 Viewer/Operator 浏览器验收、清理回滚服务与临时转发，并合并 `docs/107cup/stage8-results-evidence.md` 后改为 `DONE` |
+| 8. 结果解析与证据包 | PARTIAL | PR `#42-#44` 已合并；Job `40307` 构建、Job `40308` 真实只读解析及 Job `40309` 稳定部署通过，结构/BAND/DOS/五种下载和确定性证据包均有真实 SHA-256；证据 PR `#45` 已合并 | 完成 Viewer/Operator 浏览器验收、清理回滚服务与临时转发，再通过最终状态 PR 改为 `DONE` |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
 
@@ -818,7 +818,8 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 新稳定服务 Job `40273` 运行于 `P107-A100/anode16:18731`；4090 内部转发、Nginx 和 Windows Operator 隧道分别切换到 `18740`、公网 `18733` 和本地 `21763`，三处 live/ready 均返回 Job `40273` 与提交 `e58b769...`。新入口验证后，旧服务 Job `40262` 与旧转发 `18739` 已核对归属并停止。
 - 短时只读核验 Job `40274` 在 `anode16` 以 `COMPLETED/0:0` 结束：SQLite 完整性为 `ok`，失败 workflow 顶层为 `failed`，四步为 `succeeded/scientific_failed/blocked/blocked`，事件序号连续唯一 `1-18`，阻断事件为 `16/17`；attempt 表和目录恰有 Relax/SCF 两项，Job ID 恰为 `40264/40265`，BAND/DOS 零 attempt、零目录和零 Job ID。
 - Demo Viewer 浏览器验收与数据库、目录和调度证据一致：Dashboard 为 2 个工作流、0 个运行中、1 个成功和 1 个需关注；失败详情明确显示 SCF `electronic_not_converged`、BAND/DOS 已阻断且 Attempt 为 0，Viewer 命令禁用。完整证据见 `docs/107cup/stage7-vasp-evidence.md`。阶段 7 至此改为 `DONE`，阶段 8 继续为 `PENDING`。
-- Stage 8 结果服务 PR #42 已合并，独立验收注册修复 PR #43 和 ASE CIF 二进制缓冲区修复 PR #44 也已合并；当前 `main` 为 `db05369fe3d0b86844d1242d5ec7a37195cf37e4`。失败 Job `40304` 在解析前因模型未注册终止；失败 Job `40306` 在真实结果和图已解析后因 CIF 文本缓冲区终止。两者均未重跑 VASP、未修改 Stage 7 工作流。
+- Stage 8 结果服务 PR #42 已合并，独立验收注册修复 PR #43 和 ASE CIF 二进制缓冲区修复 PR #44 也已合并；功能验收和运行 release 固定为 `db05369fe3d0b86844d1242d5ec7a37195cf37e4`。失败 Job `40304` 在解析前因模型未注册终止；失败 Job `40306` 在真实结果和图已解析后因 CIF 文本缓冲区终止。两者均未重跑 VASP、未修改 Stage 7 工作流。
 - 最终构建 Job `40307` 在 `P107-RTX5090/anode02` 以 `COMPLETED/0:0` 结束：后端 `457/457`（另有 4 项平台跳过）、前端 `125/125`、Vite `1857` 模块和 `560` 项 release manifest 通过；manifest SHA-256 为 `e12ad90ba9bb8e4af00c90926bf9ba834267828db9fafde84e1fb7b0139a4007`。
 - 最终只读验收 Job `40308` 在 `P107-A100/anode16` 以 `COMPLETED/0:0` 结束并输出 `STAGE8_ACCEPTANCE_OK`。成功工作流带隙为 `1.6919 eV`、SCF 总能为 `-21.85260744 eV`；CIF、POSCAR、BAND 数据、DOS ZIP、成功证据包和失败证据包均生成固定 SHA-256，原始证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage8/acceptance-40308`，清单文件自身 SHA-256 为 `5b2d2caa25162d512baeb3e0e9b6de5b32502ad98fe1642e93f4495ac77448a4`。
 - 新稳定服务 Job `40309` 正在 `P107-A100/anode19:18731` 运行 `db05369...`；4090 `18740`、公网 `222.195.94.37:18733` 和 Windows `127.0.0.1:21763` 的 `live/ready` 均返回同一 Job、commit 和 manifest。Chrome 登录态控制当前未能建立，因此真实结果列表、成功/失败详情、VASP 数据库和浏览器下载尚未完成人工验收；旧 Job `40273` 与临时 `18741` 转发继续作为回滚路径保留。完整证据见 `docs/107cup/stage8-results-evidence.md`，Stage 8 暂为 `PARTIAL`。
+- 证据 PR #45 已合并为 `d32aafd57a8a5032d52c1edab81e0802e332a967`；Windows 本地 `main`、Gitea `main` 和 107 只读 checkout 已同步到该提交且工作树干净。文档合并不改变运行中的 `db05369...` 不可变 release。
