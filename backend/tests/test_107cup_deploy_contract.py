@@ -1,10 +1,451 @@
+import ast
+import hashlib
 import json
+import os
+import shlex
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_ROOT = REPO_ROOT / "deploy" / "107cup"
+VALID_WORKFLOW_ID = "11111111-1111-4111-8111-111111111111"
+VALID_ATTEMPT_ID = "22222222-2222-4222-8222-222222222222"
+
+
+class VaspStageFixture:
+    hashes = {
+        "mo": "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
+        "s": "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+        "combined": "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+    }
+    evidence_names = (
+        "POTCAR",
+        "potcar-source-sha256.txt",
+        "vaspkit-version.txt",
+        "vasp-exit-code.txt",
+        "runtime-time.txt",
+    )
+    stage_output_names = (
+        "OUTCAR",
+        "vasprun.xml",
+        "OSZICAR",
+        "CONTCAR",
+        "CHGCAR",
+        "WAVECAR",
+        "EIGENVAL",
+        "DOSCAR",
+    )
+
+    def __init__(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="lmatelab-vasp-stage-")
+        self.root = Path(self.temporary.name)
+        self.bash = shutil.which("bash")
+        if self.bash is None:
+            self.cleanup()
+            raise unittest.SkipTest("bash is unavailable")
+        self.bin = self.root / "bin"
+        self.markers = self.root / "markers"
+        self.workflow_root = self.root / "workflows"
+        self.attempt = (
+            self.workflow_root
+            / VALID_WORKFLOW_ID
+            / "attempts"
+            / VALID_ATTEMPT_ID
+        )
+        self.dependencies = self.root / "dependencies"
+        for directory in (self.bin, self.markers, self.attempt, self.dependencies):
+            directory.mkdir(parents=True, exist_ok=True)
+        (self.attempt / "POTCAR.spec").write_text(
+            "Mo_sv\nS\n", encoding="utf-8", newline="\n"
+        )
+        for name, content in (
+            ("INCAR", "SYSTEM = MoS2 fixture\n"),
+            ("KPOINTS", "fixture mesh\n0\nGamma\n1 1 1\n0 0 0\n"),
+            ("POSCAR", "MoS2 fixture\n"),
+        ):
+            (self.attempt / name).write_text(content, encoding="utf-8", newline="\n")
+        self.mo_source = self.dependencies / "Mo_sv.POTCAR"
+        self.s_source = self.dependencies / "S.POTCAR"
+        self.mo_source.write_text("Mo fixture\n", encoding="utf-8")
+        self.s_source.write_text("S fixture\n", encoding="utf-8")
+        self._write_stubs()
+        self._rewrite_runner()
+
+    def cleanup(self):
+        self.temporary.cleanup()
+
+    def _write_executable(self, name, source):
+        path = self.bin / name
+        path.write_text(source.lstrip(), encoding="utf-8", newline="\n")
+        path.chmod(0o700)
+        return path
+
+    def _write_stubs(self):
+        self._write_executable(
+            "vaspkit",
+            """
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/vaspkit"
+printf '%s\n' 'TITEL  = PAW_PBE Mo_sv 02Feb2006' 'TITEL  = PAW_PBE S 06Sep2000' > POTCAR
+printf '%s' "$FIXTURE_VASPKIT_OUTPUT"
+""",
+        )
+        self._write_executable(
+            "sha256sum",
+            f"""
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/sha256sum"
+case "$1" in
+  "$FIXTURE_MO_SOURCE") printf '%s  %s\n' '{self.hashes["mo"]}' "$1" ;;
+  "$FIXTURE_S_SOURCE") printf '%s  %s\n' '{self.hashes["s"]}' "$1" ;;
+  POTCAR) printf '%s  POTCAR\n' '{self.hashes["combined"]}' ;;
+  *) exit 64 ;;
+esac
+""",
+        )
+        self._write_executable(
+            "env-nvhpc.sh",
+            """
+#!/bin/bash
+printf '%s\n' sourced > "$FIXTURE_MARKERS/environment"
+export PATH="$FIXTURE_BIN:$PATH"
+""",
+        )
+        self._write_executable(
+            "scontrol",
+            """
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/scontrol"
+test "$*" = "--oneliner show job $SLURM_JOB_ID"
+printf '%s\n' "$FIXTURE_SCONTROL_RECORD"
+""",
+        )
+        self._write_executable(
+            "mpirun",
+            """
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/mpirun"
+test "$*" = "--bind-to none -np $SLURM_NTASKS vasp_std"
+exec vasp_std
+""",
+        )
+        self._write_executable(
+            "vasp_std",
+            """
+#!/bin/bash
+printf '%s\n' invoked > "$FIXTURE_MARKERS/vasp_std"
+if test -n "$FIXTURE_PUBLISH_COLLISION"; then
+  printf '%s\n' collision > "$FIXTURE_ATTEMPT/$FIXTURE_PUBLISH_COLLISION"
+fi
+case "$FIXTURE_STAGE" in
+  relax) outputs='OUTCAR vasprun.xml OSZICAR CONTCAR' ;;
+  scf) outputs='OUTCAR vasprun.xml CHGCAR WAVECAR' ;;
+  band) outputs='OUTCAR vasprun.xml EIGENVAL' ;;
+  dos) outputs='OUTCAR vasprun.xml DOSCAR' ;;
+  *) exit 64 ;;
+esac
+for output in $outputs; do
+  printf '%s\n' "$FIXTURE_STAGE output" > "$output"
+done
+exit "$FIXTURE_VASP_STATUS"
+""",
+        )
+        self._write_executable(
+            "time",
+            """
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/time"
+test "$1" = -v
+test "$2" = -o
+output=$3
+shift 3
+printf '%s\n' 'Maximum resident set size (kbytes): 1234' > "$output"
+set +e
+"$@"
+status=$?
+set -e
+exit "$status"
+""",
+        )
+
+    def _rewrite_runner(self):
+        source_path = DEPLOY_ROOT / "slurm" / "vasp-stage.slurm"
+        self.original_source = source_path.read_text(encoding="utf-8")
+        dependencies = {
+            "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit": self.bin
+            / "vaspkit",
+            "/home/scc/pb23030683/POTCAR/PBE/Mo_sv/POTCAR": self.mo_source,
+            "/home/scc/pb23030683/POTCAR/PBE/S/POTCAR": self.s_source,
+            "/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh": self.bin
+            / "env-nvhpc.sh",
+            "/usr/bin/scontrol": self.bin / "scontrol",
+            "/usr/bin/time": self.bin / "time",
+        }
+        self.rewrites = []
+        rewritten = self.original_source
+        for original, replacement_path in dependencies.items():
+            if rewritten.count(original) != 1:
+                raise AssertionError(f"fixed dependency occurrence changed: {original}")
+            replacement = shlex.quote(replacement_path.as_posix())
+            rewritten = rewritten.replace(original, replacement)
+            self.rewrites.append((original, replacement))
+        self.rewritten_source = rewritten
+        self.runner = self.root / "vasp-stage.fixture.slurm"
+        self.runner.write_text(rewritten, encoding="utf-8", newline="\n")
+        self.runner.chmod(0o700)
+
+    def run(
+        self,
+        *,
+        vaspkit_output=None,
+        vasp_status=0,
+        publish_collision=None,
+        scontrol_record=None,
+        slurm_values=None,
+        unset=(),
+        preserve=(),
+        **arguments,
+    ):
+        shutil.rmtree(self.attempt / ".vasp-stage-runtime", ignore_errors=True)
+        for path in (
+            *self.markers.iterdir(),
+            *(self.attempt / n for n in (*self.evidence_names, *self.stage_output_names)),
+        ):
+            if path.name not in preserve and (path.exists() or path.is_symlink()):
+                path.unlink()
+        values = {
+            "stage": "scf",
+            "workflow_id": VALID_WORKFLOW_ID,
+            "attempt_id": VALID_ATTEMPT_ID,
+            **arguments,
+        }
+        if values["stage"] in {"band", "dos"}:
+            (self.attempt / "CHGCAR").write_bytes(b"fixed SCF charge input\n")
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "PATH": f"{self.bin}{os.pathsep}{environment.get('PATH', '')}",
+                "SLURM_JOB_ID": "12345",
+                "SLURMD_NODENAME": "fixture-node",
+                "SLURM_CPUS_PER_TASK": "16",
+                "SLURM_NTASKS": "1",
+                "LMATELAB_WORKFLOW_ROOT": self.workflow_root.as_posix(),
+                "FIXTURE_BIN": self.bin.as_posix(),
+                "FIXTURE_MARKERS": self.markers.as_posix(),
+                "FIXTURE_ATTEMPT": self.attempt.as_posix(),
+                "FIXTURE_MO_SOURCE": self.mo_source.as_posix(),
+                "FIXTURE_S_SOURCE": self.s_source.as_posix(),
+                "FIXTURE_PUBLISH_COLLISION": publish_collision or "",
+                "FIXTURE_VASPKIT_OUTPUT": vaspkit_output
+                if vaspkit_output is not None
+                else "VASPKIT Standard Edition 1.5.1\n",
+                "FIXTURE_VASP_STATUS": str(vasp_status),
+                "FIXTURE_STAGE": values["stage"],
+                "FIXTURE_SCONTROL_RECORD": scontrol_record
+                if scontrol_record is not None
+                else (
+                    "JobId=12345 Account=competition Partition=P107-RTX5090 "
+                    "QOS=qos_p107-rtx5090 NumNodes=1 NumTasks=1 CPUs/Task=16"
+                ),
+            }
+        )
+        environment.update(slurm_values or {})
+        for name in unset:
+            environment.pop(name, None)
+        return subprocess.run(
+            [
+                self.bash,
+                self.runner,
+                values["stage"],
+                values["workflow_id"],
+                values["attempt_id"],
+            ],
+            cwd=self.attempt,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+    def reached(self, name):
+        return (self.markers / name).is_file()
+
+
+@unittest.skipUnless(os.name == "posix", "runner behavior requires POSIX")
+class VaspStageLinuxBehaviorTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = VaspStageFixture()
+        self.addCleanup(self.fixture.cleanup)
+
+    def test_untrusted_environment_and_arguments_stop_before_vaspkit(self):
+        for variable in ("SLURM_JOB_ID", "SLURMD_NODENAME", "SLURM_CPUS_PER_TASK", "SLURM_NTASKS"):
+            with self.subTest(variable=variable):
+                result = self.fixture.run(unset=(variable,))
+                self.assertNotEqual(0, result.returncode, result)
+                self.assertFalse(self.fixture.reached("vaspkit"))
+        sentinel = self.fixture.markers / "injected"
+        injection = f"$(touch {sentinel.as_posix()})"
+        for arguments in (
+            {"stage": f"scf{injection}"},
+            {"workflow_id": f"{VALID_WORKFLOW_ID}{injection}"},
+            {"attempt_id": f"{VALID_ATTEMPT_ID};touch {sentinel.as_posix()}"},
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.fixture.run(**arguments)
+                self.assertEqual(64, result.returncode, result)
+                self.assertFalse(sentinel.exists())
+                self.assertFalse(self.fixture.reached("vaspkit"))
+
+    def test_wrong_positive_slurm_resources_stop_before_scontrol_and_vaspkit(self):
+        for variable, value in (("SLURM_NTASKS", "2"), ("SLURM_CPUS_PER_TASK", "8")):
+            with self.subTest(variable=variable, value=value):
+                result = self.fixture.run(slurm_values={variable: value})
+                self.assertEqual(64, result.returncode, result)
+                self.assertFalse(self.fixture.reached("scontrol"))
+                self.assertFalse(self.fixture.reached("vaspkit"))
+
+    def test_wrong_scheduler_allocation_stops_before_vaspkit(self):
+        valid = {
+            "JobId": "12345",
+            "Account": "competition",
+            "Partition": "P107-RTX5090",
+            "QOS": "qos_p107-rtx5090",
+            "NumNodes": "1",
+            "NumTasks": "1",
+            "CPUs/Task": "16",
+        }
+        for field, value in (
+            ("JobId", "54321"),
+            ("Account", "stu"),
+            ("Partition", "Students"),
+            ("QOS", "qos_stu_default"),
+            ("NumNodes", "2"),
+            ("NumTasks", "2"),
+            ("CPUs/Task", "8"),
+        ):
+            with self.subTest(field=field, value=value):
+                record = {**valid, field: value}
+                result = self.fixture.run(
+                    scontrol_record=" ".join(f"{key}={item}" for key, item in record.items())
+                )
+                self.assertEqual(64, result.returncode, result)
+                self.assertTrue(self.fixture.reached("scontrol"))
+                self.assertFalse(self.fixture.reached("vaspkit"))
+
+    def _assert_reserved_symlinks_are_rejected(self, names, *, stage="scf"):
+        for name in names:
+            with self.subTest(name=name):
+                link = self.fixture.attempt / name
+                link.unlink(missing_ok=True)
+                sentinel = self.fixture.root / f"sentinel-{name.replace('/', '_')}"
+                sentinel.write_bytes(b"sentinel\n")
+                link.symlink_to(sentinel)
+                try:
+                    result = self.fixture.run(preserve={name}, stage=stage)
+                    self.assertEqual(64, result.returncode, result)
+                    self.assertEqual(b"sentinel\n", sentinel.read_bytes())
+                    self.assertFalse(self.fixture.reached("vaspkit"))
+                    self.assertFalse(self.fixture.reached("vasp_std"))
+                finally:
+                    link.unlink(missing_ok=True)
+                    sentinel.unlink(missing_ok=True)
+
+    def test_common_evidence_symlinks_are_rejected_before_tools_run(self):
+        self._assert_reserved_symlinks_are_rejected(self.fixture.evidence_names)
+
+    def test_stage_output_symlinks_are_rejected_before_tools_run(self):
+        for stage, names in (
+            ("relax", ("OUTCAR", "vasprun.xml", "OSZICAR", "CONTCAR")),
+            ("scf", ("OUTCAR", "vasprun.xml", "CHGCAR", "WAVECAR")),
+            ("band", ("OUTCAR", "vasprun.xml", "EIGENVAL")),
+            ("dos", ("OUTCAR", "vasprun.xml", "DOSCAR")),
+        ):
+            with self.subTest(stage=stage):
+                self._assert_reserved_symlinks_are_rejected(names, stage=stage)
+
+    def test_vaspkit_banner_must_be_exact_and_unique(self):
+        banner = "VASPKIT Standard Edition 1.5.1\n"
+        for output in ("VASPKIT Standard Edition 1.5.0\n", banner + banner):
+            with self.subTest(output=output):
+                result = self.fixture.run(vaspkit_output=output)
+                self.assertNotEqual(0, result.returncode, result)
+                self.assertTrue(self.fixture.reached("vaspkit"))
+                self.assertFalse(self.fixture.reached("environment"))
+                self.assertFalse(self.fixture.reached("vasp_std"))
+
+    def test_every_valid_stage_reaches_vasp_and_publishes_only_its_outputs(self):
+        expected_outputs = {
+            "relax": ("OUTCAR", "vasprun.xml", "OSZICAR", "CONTCAR"),
+            "scf": ("OUTCAR", "vasprun.xml", "CHGCAR", "WAVECAR"),
+            "band": ("OUTCAR", "vasprun.xml", "EIGENVAL"),
+            "dos": ("OUTCAR", "vasprun.xml", "DOSCAR"),
+        }
+        for stage, outputs in expected_outputs.items():
+            with self.subTest(stage=stage):
+                result = self.fixture.run(stage=stage)
+                self.assertEqual(0, result.returncode, result)
+                for phase in (
+                    "sha256sum",
+                    "vaspkit",
+                    "environment",
+                    "time",
+                    "mpirun",
+                    "vasp_std",
+                ):
+                    self.assertTrue(self.fixture.reached(phase), phase)
+                scratch = self.fixture.attempt / ".vasp-stage-runtime"
+                self.assertTrue(scratch.is_dir())
+                self.assertEqual(0o700, scratch.stat().st_mode & 0o777)
+                for name in self.fixture.evidence_names:
+                    path = self.fixture.attempt / name
+                    self.assertTrue(path.is_file(), str(path))
+                    self.assertEqual(0o600, path.stat().st_mode & 0o777)
+                    self.assertTrue(os.path.samefile(path, scratch / name), name)
+                for name in outputs:
+                    self.assertTrue((self.fixture.attempt / name).is_file(), name)
+
+    def test_nonzero_vasp_status_is_preserved(self):
+        result = self.fixture.run(vasp_status=37)
+        self.assertEqual(37, result.returncode, result)
+        self.assertEqual(
+            "37\n",
+            (self.fixture.attempt / "vasp-exit-code.txt").read_text(encoding="utf-8"),
+        )
+
+    def test_publication_collision_returns_infrastructure_status_and_keeps_vasp_status(self):
+        result = self.fixture.run(vasp_status=37, publish_collision="POTCAR")
+        self.assertEqual(74, result.returncode, result)
+        self.assertEqual(
+            "collision\n",
+            (self.fixture.attempt / "POTCAR").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            "37\n",
+            (self.fixture.attempt / ".vasp-stage-runtime" / "vasp-exit-code.txt").read_text(
+                encoding="utf-8"
+            ),
+        )
+        self.assertTrue((self.fixture.attempt / "runtime-time.txt").is_file())
+
+    def test_fixture_executes_only_the_rewritten_runner(self):
+        result = self.fixture.run()
+        self.assertEqual(0, result.returncode, result)
+        restored = self.fixture.rewritten_source
+        for original, replacement in self.fixture.rewrites:
+            self.assertEqual(1, restored.count(replacement))
+            restored = restored.replace(replacement, original)
+        self.assertEqual(self.fixture.original_source, restored)
 
 
 class CompetitionDeployContractTests(unittest.TestCase):
@@ -85,6 +526,65 @@ class CompetitionDeployContractTests(unittest.TestCase):
         for forbidden in ("shell=True", "docker", "vasp_std", "vasp_gam", "vasp_ncl"):
             self.assertNotIn(forbidden, source)
 
+    def test_stage6_smoke_test_only_probe_uses_typed_probe_runner(self):
+        source = self.read_required("slurm/stage6-smoke.py")
+        module = ast.parse(source)
+        function = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.FunctionDef) and node.name == "test_only_probe"
+        )
+
+        class TypedSubmission:
+            created: list["TypedSubmission"] = []
+
+            def __init__(
+                self,
+                *,
+                workflow_id: str,
+                attempt_id: str,
+                step_key: str,
+                attempt_number: int,
+                attempt_directory: Path,
+                script_path: Path,
+                runner_kind: str,
+                runner_mode: str,
+            ) -> None:
+                self.runner_kind = runner_kind
+                self.runner_mode = runner_mode
+                self.job_name = "typed-probe-job"
+                self.__class__.created.append(self)
+
+        class Client:
+            def prepare_attempt_directory(self, workflow_id: str, attempt_id: str) -> Path:
+                return Path("/attempts") / workflow_id / attempt_id
+
+            def test_submission(self, submission: TypedSubmission) -> SimpleNamespace:
+                return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+        namespace = {
+            "PROBE_SCRIPT": Path("/fixed/probe.slurm"),
+            "SlurmSubmission": TypedSubmission,
+            "create_client": lambda: Client(),
+            "hashlib": hashlib,
+            "json": json,
+            "run_command": lambda *_args, **_kwargs: {"stdout": '{"jobs": []}'},
+            "uuid": SimpleNamespace(uuid4=lambda: "00000000-0000-4000-8000-000000000001"),
+        }
+        exec(
+            compile(ast.Module(body=[function], type_ignores=[]), "stage6-smoke.py", "exec"),
+            namespace,
+        )
+
+        result = namespace["test_only_probe"]()
+
+        self.assertEqual(0, result["returncode"])
+        self.assertEqual(1, len(TypedSubmission.created))
+        self.assertEqual(
+            ("probe", "success"),
+            (TypedSubmission.created[0].runner_kind, TypedSubmission.created[0].runner_mode),
+        )
+
     def test_stage6_smoke_resolves_the_pinned_release_when_slurm_spools_the_script(self):
         source = self.read_required("slurm/stage6-smoke.py")
 
@@ -114,6 +614,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "tests.test_competition_workflow_service",
             "tests.test_competition_workflow_routes",
             "tests.test_competition_slurm",
+            "tests.test_competition_slurm_linux",
         ):
             self.assertIn(suite, source)
 
@@ -125,6 +626,209 @@ class CompetitionDeployContractTests(unittest.TestCase):
             source,
         )
         self.assertIn("find source frontend-dist deploy -type f", source)
+
+    def test_stage7_vasp_runner_has_only_fixed_resources_identity_and_commands(self):
+        source = self.read_required("slurm/vasp-stage.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=16",
+            "#SBATCH --gres=gpu:RTX5090:1",
+            "#SBATCH --mem=32G",
+            "#SBATCH --time=06:00:00",
+            'test "$#" -eq 3',
+            "case \"$stage\" in relax|scf|band|dos)",
+            "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            'test "$PWD" = "$LMATELAB_WORKFLOW_ROOT/$workflow_id/attempts/$attempt_id"',
+            "test \"$(<POTCAR.spec)\" = $'Mo_sv\\nS'",
+            "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
+            "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+            "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+            "PAW_PBE\\ Mo_sv*",
+            "PAW_PBE\\ S\\ *",
+            "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103",
+            "/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh",
+            "/usr/bin/time -v -o runtime-time.txt",
+            'mpirun --bind-to none -np "$SLURM_NTASKS" vasp_std',
+            "umask 077",
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("eval ", "bash -c", "sh -c", "docker", "singularity", "srun --pty"):
+            self.assertNotIn(forbidden, source)
+
+    def test_stage7_vasp_runner_preserves_common_evidence_and_vasp_exit_status(self):
+        source = self.read_required("slurm/vasp-stage.slurm")
+        for evidence_name in (
+            "POTCAR",
+            "potcar-source-sha256.txt",
+            "vaspkit-version.txt",
+            "vasp-exit-code.txt",
+            "runtime-time.txt",
+        ):
+            self.assertIn(evidence_name, source)
+
+        allow_nonzero = source.index("set +e")
+        execute_vasp = source.index("/usr/bin/time -v -o runtime-time.txt", allow_nonzero)
+        capture_status = source.index("vasp_status=$?", execute_vasp)
+        restore_errexit = source.index("set -e", capture_status)
+        write_status = source.index('> vasp-exit-code.txt', restore_errexit)
+        preserve_status = source.index('exit "$vasp_status"', write_status)
+        self.assertLess(allow_nonzero, execute_vasp)
+        self.assertLess(execute_vasp, capture_status)
+        self.assertLess(capture_status, restore_errexit)
+        self.assertLess(restore_errexit, write_status)
+        self.assertLess(write_status, preserve_status)
+
+    def test_stage7_runner_gates_slurm_and_exact_vaspkit_banner(self):
+        source = self.read_required("slurm/vasp-stage.slurm")
+        for required in (
+            ': "${SLURM_JOB_ID:?vasp-stage.slurm must run through Slurm}"',
+            ': "${SLURMD_NODENAME:?SLURMD_NODENAME is required}"',
+            ': "${SLURM_CPUS_PER_TASK:?SLURM_CPUS_PER_TASK is required}"',
+            ': "${SLURM_NTASKS:?SLURM_NTASKS is required}"',
+            '[[ "$SLURM_JOB_ID" =~ ^[1-9][0-9]*$ ]]',
+            'test "$SLURM_CPUS_PER_TASK" = 16',
+            'test "$SLURM_NTASKS" = 1',
+            '/usr/bin/scontrol --oneliner show job "$SLURM_JOB_ID"',
+            "Account=competition",
+            "Partition=P107-RTX5090",
+            "QOS=qos_p107-rtx5090",
+            "NumNodes=1",
+            "NumTasks=1",
+            "CPUs/Task=16",
+            "mapfile -t vaspkit_markers",
+            "VASPKIT Standard Edition 1.5.1",
+            'test "${#vaspkit_markers[@]}" -eq 1',
+            'test "${vaspkit_markers[0]}" = "$vaspkit_banner"',
+        ):
+            self.assertIn(required, source)
+        self.assertLess(source.index("SLURM_JOB_ID"), source.index('test "$#" -eq 3'))
+        self.assertLess(source.index("/usr/bin/scontrol"), source.index('test "$#" -eq 3'))
+        self.assertLess(source.index('test "$#" -eq 3'), source.index("POTCAR.spec"))
+        self.assertLess(source.index("mapfile -t vaspkit_markers"), source.index("env-nvhpc.sh"))
+
+        preflight = self.read_required("slurm/stage7-preflight.slurm")
+        self.assertIn("mapfile -t vaspkit_markers", preflight)
+        self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', preflight)
+        self.assertIn('test "${vaspkit_markers[0]}" = "$vaspkit_banner"', preflight)
+        self.assertLess(preflight.index("mapfile -t vaspkit_markers"), preflight.index("env-nvhpc.sh"))
+
+    def test_stage7_runner_uses_private_scratch_and_no_overwrite_publication(self):
+        source = self.read_required("slurm/vasp-stage.slurm")
+        for required in (
+            'scratch="$PWD/.vasp-stage-runtime"',
+            'mkdir -m 700 -- "$scratch"',
+            'test ! -e "$name"',
+            'test ! -L "$name"',
+            'test -f "$scratch/$name"',
+            'test ! -L "$scratch/$name"',
+            'ln -- "$scratch/$name" "$attempt_directory/$name"',
+            "OUTCAR",
+            "vasprun.xml",
+            "OSZICAR",
+            "CONTCAR",
+            "CHGCAR",
+            "WAVECAR",
+            "EIGENVAL",
+            "DOSCAR",
+        ):
+            self.assertIn(required, source)
+        self.assertNotIn("rm -rf", source)
+        precheck = source.index('test ! -e "$name"')
+        scratch = source.index('mkdir -m 700 -- "$scratch"', precheck)
+        vaspkit = source.index("vaspkit -task 103", scratch)
+        publish = source.index('ln -- "$scratch/$name"', vaspkit)
+        self.assertLess(precheck, scratch)
+        self.assertLess(scratch, vaspkit)
+        self.assertLess(vaspkit, publish)
+
+    def test_stage7_preflight_is_short_private_fixed_and_never_executes_vasp(self):
+        source = self.read_required("slurm/stage7-preflight.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --time=00:05:00",
+            "SLURM_JOB_ID",
+            "umask 077",
+            'evidence/stage7/preflight-$SLURM_JOB_ID',
+            "competition_templates/mos2_v1",
+            '"$template/POSCAR"',
+            "POTCAR.spec",
+            "vaspkit -task 103",
+            "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
+            "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+            "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+            "PAW_PBE\\ Mo_sv*",
+            "PAW_PBE\\ S\\ *",
+            "env-nvhpc.sh",
+            "command -v vasp_std",
+            'ldd "$(command -v vasp_std)"',
+        ):
+            self.assertIn(required, source)
+        for forbidden in ("mpirun", "/usr/bin/time", "srun "):
+            self.assertNotIn(forbidden, source)
+
+    def test_stage7_internal_acceptance_creator_is_fixed_short_and_nonpublic(self):
+        python_source = self.read_required("slurm/stage7-acceptance.py")
+        slurm_source = self.read_required("slurm/stage7-acceptance.slurm")
+        for required in (
+            'parser.add_argument("--profile", choices=("scf_nonconvergence_v1",), required=True)',
+            'parser.add_argument("--operator-alias", default="pb23030683")',
+            "DraftCreateRequest",
+            "create_internal_acceptance_draft",
+            "confirm_workflow",
+            "build_production_coordinator",
+            "coordinator.start",
+        ):
+            self.assertIn(required, python_source)
+        for forbidden in (
+            "shell=True",
+            "subprocess",
+            "os.system",
+            "/home/scc/pb23030683/POTCAR",
+            "TITEL  =",
+            "apply_internal_profile",
+            "render_acceptance_scf_incar",
+            "WorkflowFile",
+            "WorkflowRun",
+            "append_workflow_event",
+        ):
+            self.assertNotIn(forbidden, python_source)
+
+        create = python_source.index("create_internal_acceptance_draft(")
+        confirm = python_source.index("confirm_workflow(", create)
+        coordinator = python_source.index("coordinator.start(", confirm)
+        self.assertLess(create, confirm)
+        self.assertLess(confirm, coordinator)
+
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --time=00:05:00",
+            "SLURM_JOB_ID",
+            "runtime.env",
+            "envs/python",
+            "stage7-acceptance.py",
+            "--profile scf_nonconvergence_v1",
+        ):
+            self.assertIn(required, slurm_source)
+        for forbidden in ("vasp_std", "vasp_gam", "vasp_ncl", "mpirun", "vaspkit"):
+            self.assertNotIn(forbidden, slurm_source.lower())
+
+    def test_formal_build_runs_stage7_backend_suites(self):
+        source = self.read_required("build.slurm")
+        for suite in (
+            "tests.test_competition_attempt_inputs",
+            "tests.test_competition_vasp",
+            "tests.test_competition_coordinator",
+            "tests.test_competition_lifespan",
+        ):
+            self.assertIn(suite, source)
 
     def test_build_job_uses_module_python_with_a_valid_pip_environment(self):
         source = self.read_required("build.slurm")

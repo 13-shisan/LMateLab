@@ -36,6 +36,10 @@ from services.competition_inputs import (
     parse_structure_bytes,
     validate_draft_payload,
 )
+from services.competition_vasp import render_acceptance_scf_incar
+
+
+_INTERNAL_ACCEPTANCE_PROFILE = "scf_nonconvergence_v1"
 
 
 class WorkflowServiceError(ValueError):
@@ -278,6 +282,78 @@ def _claim_upload(
     return result.rowcount == 1
 
 
+def _ambiguous_draft_commit() -> WorkflowServiceError:
+    return WorkflowServiceError(
+        "draft_commit_outcome_ambiguous",
+        "workflow draft commit outcome is ambiguous; evidence was retained",
+    )
+
+
+def _resolve_draft_commit_outcome(
+    bind,
+    root: Path,
+    *,
+    workflow_id: str,
+    owner_id: int,
+    release_commit: str,
+    input_sha256: str,
+    directory_id: str,
+    metadata: dict[str, Any],
+    events: list[tuple[str, dict[str, Any]]],
+) -> WorkflowMutationResult | None:
+    try:
+        with Session(bind=bind) as verification_session:
+            run = verification_session.get(WorkflowRun, workflow_id)
+            if run is None:
+                return None
+            _validate_workflow(verification_session, root, run)
+            files = verification_session.scalars(
+                select(WorkflowFile).where(WorkflowFile.workflow_id == run.id)
+            ).all()
+            persisted_events = verification_session.scalars(
+                select(WorkflowEvent)
+                .where(WorkflowEvent.workflow_id == run.id)
+                .order_by(WorkflowEvent.sequence)
+            ).all()
+            if (
+                run.owner_id != owner_id
+                or run.status != "draft"
+                or run.material != "MoS2"
+                or run.source_kind != "builtin"
+                or run.release_commit != release_commit
+                or run.input_sha256 != input_sha256
+                or _metadata(run.metadata_json) != metadata
+                or any(
+                    row.owner_id != owner_id
+                    or row.attempt_id is not None
+                    or row.source_kind != "generated"
+                    or row.relative_path
+                    != f'{directory_id}/{_metadata(row.metadata_json).get("logical_path")}'
+                    for row in files
+                )
+                or [
+                    (
+                        event.sequence,
+                        event.event_type,
+                        _metadata(event.payload_json),
+                    )
+                    for event in persisted_events
+                ]
+                != [
+                    (sequence, event_type, payload)
+                    for sequence, (event_type, payload) in enumerate(events, start=1)
+                ]
+            ):
+                raise _ambiguous_draft_commit()
+            return _result(run)
+    except WorkflowServiceError as exc:
+        if exc.code == "draft_commit_outcome_ambiguous":
+            raise
+        raise _ambiguous_draft_commit() from exc
+    except Exception as exc:
+        raise _ambiguous_draft_commit() from exc
+
+
 def create_draft(
     session: Session,
     workflow_root: str | os.PathLike[str],
@@ -286,14 +362,65 @@ def create_draft(
     payload: DraftCreateRequest | dict[str, Any],
     release_commit: str,
 ) -> WorkflowMutationResult:
+    return _create_draft_common(
+        session,
+        workflow_root,
+        owner_id=owner_id,
+        payload=payload,
+        release_commit=release_commit,
+        acceptance_profile=None,
+    )
+
+
+def create_internal_acceptance_draft(
+    session: Session,
+    workflow_root: str | os.PathLike[str],
+    *,
+    owner_id: int,
+    payload: DraftCreateRequest | dict[str, Any],
+    release_commit: str,
+    profile: str,
+) -> WorkflowMutationResult:
+    if profile != _INTERNAL_ACCEPTANCE_PROFILE:
+        raise WorkflowServiceError(
+            "invalid_acceptance_profile", "acceptance profile is invalid"
+        )
+    return _create_draft_common(
+        session,
+        workflow_root,
+        owner_id=owner_id,
+        payload=payload,
+        release_commit=release_commit,
+        acceptance_profile=profile,
+    )
+
+
+def _create_draft_common(
+    session: Session,
+    workflow_root: str | os.PathLike[str],
+    *,
+    owner_id: int,
+    payload: DraftCreateRequest | dict[str, Any],
+    release_commit: str,
+    acceptance_profile: str | None,
+) -> WorkflowMutationResult:
     if re.fullmatch(r"[0-9a-f]{40}", release_commit) is None:
         raise WorkflowServiceError(
             "invalid_release_commit", "workflow release commit is invalid"
         )
     validated = _request_payload(payload)
+    if acceptance_profile is not None and (
+        validated["source_kind"] != "builtin" or validated["parameters"]
+    ):
+        raise WorkflowServiceError(
+            "invalid_acceptance_profile",
+            "acceptance profile requires the fixed builtin payload",
+        )
     root = _root_path(workflow_root)
     upload_id = validated.get("structure_upload_id")
     generated_directory: Path | None = None
+    commit_started = False
+    bind = session.get_bind()
 
     try:
         upload_row = None
@@ -303,8 +430,31 @@ def create_draft(
                 session, root, owner_id, upload_id
             )
 
-        materialized = materialize_inputs(root, structure, validated)
+        materialized = materialize_inputs(
+            root,
+            structure,
+            validated,
+            _scf_incar_transform=(
+                render_acceptance_scf_incar
+                if acceptance_profile is not None
+                else None
+            ),
+        )
         generated_directory = Path(materialized["directory"])
+        acceptance_scf_sha256 = None
+        if acceptance_profile is not None:
+            scf_records = [
+                record
+                for record in materialized["files"]
+                if PurePosixPath(record["relative_path"]).parts[1:]
+                == ("scf", "INCAR")
+            ]
+            if len(scf_records) != 1:
+                raise WorkflowServiceError(
+                    "invalid_acceptance_materialization",
+                    "acceptance workflow input materialization is invalid",
+                )
+            acceptance_scf_sha256 = scf_records[0]["sha256"]
         run = WorkflowRun(
             id=str(uuid.uuid4()),
             owner_id=owner_id,
@@ -316,10 +466,11 @@ def create_draft(
         )
         session.add(run)
         session.flush()
-        if upload_row is not None and not _claim_upload(session, upload_row, run.id):
-            raise WorkflowServiceError(
-                "upload_unavailable", "structure upload is unavailable"
-            )
+        if upload_row is not None:
+            if not _claim_upload(session, upload_row, run.id):
+                raise WorkflowServiceError(
+                    "upload_unavailable", "structure upload is unavailable"
+                )
         template_definition = load_template(validated["template_version"])
         template_row = session.scalar(
             select(WorkflowTemplate).where(
@@ -341,16 +492,17 @@ def create_draft(
             for definition in template_definition["steps"]
         }
         for position, step_key in enumerate(FIXED_STEPS):
+            parameters = {
+                "depends_on": dependencies[step_key],
+                "parameters": validated["parameters"].get(step_key, {}),
+            }
             session.add(
                 WorkflowStep(
                     workflow=run,
                     step_key=step_key,
                     position=position,
                     status="waiting",
-                    parameters_json={
-                        "depends_on": dependencies[step_key],
-                        "parameters": validated["parameters"].get(step_key, {}),
-                    },
+                    parameters_json=parameters,
                 )
             )
 
@@ -376,7 +528,7 @@ def create_draft(
         manifest_entries = [_manifest_entry(row) for row in generated_rows]
         manifest_hash = _manifest_hash(manifest_entries)
         run.input_sha256 = manifest_hash
-        run.metadata_json = {
+        run_metadata = {
             "input_manifest": sorted(
                 manifest_entries, key=lambda item: item["logical_path"]
             ),
@@ -387,25 +539,60 @@ def create_draft(
             },
             "structure_summary": materialized["structure_summary"],
         }
-        session.add(
-            WorkflowEvent(
-                workflow=run,
-                sequence=1,
-                event_type="draft_created",
-                payload_json={
-                    "input_sha256": manifest_hash,
-                    "source_kind": validated["source_kind"],
-                    "template_version": validated["template_version"],
-                    "release_commit": release_commit,
-                },
+        if acceptance_profile is not None:
+            run_metadata["acceptance_profile"] = acceptance_profile
+        run.metadata_json = run_metadata
+        draft_payload = {
+            "input_sha256": manifest_hash,
+            "source_kind": validated["source_kind"],
+            "template_version": validated["template_version"],
+            "release_commit": release_commit,
+        }
+        event_definitions = [("draft_created", draft_payload)]
+        if acceptance_profile is not None:
+            event_definitions.append(
+                (
+                    "acceptance_profile_configured",
+                    {
+                        "profile": acceptance_profile,
+                        "scf_incar_sha256": acceptance_scf_sha256,
+                        "input_sha256": manifest_hash,
+                    },
+                )
             )
-        )
+        for sequence, (event_type, event_payload) in enumerate(
+            event_definitions, start=1
+        ):
+            session.add(
+                WorkflowEvent(
+                    workflow=run,
+                    sequence=sequence,
+                    event_type=event_type,
+                    payload_json=event_payload,
+                )
+            )
 
+        commit_started = True
         session.commit()
     except Exception:
         session.rollback()
+        if commit_started and acceptance_profile is not None:
+            committed = _resolve_draft_commit_outcome(
+                bind,
+                root,
+                workflow_id=run.id,
+                owner_id=owner_id,
+                release_commit=release_commit,
+                input_sha256=manifest_hash,
+                directory_id=generated_directory.name,
+                metadata=run_metadata,
+                events=event_definitions,
+            )
+            if committed is not None:
+                return committed
         if generated_directory is not None:
-            shutil.rmtree(generated_directory, ignore_errors=True)
+            if acceptance_profile is None:
+                shutil.rmtree(generated_directory, ignore_errors=True)
         raise
     return _result(run)
 

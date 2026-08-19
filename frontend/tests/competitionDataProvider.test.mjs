@@ -59,6 +59,7 @@ test('demo mutations reject before any supplied fetch implementation runs', asyn
     ['uploadStructure', [new Blob(['POSCAR'])], '结构上传'],
     ['saveDraft', [{ material: 'MoS2' }], '草稿保存'],
     ['submitWorkflow', ['wf-demo-mos2-running'], '工作流提交'],
+    ['startWorkflow', ['wf-demo-mos2-running'], '工作流启动'],
     ['cancelWorkflow', ['wf-demo-mos2-running'], '工作流取消'],
     ['retryWorkflow', ['wf-demo-mos2-failed', 'scf'], '工作流重试'],
     ['mutateDatabase', [{ formula: 'MoS2' }], '数据库写入'],
@@ -116,12 +117,284 @@ test('live forbidden responses retain status and never fall back to demo data', 
       assert.equal(error.name, 'CompetitionRequestError');
       assert.equal(error.status, 403);
       assert.equal(error.code, 'forbidden');
-      assert.equal(error.message, 'viewer cannot write');
+      assert.equal(error.message, '当前身份无权执行此操作');
+      assert.equal('details' in error, false);
       assert.equal('data_kind' in error, false);
       assert.doesNotMatch(error.message, /demo|演示/i);
       return true;
     },
   );
+});
+
+test('live request failures expose only stable status-based public errors', async () => {
+  const cases = [
+    {
+      status: 401,
+      body: { detail: '/home/private/initial', code: 'attacker-code' },
+      message: '登录状态已失效，请重新登录',
+      code: 'unauthorized',
+    },
+    {
+      status: 403,
+      body: { message: 'cat /etc/passwd', code: 'run-command' },
+      message: '当前身份无权执行此操作',
+      code: 'forbidden',
+    },
+    {
+      status: 404,
+      body: { detail: '../private/workflow' },
+      message: '请求的数据不存在',
+      code: 'not-found',
+    },
+    {
+      status: 409,
+      body: { detail: `$(scancel 41002)\n${'x'.repeat(5000)}` },
+      message: '当前状态不允许执行此操作',
+      code: 'conflict',
+    },
+    {
+      status: 422,
+      body: { detail: [{ message: 'line one\nline two\n/home/private/input' }] },
+      message: '请求内容未通过校验',
+      code: 'validation-error',
+    },
+    {
+      status: 503,
+      body: { detail: '/home/private/service', code: 'internal-trace-code' },
+      message: '服务暂时不可用，请稍后重试',
+      code: 'server-error',
+    },
+    {
+      status: 418,
+      body: { detail: 'unexpected\nserver\nbody' },
+      message: '请求失败，请稍后重试',
+      code: 'request-failed',
+    },
+  ];
+
+  for (const expected of cases) {
+    const rawBody = JSON.stringify(expected.body);
+    const provider = createApiCompetitionDataProvider({
+      authHeaders: () => ({}),
+      fetchImpl: async () => new Response(rawBody, {
+        status: expected.status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    });
+    await assert.rejects(
+      () => provider.getWorkflow('wf-1'),
+      (error) => {
+        assert.equal(error.name, 'CompetitionRequestError');
+        assert.equal(error.status, expected.status);
+        assert.equal(error.code, expected.code);
+        assert.equal(error.message, expected.message);
+        assert.equal('details' in error, false);
+        const publicError = `${error.message}\n${JSON.stringify(error)}`;
+        for (const secret of [
+          '/home/private', 'cat /etc/passwd', 'scancel', 'line one',
+          'internal-trace-code', 'attacker-code', 'unexpected',
+        ]) {
+          assert.equal(publicError.includes(secret), false, `${expected.status}: ${secret}`);
+        }
+        assert.ok(publicError.length < 300);
+        return true;
+      },
+    );
+  }
+});
+
+test('live malformed JSON responses never retain the response text', async () => {
+  const privateResponse = '{"detail":"/home/private/sensitive-response-marker\n$(scancel 1)"';
+  for (const status of [200, 503]) {
+    const provider = createApiCompetitionDataProvider({
+      authHeaders: () => ({}),
+      fetchImpl: async () => new Response(privateResponse, {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    });
+    await assert.rejects(
+      () => provider.getWorkflow('wf-1'),
+      (error) => {
+        assert.equal(error.status, status);
+        assert.equal(
+          error.message,
+          status === 200
+            ? '响应格式无效，请稍后重试'
+            : '服务暂时不可用，请稍后重试',
+        );
+        assert.equal(error.code, status === 200 ? 'parse-error' : 'server-error');
+        assert.equal('details' in error, false);
+        const publicError = `${error.message}\n${JSON.stringify(error)}`;
+        assert.doesNotMatch(publicError, /home\/private|scancel|sensitive-response-marker/i);
+        return true;
+      },
+    );
+  }
+});
+
+test('live transport failures expose only stable public errors', async () => {
+  const cases = [
+    {
+      label: 'fetch rejection',
+      fetchImpl: async () => {
+        throw new Error('/home/private/fetch-failure $(scancel 1)');
+      },
+      status: 0,
+      message: '网络连接失败，请稍后重试',
+      code: 'network-error',
+    },
+    {
+      label: 'fetch abort',
+      fetchImpl: async () => {
+        throw new DOMException('/home/private/abort-failure', 'AbortError');
+      },
+      status: 0,
+      message: '请求已中断，请重试',
+      code: 'request-aborted',
+    },
+    {
+      label: 'response text rejection',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        text: async () => {
+          throw new Error('/home/private/body-read-failure');
+        },
+      }),
+      status: 200,
+      message: '响应读取失败，请稍后重试',
+      code: 'response-read-error',
+    },
+    {
+      label: 'response blob rejection',
+      method: 'downloadArtifact',
+      args: ['wf-1', 'band'],
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        blob: async () => {
+          throw new Error('/home/private/blob-read-failure');
+        },
+      }),
+      status: 200,
+      message: '响应读取失败，请稍后重试',
+      code: 'response-read-error',
+    },
+  ];
+
+  for (const expected of cases) {
+    const provider = createApiCompetitionDataProvider({
+      authHeaders: () => ({}),
+      fetchImpl: expected.fetchImpl,
+    });
+    const method = expected.method || 'getWorkflow';
+    const args = expected.args || ['wf-1'];
+    await assert.rejects(
+      () => provider[method](...args),
+      (error) => {
+        assert.equal(error.name, 'CompetitionRequestError', expected.label);
+        assert.equal(error.status, expected.status, expected.label);
+        assert.equal(error.code, expected.code, expected.label);
+        assert.equal(error.message, expected.message, expected.label);
+        assert.equal('details' in error, false, expected.label);
+        assert.equal('cause' in error, false, expected.label);
+        const publicError = `${error.message}\n${JSON.stringify(error)}`;
+        assert.doesNotMatch(publicError, /home\/private|scancel|failure/i, expected.label);
+        return true;
+      },
+    );
+  }
+});
+
+test('live requests time out even when fetch ignores abort signals', { timeout: 1000 }, async () => {
+  let suppliedSignal = null;
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async (_path, init) => {
+      suppliedSignal = init.signal;
+      return new Promise(() => {});
+    },
+  });
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    () => provider.getWorkflow('wf-1'),
+    (error) => {
+      assert.equal(error.name, 'CompetitionRequestError');
+      assert.equal(error.status, 0);
+      assert.equal(error.code, 'request-timeout');
+      assert.equal(error.message, '请求超时，请稍后重试');
+      assert.equal('details' in error, false);
+      assert.equal('cause' in error, false);
+      return true;
+    },
+  );
+  assert.ok(Date.now() - startedAt < 500);
+  assert.equal(suppliedSignal instanceof AbortSignal, true);
+  assert.equal(suppliedSignal.aborted, true);
+});
+
+test('live request timeout covers stalled body reads', { timeout: 1000 }, async () => {
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: async () => new Promise(() => {}),
+    }),
+  });
+
+  await assert.rejects(
+    () => provider.getWorkflow('wf-1'),
+    (error) => error.name === 'CompetitionRequestError'
+      && error.status === 0
+      && error.code === 'request-timeout'
+      && error.message === '请求超时，请稍后重试',
+  );
+});
+
+test('live requests clear timers and safely observe late fetch rejection', { timeout: 1000 }, async () => {
+  let successfulSignal = null;
+  const successfulProvider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async (_path, init) => {
+      successfulSignal = init.signal;
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await successfulProvider.getWorkflow('wf-1');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(successfulSignal.aborted, false);
+
+  let rejectLateFetch;
+  const lateProvider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    requestTimeoutMs: 20,
+    fetchImpl: async () => new Promise((_resolve, reject) => {
+      rejectLateFetch = reject;
+    }),
+  });
+  const unhandled = [];
+  const captureUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', captureUnhandled);
+  try {
+    await assert.rejects(
+      () => lateProvider.getWorkflow('wf-1'),
+      (error) => error.code === 'request-timeout',
+    );
+    rejectLateFetch(new Error('/home/private/late-fetch-rejection'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', captureUnhandled);
+  }
 });
 
 test('demo database pagination is stable and reports the full total', async () => {
@@ -366,4 +639,110 @@ test('live workflow retry accepts an object and encodes id and step', async () =
   assert.equal(request.path, '/api/competition/workflows/wf%2Fdemo%20id/steps/scf%2Brestart/retry');
   assert.equal(request.init.method, 'POST');
   assert.equal(request.init.body, '{}');
+});
+
+test('live provider validates then starts through separate fixed routes', async () => {
+  const requests = [];
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    fetchImpl: async (path, init) => {
+      requests.push([path, init]);
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  await provider.submitWorkflow('wf-1');
+  await provider.startWorkflow('wf-1');
+
+  assert.deepEqual(requests.map(([path]) => path), [
+    '/api/competition/workflows/wf-1/submit',
+    '/api/competition/workflows/wf-1/start',
+  ]);
+  assert.deepEqual(requests.map(([, init]) => [init.method, init.body]), [
+    ['POST', '{}'],
+    ['POST', '{}'],
+  ]);
+});
+
+test('attempt log providers use only safe fixed stdout and stderr routes', async () => {
+  const requests = [];
+  const live = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    fetchImpl: async (path, init) => {
+      requests.push([path, init]);
+      const stream = path.endsWith('/stderr') ? 'stderr' : 'stdout';
+      return new Response(JSON.stringify({ stream, content: `${stream} tail\n` }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await live.getAttemptLog('wf-1', 'attempt-1', 'stdout'),
+    { stream: 'stdout', content: 'stdout tail\n' },
+  );
+  assert.deepEqual(
+    await live.getAttemptLog('wf-1', 'attempt-1', 'stderr'),
+    { stream: 'stderr', content: 'stderr tail\n' },
+  );
+  assert.deepEqual(requests.map(([path]) => path), [
+    '/api/competition/workflows/wf-1/attempts/attempt-1/logs/stdout',
+    '/api/competition/workflows/wf-1/attempts/attempt-1/logs/stderr',
+  ]);
+  assert.equal(requests.every(([, init]) => init.method === undefined), true);
+
+  const requestCount = requests.length;
+  for (const args of [
+    ['/home/private/workflow', 'attempt-1', 'stdout'],
+    ['wf-1', '/home/private/attempt', 'stdout'],
+    ['wf-1', 'C:\\private\\attempt', 'stderr'],
+    ['.', 'attempt-1', 'stdout'],
+    ['..', 'attempt-1', 'stdout'],
+    ['wf/child', 'attempt-1', 'stdout'],
+    ['wf\\child', 'attempt-1', 'stdout'],
+    ['wf-1', '../attempt', 'stdout'],
+    ['wf-1', 'attempt/child', 'stdout'],
+    ['wf-1', 'attempt\\child', 'stdout'],
+    ['wf-1', 'attempt id', 'stdout'],
+    ['wf-1', 'attempt\tid', 'stdout'],
+    ['wf-1', 'attempt\nid', 'stdout'],
+    ['wf-1', 'attempt%2Fchild', 'stdout'],
+    ['wf-1', 'attempt-1', 'combined'],
+    ['wf-1', 'attempt-1', '../../stdout'],
+  ]) {
+    await assert.rejects(
+      () => live.getAttemptLog(...args),
+      (error) => error?.status === 400 && error?.code === 'invalid-log-request',
+    );
+  }
+  assert.equal(requests.length, requestCount);
+
+  const demo = createDemoCompetitionDataProvider({
+    fetchImpl: async () => { throw new Error('demo logs must not request the network'); },
+  });
+  const demoWorkflow = await demo.getWorkflow('wf-demo-mos2-running');
+  const demoAttemptId = demoWorkflow.steps.find((step) => step.attempt_id)?.attempt_id;
+  assert.match(demoAttemptId, /^[0-9a-f-]{36}$/);
+  const demoLog = await demo.getAttemptLog(demoWorkflow.id, demoAttemptId, 'stdout');
+  assert.deepEqual(Object.keys(demoLog).sort(), ['content', 'stream']);
+  assert.equal(demoLog.stream, 'stdout');
+  assert.match(demoLog.content, /DEMO/);
+  assert.ok(new TextEncoder().encode(demoLog.content).byteLength <= 64 * 1024);
+  for (const args of [
+    ['..', demoAttemptId, 'stdout'],
+    ['wf-demo/child', demoAttemptId, 'stdout'],
+    ['wf-demo\\child', demoAttemptId, 'stdout'],
+    [demoWorkflow.id, '../attempt', 'stdout'],
+    [demoWorkflow.id, 'attempt id', 'stdout'],
+    [demoWorkflow.id, demoAttemptId, 'stdin'],
+  ]) {
+    await assert.rejects(
+      () => demo.getAttemptLog(...args),
+      (error) => error?.status === 400 && error?.code === 'invalid-log-request',
+    );
+  }
 });

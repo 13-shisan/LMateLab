@@ -143,7 +143,7 @@
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PENDING | 尚未从网页执行真实 VASP | 完成成功和人为失败两条链 |
+| 7. VASP 四步闭环 | PARTIAL | 固定 MoS2 四步闭环已在实现检查点 `f2fe8acd4251b25a8d47f876be0213cca0062a2c` 完成本地实现和回归；尚未合并、部署或产生任何 107 VASP Job ID | 合并实现 PR 后完成 Task 13 部署门禁，再执行成功和人为失败两条真实链 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -466,6 +466,8 @@ relax -> SCF -> BAND -> DOS
 
 真实 VASP 完成必须同时具备 Slurm `COMPLETED/0:0`、VASP 正常结束标记、阶段文件集合和哈希；缺一项都不能显示成功。
 
+本地实现进展（`2026-08-19`，不勾选上述真实运行门禁）：固定 MoS2 输入、POTCAR 策略、不可变 attempt、科学验收、自动推进、重试/取消、受限日志、服务生命周期、Operator 写操作、前端轮询、计算节点 runner、预检和固定失败 profile 已实现。实现检查点为 `f2fe8acd4251b25a8d47f876be0213cca0062a2c`；Task 12 后端 `430` 项通过、`21` 项按本地平台条件跳过，前端 `125/125`、定向 ESLint、demo/live 两种 `107cup` Vite 构建均通过且每次转换 `1857` 个模块，WSL runner 行为测试 `10/10`、三个 Bash 语法检查、Python 编译和仓库安全检查通过。上述均为 Windows/WSL 本地证据；本次没有连接 107、没有提交 Slurm、没有运行 VASPKIT/VASP，也没有 107 Job ID、正常结束标记或科学结果。阶段 8 继续为 `PENDING`。
+
 ## 13. 阶段 8：结果解析与证据包
 
 **Files:**
@@ -769,3 +771,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 后快照 Job `38629` 在 `anode16` 以 `COMPLETED/0:0` 结束，standalone 模式证据目录为 `before-38629`，manifest SHA-256 为 `4bb663dca35f6d92f02f54177b279fc8e4f467c2e008f5436f765e000ea876a4`。两套正式 SQLite 哈希和完整性、稳定 Job `37715`、`anode02:18731`、运行提交 `bec82bc9...` 及公开 live/ready/Dashboard 均未改变；`current` 按构建合同切换到新发布，不表示运行中的稳定服务已重启。
 - 完整运行证据见 `docs/107cup/stage6-slurm-evidence.md`。该证据尚在独立待合并分支，因此阶段 6 继续为 `PARTIAL`；证据 PR 合并并完成 Windows、Gitea `main` 与 107 同步后，才可在后续状态提交中改为 `DONE`。阶段 7 和阶段 8 保持 `PENDING`，没有运行 VASP。
 - 独立证据 PR #28 已合并为 `044ada5a5287f402f57507f25245764a807bc8d4`。Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到该提交，107 工作树干净；稳定 Job `37715` 仍在 `anode02` 运行，公开 live、ready 和 Dashboard 均为 `200`。因此阶段 6 改为 `DONE`；阶段 7 和阶段 8 继续为 `PENDING`，本次未运行 VASP。
+
+### 2026-08-19
+
+- 阶段 7 固定 MoS2 `relax -> SCF -> BAND/DOS` 本地实现检查点为 `f2fe8acd4251b25a8d47f876be0213cca0062a2c`（不含本次状态记录提交）。实现范围严格限于固定材料、固定模板和固定 runner，不加入 Agent、机器学习、任意材料/命令或阶段 8 结果包。
+- Task 12 本地门禁通过：后端完整 14 模块回归 `430` 项通过、`21` 项按 Windows/POSIX 条件跳过；前端 `125/125`、竞赛范围 ESLint、demo/live 两种 `107cup` Vite 构建均通过且每次转换 `1857` 个模块；WSL runner 行为测试 `10/10`，三个 Stage 7 Bash 文件通过 `bash -n`，内部验收脚本通过 `py_compile`。
+- 仓库检查未发现本分支新增的 `shell=True`、`eval`、`bash -c`、`sh -c`、Docker/Singularity 或 POTCAR 内容路径，凭据模式扫描无命中，`git diff --check` 通过。构建保留既有 Browserslist、3Dmol 依赖 `eval` 和大 chunk 警告，不把第三方依赖警告误报为本阶段失败。
+- 上述只证明本地源码和合同门禁。分支尚未合并，107 未构建或部署该实现，本次没有连接 107、提交 Slurm 或执行 VASPKIT/VASP，因而没有真实 VASP Job ID、正常结束标记、四步文件集合或人为失败链证据。阶段 7 仅改为 `PARTIAL`，阶段 8 继续为 `PENDING`；必须在实现 PR 合并并同步固定提交后，再按 Task 13 和 Task 14 完成真实 107 验收。

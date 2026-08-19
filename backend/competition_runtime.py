@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import re
 from pathlib import Path, PurePosixPath
@@ -59,6 +60,112 @@ def slurm_probe_script(environ: Mapping[str, str] | None = None) -> Path:
     if not path.is_absolute() or ".." in path.parts:
         raise ValueError("LMATELAB_SLURM_PROBE_SCRIPT must be a fixed absolute POSIX path")
     return Path(value)
+
+
+def vasp_stage_script(environ: Mapping[str, str] | None = None) -> Path:
+    values = os.environ if environ is None else environ
+    value = values.get(
+        "LMATELAB_VASP_STAGE_SCRIPT",
+        "/home/scc/pb23030683/lmatelab-107cup/current/deploy/107cup/slurm/vasp-stage.slurm",
+    )
+    try:
+        path = PurePosixPath(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "LMATELAB_VASP_STAGE_SCRIPT must be a fixed absolute POSIX path"
+        ) from exc
+    if (
+        not value
+        or "\x00" in value
+        or "\n" in value
+        or "\r" in value
+        or not path.is_absolute()
+        or ".." in path.parts
+    ):
+        raise ValueError(
+            "LMATELAB_VASP_STAGE_SCRIPT must be a fixed absolute POSIX path"
+        )
+    return Path(value)
+
+
+def coordinator_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    values = os.environ if environ is None else environ
+    value = values.get("LMATELAB_COORDINATOR_ENABLED", "1")
+    if value not in {"0", "1"}:
+        raise ValueError("LMATELAB_COORDINATOR_ENABLED must be 0 or 1")
+    return value == "1"
+
+
+def coordinator_interval_seconds(
+    environ: Mapping[str, str] | None = None,
+) -> float:
+    values = os.environ if environ is None else environ
+    return validate_coordinator_interval_seconds(
+        values.get("LMATELAB_COORDINATOR_INTERVAL_SECONDS", "10")
+    )
+
+
+def _bounded_float(
+    value: object,
+    *,
+    variable: str,
+    minimum: float,
+    maximum: float,
+) -> float:
+    if isinstance(value, str):
+        if value != value.strip() or not value:
+            raise ValueError(
+                f"{variable} must be between {minimum:g} and {maximum:g}"
+            )
+    elif isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{variable} must be between {minimum:g} and {maximum:g}")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{variable} must be between {minimum:g} and {maximum:g}"
+        ) from exc
+    if not math.isfinite(parsed) or not minimum <= parsed <= maximum:
+        raise ValueError(f"{variable} must be between {minimum:g} and {maximum:g}")
+    return parsed
+
+
+def validate_coordinator_interval_seconds(value: object) -> float:
+    return _bounded_float(
+        value,
+        variable="LMATELAB_COORDINATOR_INTERVAL_SECONDS",
+        minimum=2.0,
+        maximum=60.0,
+    )
+
+
+def coordinator_drain_timeout_seconds(
+    environ: Mapping[str, str] | None = None,
+) -> float:
+    values = os.environ if environ is None else environ
+    return validate_coordinator_drain_timeout_seconds(
+        values.get("LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS", "10")
+    )
+
+
+def validate_coordinator_drain_timeout_seconds(value: object) -> float:
+    return _bounded_float(
+        value,
+        variable="LMATELAB_COORDINATOR_DRAIN_TIMEOUT_SECONDS",
+        minimum=0.01,
+        maximum=60.0,
+    )
+
+
+def coordinator_batch_limit(environ: Mapping[str, str] | None = None) -> int:
+    values = os.environ if environ is None else environ
+    value = values.get("LMATELAB_COORDINATOR_BATCH_LIMIT", "8")
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[1-9]|[12][0-9]|3[0-2]", value) is None
+    ):
+        raise ValueError("LMATELAB_COORDINATOR_BATCH_LIMIT must be between 1 and 32")
+    return int(value)
 
 
 def deployment_metadata(environ: Mapping[str, str] | None = None) -> dict[str, str]:

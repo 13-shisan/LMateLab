@@ -1,3 +1,5 @@
+import hashlib
+import json
 import tempfile
 import unittest
 import uuid
@@ -13,15 +15,25 @@ from sqlalchemy.orm import Session
 from auth_identity import get_current_user
 from database import Base, get_db
 from models import User
-from models_workflow import WorkflowAttempt, WorkflowEvent, WorkflowRun, WorkflowStep
+from models_workflow import (
+    WorkflowAttempt,
+    WorkflowEvent,
+    WorkflowRun,
+    WorkflowStep,
+    canonical_json,
+)
 from routers.competition_workflows import (
+    get_competition_coordinator,
     get_competition_reconciler,
     router,
     upload_structure,
 )
 from schemas_workflow import StructureUploadResult
 from services.competition_inputs import InputValidationError, MAX_STRUCTURE_BYTES
-from services.competition_reconcile import ReconcileError
+from services.competition_coordinator import CoordinatorError
+from services.competition_reconcile import CompetitionReconciler, ReconcileError
+from services.competition_slurm import SlurmError
+from services.competition_vasp import VaspPolicyError
 
 
 VALID_POSCAR = b"""MoS2
@@ -118,6 +130,12 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
 
         self.app.dependency_overrides[get_db] = test_db
         self.app.dependency_overrides[get_current_user] = identity
+        self.coordinator = mock.Mock()
+        self.slurm_client = mock.Mock()
+        self.coordinator.reconciler.slurm = self.slurm_client
+        self.app.dependency_overrides[get_competition_coordinator] = (
+            lambda: self.coordinator
+        )
         self.cancel_service = mock.Mock()
         self.app.dependency_overrides[get_competition_reconciler] = lambda: self.cancel_service
         self.client = TestClient(self.app)
@@ -131,7 +149,10 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(201, response.status_code, response.text)
         return response.json()
 
-    def create_validated_attempt(self, owner_id=None, status="running"):
+    def test_default_reconciler_dependency_remains_available(self):
+        self.assertIsInstance(get_competition_reconciler(), CompetitionReconciler)
+
+    def create_validated_attempt(self, owner_id=None, status="running", metadata=None):
         draft = self.create_draft(owner_id=owner_id)
         confirmed = self.client.post(
             f"/api/competition/workflows/{draft['id']}/submit",
@@ -158,7 +179,7 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
                     status=status,
                     slurm_job_id="41050",
                     working_directory=str(attempt_dir),
-                    metadata_json={
+                    metadata_json=metadata or {
                         "scheduler_observation": {
                             "error_code": None,
                             "exit_code": "0:0",
@@ -174,6 +195,58 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             )
             session.commit()
         return draft, attempt_id
+
+    @staticmethod
+    def coordinator_outcome(workflow_id, attempt_id, step_key="relax", status="queued"):
+        return SimpleNamespace(
+            workflow_id=workflow_id,
+            attempt_id=attempt_id,
+            step_key=step_key,
+            status=status,
+        )
+
+    @staticmethod
+    def cancellation_outcome(workflow_id, attempt_id, status="cancelling"):
+        return SimpleNamespace(
+            workflow_id=workflow_id,
+            attempt_id=attempt_id,
+            job_id="41050",
+            status=status,
+            result="requested",
+        )
+
+    @staticmethod
+    def acceptance_metadata(*, accepted, reason_code=None):
+        check = {"name": "scheduler_state", "passed": accepted}
+        if not accepted:
+            check["reason_code"] = reason_code
+        report = {
+            "accepted": accepted,
+            "reason_code": reason_code,
+            "checks": [check],
+            "measurements": {
+                "elapsed_wall_seconds": 1.25,
+                "process_tree_peak_rss_kbytes": 2048,
+                "vasp_version": "6.4.2",
+                "vaspkit_version": "1.5.1",
+            },
+            "artifacts": [
+                {"name": "OUTCAR", "sha256": "a" * 64, "size_bytes": 123}
+            ],
+        }
+        report_sha256 = hashlib.sha256(
+            canonical_json(report).encode("utf-8")
+        ).hexdigest()
+        return {
+            "scheduler_observation": {
+                "raw_state": "COMPLETED",
+                "exit_code": "0:0",
+                "reason": f"private reason at /home/{'accepted' if accepted else 'failed'}",
+                "error_code": None,
+            },
+            "scientific_acceptance": report,
+            "scientific_acceptance_sha256": report_sha256,
+        }
 
     def test_operator_upload_save_confirm_uses_authenticated_owner(self):
         upload = self.client.post(
@@ -309,6 +382,7 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(TEST_RELEASE_COMMIT, body["release_commit"])
         self.assertEqual(["relax", "scf", "band", "dos"], [step["key"] for step in body["steps"]])
         for step in body["steps"]:
+            self.assertIsNone(step["attempt_id"])
             self.assertIsNone(step["job_id"])
             self.assertEqual(0, step["attempt"])
             self.assertIsNone(step["attempt_dir"])
@@ -326,17 +400,71 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
 
         self.assertEqual(200, detail.status_code, detail.text)
         step = detail.json()["steps"][0]
+        self.assertEqual(attempt_id, step["attempt_id"])
         self.assertEqual("41050", step["job_id"])
         self.assertEqual(1, step["attempt"])
         self.assertEqual(f"{draft['id']}/attempts/{attempt_id}", step["attempt_dir"])
         self.assertEqual("RUNNING", step["slurm_state"])
         self.assertEqual("0:0", step["exit_code"])
-        self.assertEqual("None", step["reason"])
-        self.assertTrue(step["accepted"])
+        self.assertIsNone(step["reason"])
+        self.assertIsNone(step["accepted"])
+        self.assertIsNone(step["acceptance"])
+        self.assertEqual({}, step["resources"])
+        self.assertIsNotNone(step["updated_at"])
         self.assertNotIn(str(self.workflow_root), detail.text)
         item = next(row for row in listing.json()["items"] if row["id"] == draft["id"])
         self.assertEqual("41050", item["latest_job_id"])
         self.assertEqual("relax", item["current_step"])
+
+    def test_step_attempt_id_rejects_malformed_and_noncanonical_ledger_ids(self):
+        for tampered_attempt_id in (
+            "not-a-uuid/private-attempt",
+            str(uuid.uuid4()).upper(),
+        ):
+            with self.subTest(tampered_attempt_id=tampered_attempt_id):
+                draft, attempt_id = self.create_validated_attempt()
+                with Session(self.engine) as session:
+                    attempt = session.get(WorkflowAttempt, attempt_id)
+                    attempt.id = tampered_attempt_id
+                    session.commit()
+
+                response = self.client.get(
+                    f"/api/competition/workflows/{draft['id']}"
+                )
+
+                self.assertEqual(200, response.status_code, response.text)
+                step = response.json()["steps"][0]
+                self.assertIsNone(step["attempt_id"])
+                self.assertNotIn(tampered_attempt_id, response.text)
+
+    def test_list_and_dashboard_reject_tampered_historical_job_ids(self):
+        draft, attempt_id = self.create_validated_attempt(status="running")
+        private_job_id = "/home/private/job-41050\nraw scheduler text"
+        with Session(self.engine) as session:
+            attempt = session.get(WorkflowAttempt, attempt_id)
+            attempt.slurm_job_id = private_job_id
+            run = session.get(WorkflowRun, draft["id"])
+            run.status = "running"
+            session.commit()
+
+        listing = self.client.get("/api/competition/workflows")
+        dashboard = self.client.get("/api/competition/dashboard")
+
+        self.assertEqual(200, listing.status_code, listing.text)
+        self.assertEqual(200, dashboard.status_code, dashboard.text)
+        item = next(row for row in listing.json()["items"] if row["id"] == draft["id"])
+        self.assertIsNone(item["latest_job_id"])
+        recent = next(
+            row
+            for row in dashboard.json()["recent_workflows"]
+            if row["id"] == draft["id"]
+        )
+        self.assertIsNone(recent["latest_job_id"])
+        self.assertIsNone(dashboard.json()["active_workflow"]["latest_job_id"])
+        self.assertNotIn(private_job_id, listing.text)
+        self.assertNotIn(private_job_id, dashboard.text)
+        self.assertNotIn("/home/private", listing.text)
+        self.assertNotIn("/home/private", dashboard.text)
 
     def test_dashboard_uses_real_owner_scoped_counts(self):
         draft = self.create_draft()
@@ -368,6 +496,376 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(own["id"], response.json()["active_workflow"]["id"])
         self.assertNotIn("Other Name", response.text)
         self.assertNotIn(str(self.workflow_root), response.text)
+
+    def test_operator_workflow_commands_are_thin_and_duplicate_safe(self):
+        draft, attempt_id = self.create_validated_attempt()
+        command_outcome = self.coordinator_outcome(draft["id"], attempt_id)
+        cancel_outcome = self.cancellation_outcome(draft["id"], attempt_id)
+        self.coordinator.start.return_value = command_outcome
+        self.coordinator.retry.return_value = command_outcome
+        self.coordinator.cancel.return_value = cancel_outcome
+
+        start_first = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/start", json={}
+        )
+        start_second = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/start"
+        )
+        retry_first = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/steps/relax/retry", json={}
+        )
+        retry_second = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/steps/relax/retry"
+        )
+        cancel_first = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/cancel", json={}
+        )
+        cancel_second = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/cancel"
+        )
+
+        for response in (
+            start_first,
+            start_second,
+            retry_first,
+            retry_second,
+            cancel_first,
+            cancel_second,
+        ):
+            self.assertEqual(200, response.status_code, response.text)
+            self.assertEqual(attempt_id, response.json()["attempt_id"])
+        self.assertEqual(start_first.json(), start_second.json())
+        self.assertEqual(retry_first.json(), retry_second.json())
+        self.assertEqual(cancel_first.json(), cancel_second.json())
+        self.coordinator.start.assert_has_calls(
+            [mock.call(draft["id"], self.operator_id)] * 2
+        )
+        self.coordinator.retry.assert_has_calls(
+            [mock.call(draft["id"], self.operator_id, "relax")] * 2
+        )
+        self.coordinator.cancel.assert_has_calls(
+            [mock.call(draft["id"], self.operator_id)] * 2
+        )
+
+        injected = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/cancel",
+            json={"job_id": "99999"},
+        )
+        self.assertEqual(422, injected.status_code, injected.text)
+        self.assertEqual(2, self.coordinator.cancel.call_count)
+
+    def test_workflow_commands_reject_every_body_override_before_coordinator(self):
+        workflow_id = str(uuid.uuid4())
+        for suffix in ("start", "steps/scf/retry", "cancel"):
+            for key, value in (
+                ("job_id", "99999"),
+                ("path", "/home/private"),
+                ("filename", "private.out"),
+                ("limit", 999999),
+                ("unknown", "private scheduler input"),
+            ):
+                with self.subTest(suffix=suffix, key=key):
+                    response = self.client.post(
+                        f"/api/competition/workflows/{workflow_id}/{suffix}",
+                        json={key: value},
+                    )
+                    self.assertEqual(422, response.status_code, response.text)
+        self.coordinator.start.assert_not_called()
+        self.coordinator.retry.assert_not_called()
+        self.coordinator.cancel.assert_not_called()
+
+    def test_workflow_commands_authenticate_before_lookup_and_validate_paths(self):
+        workflow_id = str(uuid.uuid4())
+        self.identity_id = self.viewer_id
+        for suffix in ("start", "steps/scf/retry", "cancel"):
+            with self.subTest(suffix=suffix):
+                response = self.client.post(
+                    f"/api/competition/workflows/{workflow_id}/{suffix}", json={}
+                )
+                self.assertEqual(403, response.status_code, response.text)
+        self.coordinator.assert_not_called()
+        self.coordinator.start.assert_not_called()
+        self.coordinator.retry.assert_not_called()
+        self.coordinator.cancel.assert_not_called()
+
+        unauthenticated = FastAPI()
+        unauthenticated.include_router(router, prefix="/api")
+        unauthenticated_client = TestClient(unauthenticated)
+        for suffix in (
+            "not-a-uuid/start",
+            f"{workflow_id}/steps/foreign/retry",
+            "not-a-uuid/cancel",
+        ):
+            with self.subTest(actor="unauthenticated", suffix=suffix):
+                response = unauthenticated_client.post(
+                    f"/api/competition/workflows/{suffix}", json={}
+                )
+                self.assertEqual(401, response.status_code, response.text)
+
+        self.identity_id = self.viewer_id
+        for suffix in (
+            "not-a-uuid/start",
+            f"{workflow_id}/steps/foreign/retry",
+            "not-a-uuid/cancel",
+        ):
+            with self.subTest(actor="viewer", suffix=suffix):
+                response = self.client.post(
+                    f"/api/competition/workflows/{suffix}", json={}
+                )
+                self.assertEqual(403, response.status_code, response.text)
+
+        self.identity_id = self.operator_id
+        malformed = self.client.post(
+            "/api/competition/workflows/not-a-uuid/start", json={}
+        )
+        invalid_step = self.client.post(
+            f"/api/competition/workflows/{workflow_id}/steps/foreign/retry", json={}
+        )
+        self.assertEqual(422, malformed.status_code, malformed.text)
+        self.assertEqual(422, invalid_step.status_code, invalid_step.text)
+        self.coordinator.start.assert_not_called()
+        self.coordinator.retry.assert_not_called()
+
+    def test_workflow_command_errors_are_stable_and_sanitized(self):
+        workflow_id = str(uuid.uuid4())
+        secret = f"private scheduler output at {self.workflow_root}"
+        cases = (
+            ("start", CoordinatorError("workflow_not_found", secret), 404, "workflow_not_found"),
+            (
+                "start",
+                CoordinatorError("workflow_not_startable", secret),
+                409,
+                "workflow_not_startable",
+            ),
+            (
+                "steps/scf/retry",
+                CoordinatorError("step_not_retryable", secret),
+                409,
+                "step_not_retryable",
+            ),
+            ("cancel", CoordinatorError("submission_failed", secret), 503, "submission_failed"),
+            (
+                "start",
+                ReconcileError("scheduler_unavailable", secret),
+                503,
+                "scheduler_unavailable",
+            ),
+            ("start", SlurmError(secret), 503, "scheduler_unavailable"),
+            (
+                "start",
+                VaspPolicyError("workflow_scope_invalid", secret),
+                422,
+                "workflow_scope_invalid",
+            ),
+            (
+                "start",
+                VaspPolicyError("potcar_sha256_mismatch", secret),
+                422,
+                "potcar_sha256_mismatch",
+            ),
+        )
+        for suffix, error, expected_status, expected_code in cases:
+            with self.subTest(code=expected_code):
+                self.coordinator.reset_mock()
+                method = (
+                    self.coordinator.retry
+                    if "/retry" in suffix
+                    else self.coordinator.cancel
+                    if suffix == "cancel"
+                    else self.coordinator.start
+                )
+                method.side_effect = error
+                response = self.client.post(
+                    f"/api/competition/workflows/{workflow_id}/{suffix}", json={}
+                )
+                self.assertEqual(expected_status, response.status_code, response.text)
+                self.assertEqual(expected_code, response.headers.get("X-Error-Code"))
+                self.assertNotIn(secret, response.text)
+                self.assertNotIn(str(self.workflow_root), response.text)
+                method.side_effect = None
+
+    def test_owned_operator_and_viewer_read_only_bounded_ledger_logs(self):
+        draft, attempt_id = self.create_validated_attempt()
+        self.slurm_client.read_log_tail.return_value = "last bounded lines\n"
+        path = (
+            f"/api/competition/workflows/{draft['id']}"
+            f"/attempts/{attempt_id}/logs/stdout"
+        )
+
+        operator = self.client.get(path)
+        self.identity_id = self.viewer_id
+        viewer = self.client.get(path)
+
+        for response in (operator, viewer):
+            self.assertEqual(200, response.status_code, response.text)
+            self.assertEqual(
+                {"stream": "stdout", "content": "last bounded lines\n"},
+                response.json(),
+            )
+        self.assertEqual(
+            [mock.call(draft["id"], attempt_id, "stdout")] * 2,
+            self.slurm_client.read_log_tail.call_args_list,
+        )
+
+        self.identity_id = self.operator_id
+        self.slurm_client.read_log_tail.reset_mock()
+        self.slurm_client.read_log_tail.return_value = "x" * (64 * 1024)
+        bounded = self.client.get(path)
+        self.assertEqual(200, bounded.status_code, bounded.text[:500])
+        self.assertLessEqual(len(bounded.content), 64 * 1024 + 64)
+
+        multibyte = ('\u6c49\u5b57"\\\n\U0001f642' * 20000) + "UTF8-tail"
+        self.slurm_client.read_log_tail.return_value = multibyte
+        escaped = self.client.get(path)
+        self.assertEqual(200, escaped.status_code, escaped.text[:500])
+        self.assertLessEqual(len(escaped.content), 64 * 1024 + 64)
+        escaped.content.decode("utf-8")
+        returned = escaped.json()["content"]
+        self.assertTrue(multibyte.endswith(returned))
+        self.assertTrue(returned.endswith("UTF8-tail"))
+
+    def test_log_route_fails_closed_before_any_unsafe_read(self):
+        own, own_attempt = self.create_validated_attempt()
+        other, other_attempt = self.create_validated_attempt(owner_id=self.other_id)
+        self.identity_id = self.operator_id
+        valid_base = f"/api/competition/workflows/{own['id']}/attempts/{own_attempt}/logs"
+        cases = (
+            (f"/api/competition/workflows/{other['id']}/attempts/{other_attempt}/logs/stdout", 404),
+            (f"/api/competition/workflows/{own['id']}/attempts/{other_attempt}/logs/stdout", 404),
+            (f"/api/competition/workflows/{own['id']}/attempts/{uuid.uuid4()}/logs/stdout", 404),
+            (f"/api/competition/workflows/not-a-uuid/attempts/{own_attempt}/logs/stdout", 422),
+            (f"/api/competition/workflows/{own['id']}/attempts/not-a-uuid/logs/stdout", 422),
+            (f"{valid_base}/combined", 422),
+            (f"{valid_base}/stdout?limit=1", 422),
+        )
+        for path, expected in cases:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(expected, response.status_code, response.text)
+        body_override = self.client.request(
+            "GET", f"{valid_base}/stdout", json={"path": "/home/private"}
+        )
+        self.assertEqual(422, body_override.status_code, body_override.text)
+        self.slurm_client.read_log_tail.assert_not_called()
+
+        unauthenticated = FastAPI()
+        unauthenticated.include_router(router, prefix="/api")
+        unauthenticated.dependency_overrides[get_db] = self.app.dependency_overrides[get_db]
+        response = TestClient(unauthenticated).get(f"{valid_base}/stdout")
+        self.assertEqual(401, response.status_code, response.text)
+        self.slurm_client.read_log_tail.assert_not_called()
+
+    def test_log_route_returns_empty_missing_log_and_sanitizes_unsafe_reads(self):
+        draft, attempt_id = self.create_validated_attempt()
+        path = (
+            f"/api/competition/workflows/{draft['id']}"
+            f"/attempts/{attempt_id}/logs/stderr"
+        )
+        self.slurm_client.read_log_tail.return_value = ""
+        missing = self.client.get(path)
+        self.assertEqual({"stream": "stderr", "content": ""}, missing.json())
+
+        self.slurm_client.read_log_tail.side_effect = ValueError(
+            f"symlink at {self.workflow_root}"
+        )
+        unsafe = self.client.get(path)
+        self.assertEqual(409, unsafe.status_code, unsafe.text)
+        self.assertEqual("log_read_unsafe", unsafe.headers.get("X-Error-Code"))
+        self.assertNotIn(str(self.workflow_root), unsafe.text)
+
+        self.slurm_client.read_log_tail.side_effect = SlurmError(
+            f"scheduler at {self.workflow_root}"
+        )
+        unavailable = self.client.get(path)
+        self.assertEqual(503, unavailable.status_code, unavailable.text)
+        self.assertEqual("scheduler_unavailable", unavailable.headers.get("X-Error-Code"))
+        self.assertNotIn(str(self.workflow_root), unavailable.text)
+
+    def test_step_serialization_distinguishes_scientific_acceptance_safely(self):
+        expected_keys = {
+            "key",
+            "status",
+            "job_id",
+            "attempt",
+            "attempt_id",
+            "attempt_dir",
+            "slurm_state",
+            "exit_code",
+            "reason",
+            "accepted",
+            "acceptance",
+            "resources",
+            "updated_at",
+        }
+        cases = (
+            ("running", None, None),
+            ("succeeded", True, None),
+            ("scientific_failed", False, "electronic_not_converged"),
+        )
+        for attempt_status, expected_accepted, reason_code in cases:
+            with self.subTest(attempt_status=attempt_status):
+                metadata = (
+                    self.acceptance_metadata(
+                        accepted=expected_accepted,
+                        reason_code=reason_code,
+                    )
+                    if expected_accepted is not None
+                    else None
+                )
+                draft, _attempt_id = self.create_validated_attempt(
+                    status=attempt_status,
+                    metadata=metadata,
+                )
+                response = self.client.get(
+                    f"/api/competition/workflows/{draft['id']}"
+                )
+                self.assertEqual(200, response.status_code, response.text)
+                step = response.json()["steps"][0]
+                self.assertEqual(expected_keys, set(step))
+                self.assertIs(expected_accepted, step["accepted"])
+                self.assertIsNotNone(step["updated_at"])
+                if expected_accepted is None:
+                    self.assertIsNone(step["acceptance"])
+                    self.assertEqual({}, step["resources"])
+                    self.assertIsNone(step["reason"])
+                else:
+                    self.assertIs(expected_accepted, step["acceptance"]["accepted"])
+                    self.assertEqual(reason_code, step["reason"])
+                    self.assertEqual(1.25, step["resources"]["elapsed_wall_seconds"])
+                    self.assertEqual("a" * 64, step["acceptance"]["artifacts"][0]["sha256"])
+                serialized = json.dumps(step)
+                self.assertNotIn(str(self.workflow_root), serialized)
+                self.assertNotIn("private reason", serialized)
+                self.assertNotIn("POTCAR content", serialized)
+
+    def test_tampered_acceptance_sha_and_status_fail_closed_without_leaks(self):
+        secret = f"private acceptance at {self.workflow_root}"
+        bad_sha = self.acceptance_metadata(accepted=True)
+        bad_sha["scientific_acceptance_sha256"] = "0" * 64
+        bad_sha["private"] = secret
+        bad_status = self.acceptance_metadata(accepted=True)
+        bad_status["private"] = secret
+        cases = (
+            ("succeeded", bad_sha),
+            ("scientific_failed", bad_status),
+        )
+        for attempt_status, metadata in cases:
+            with self.subTest(attempt_status=attempt_status):
+                draft, _attempt_id = self.create_validated_attempt(
+                    status=attempt_status,
+                    metadata=metadata,
+                )
+                response = self.client.get(
+                    f"/api/competition/workflows/{draft['id']}"
+                )
+                self.assertEqual(200, response.status_code, response.text)
+                step = response.json()["steps"][0]
+                self.assertIsNone(step["accepted"])
+                self.assertIsNone(step["acceptance"])
+                self.assertEqual({}, step["resources"])
+                self.assertIsNone(step["reason"])
+                self.assertNotIn(secret, response.text)
+                self.assertNotIn(str(self.workflow_root), response.text)
 
     def test_cancel_endpoint_is_operator_owned_and_rejects_arbitrary_job_id(self):
         draft, attempt_id = self.create_validated_attempt()

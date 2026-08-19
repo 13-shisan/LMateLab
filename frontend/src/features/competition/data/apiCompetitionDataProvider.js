@@ -1,6 +1,21 @@
 import { getAuthHeaders } from '../../../api/auth.js';
 import { CompetitionRequestError } from './competitionErrors.js';
 
+const LOG_STREAMS = new Set(['stdout', 'stderr']);
+const SAFE_ROUTE_IDENTIFIER = /^[A-Za-z0-9_-]{1,128}$/;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const MIN_REQUEST_TIMEOUT_MS = 10;
+const MAX_REQUEST_TIMEOUT_MS = 120000;
+const REQUEST_FAILURES = new Map([
+  [400, { message: '请求参数无效', code: 'bad-request' }],
+  [401, { message: '登录状态已失效，请重新登录', code: 'unauthorized' }],
+  [403, { message: '当前身份无权执行此操作', code: 'forbidden' }],
+  [404, { message: '请求的数据不存在', code: 'not-found' }],
+  [409, { message: '当前状态不允许执行此操作', code: 'conflict' }],
+  [422, { message: '请求内容未通过校验', code: 'validation-error' }],
+  [429, { message: '请求过于频繁，请稍后重试', code: 'rate-limited' }],
+]);
+
 function queryString(entries) {
   const params = new URLSearchParams();
   for (const [key, value] of entries) {
@@ -12,12 +27,39 @@ function queryString(entries) {
   return query ? `?${query}` : '';
 }
 
-function errorMessage(data, status) {
-  if (typeof data?.detail === 'string') return data.detail;
-  if (data?.detail !== undefined) return JSON.stringify(data.detail);
-  if (typeof data?.message === 'string') return data.message;
-  if (typeof data === 'string' && data) return data;
-  return `Competition request failed (${status})`;
+function publicRequestFailure(status) {
+  if (REQUEST_FAILURES.has(status)) return REQUEST_FAILURES.get(status);
+  if (status >= 500 && status <= 599) {
+    return { message: '服务暂时不可用，请稍后重试', code: 'server-error' };
+  }
+  return { message: '请求失败，请稍后重试', code: 'request-failed' };
+}
+
+function publicTransportFailure(error) {
+  if (error?.name === 'AbortError') {
+    return new CompetitionRequestError('请求已中断，请重试', 0, 'request-aborted');
+  }
+  return new CompetitionRequestError('网络连接失败，请稍后重试', 0, 'network-error');
+}
+
+function publicResponseReadFailure(status) {
+  return new CompetitionRequestError(
+    '响应读取失败，请稍后重试',
+    status,
+    'response-read-error',
+  );
+}
+
+function publicRequestTimeoutFailure() {
+  return new CompetitionRequestError('请求超时，请稍后重试', 0, 'request-timeout');
+}
+
+function boundedRequestTimeoutMs(value) {
+  if (!Number.isFinite(value)) return DEFAULT_REQUEST_TIMEOUT_MS;
+  return Math.min(
+    MAX_REQUEST_TIMEOUT_MS,
+    Math.max(MIN_REQUEST_TIMEOUT_MS, Math.trunc(value)),
+  );
 }
 
 function filenameFromDisposition(disposition, fallback) {
@@ -32,10 +74,29 @@ function filenameFromDisposition(disposition, fallback) {
   return disposition?.match(/filename="?([^";]+)"?/i)?.[1] || fallback;
 }
 
+function isSafeRouteIdentifier(value) {
+  return typeof value === 'string' && SAFE_ROUTE_IDENTIFIER.test(value);
+}
+
+function validateAttemptLogRoute(workflowId, attemptId, stream) {
+  const invalidIdentifier = !isSafeRouteIdentifier(workflowId)
+    || !isSafeRouteIdentifier(attemptId);
+  if (invalidIdentifier || !LOG_STREAMS.has(stream)) {
+    throw new CompetitionRequestError(
+      'Attempt log request is invalid',
+      400,
+      'invalid-log-request',
+    );
+  }
+}
+
 export function createApiCompetitionDataProvider({
   fetchImpl = fetch,
   authHeaders = getAuthHeaders,
+  requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 } = {}) {
+  const timeoutMs = boundedRequestTimeoutMs(requestTimeoutMs);
+
   async function request(path, options = {}) {
     const { responseType = 'auto', headers: suppliedHeaders, ...init } = options;
     const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData;
@@ -43,35 +104,70 @@ export function createApiCompetitionDataProvider({
       ...authHeaders(isFormData ? null : 'application/json'),
       ...(suppliedHeaders || {}),
     };
-    const response = await fetchImpl(path, { ...init, headers });
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeoutId;
 
-    if (responseType === 'blob' && response.ok) {
-      return { blob: await response.blob(), response };
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    const text = await response.text();
-    let data = text;
-    if (contentType.includes('application/json')) {
+    const transport = (async () => {
+      let response;
       try {
-        data = text ? JSON.parse(text) : null;
-      } catch {
-        const parseError = new CompetitionRequestError('Competition response could not be parsed', response.status, 'parse-error');
-        parseError.details = text;
-        throw parseError;
+        response = await fetchImpl(path, { ...init, headers, signal: controller.signal });
+      } catch (error) {
+        if (timedOut) throw publicRequestTimeoutFailure();
+        throw publicTransportFailure(error);
       }
-    }
 
-    if (!response.ok) {
-      const error = new CompetitionRequestError(
-        errorMessage(data, response.status),
-        response.status,
-        data?.code || 'request-failed',
-      );
-      error.details = data;
-      throw error;
+      if (responseType === 'blob' && response.ok) {
+        try {
+          return { blob: await response.blob(), response };
+        } catch {
+          if (timedOut) throw publicRequestTimeoutFailure();
+          throw publicResponseReadFailure(response.status);
+        }
+      }
+
+      if (!response.ok) {
+        const failure = publicRequestFailure(response.status);
+        throw new CompetitionRequestError(failure.message, response.status, failure.code);
+      }
+
+      let contentType;
+      let text;
+      try {
+        contentType = response.headers.get('content-type') || '';
+        text = await response.text();
+      } catch {
+        if (timedOut) throw publicRequestTimeoutFailure();
+        throw publicResponseReadFailure(response.status);
+      }
+      let data = text;
+      if (contentType.includes('application/json')) {
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          throw new CompetitionRequestError(
+            '响应格式无效，请稍后重试',
+            response.status,
+            'parse-error',
+          );
+        }
+      }
+      return data;
+    })();
+
+    const timeout = new Promise((_resolve, reject) => {
+      timeoutId = globalThis.setTimeout(() => {
+        timedOut = true;
+        reject(publicRequestTimeoutFailure());
+        controller.abort();
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([transport, timeout]);
+    } finally {
+      globalThis.clearTimeout(timeoutId);
     }
-    return data;
   }
 
   function jsonPost(path, body) {
@@ -161,6 +257,18 @@ export function createApiCompetitionDataProvider({
 
     submitWorkflow(id) {
       return jsonPost(`/api/competition/workflows/${encodeURIComponent(id)}/submit`, {});
+    },
+
+    startWorkflow(id) {
+      return jsonPost(`/api/competition/workflows/${encodeURIComponent(id)}/start`, {});
+    },
+
+    async getAttemptLog(workflowId, attemptId, stream) {
+      validateAttemptLogRoute(workflowId, attemptId, stream);
+      return request(
+        `/api/competition/workflows/${encodeURIComponent(workflowId)}`
+        + `/attempts/${encodeURIComponent(attemptId)}/logs/${stream}`,
+      );
     },
 
     cancelWorkflow(id) {

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { Save, Send, X } from 'lucide-react';
+import { Play, Save, Send, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 import { canWriteCompetitionData } from '../../config/competitionAccess';
 import {
@@ -71,6 +72,39 @@ function isBusinessWriteAllowed(mode, user) {
   return mode === 'live' && canWriteCompetitionData(user);
 }
 
+async function executeStartWorkflow({
+  mode,
+  user,
+  workflowId,
+  pending,
+  write,
+}) {
+  const validWorkflowId = typeof workflowId === 'string'
+    && workflowId.trim() !== ''
+    && workflowId === workflowId.trim();
+  if (
+    mode !== 'live'
+    || !canWriteCompetitionData(user)
+    || !validWorkflowId
+    || pending !== false
+    || typeof write !== 'function'
+  ) return false;
+  await write();
+  return true;
+}
+
+function isValidStartOutcome(outcome, workflowId) {
+  const prototype = outcome && typeof outcome === 'object'
+    ? Object.getPrototypeOf(outcome)
+    : undefined;
+  return (prototype === Object.prototype || prototype === null)
+    && outcome.workflow_id === workflowId
+    && typeof outcome.attempt_id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(outcome.attempt_id)
+    && outcome.step_key === 'relax'
+    && ['preparing', 'submitting', 'queued', 'running'].includes(outcome.status);
+}
+
 async function runLockedWrite(lock, allowed, write) {
   if (!allowed || lock.current) return null;
   lock.current = true;
@@ -114,10 +148,14 @@ function describeCommandStatus({
   uploadPending = false,
   savePending = false,
   confirmPending = false,
+  startPending = false,
+  startUncertain = false,
 }) {
   if (uploadPending) return '正在上传并等待服务端解析结构';
   if (savePending) return '正在保存草稿';
   if (confirmPending) return '正在执行提交前校验';
+  if (startPending) return '正在启动计算';
+  if (startUncertain) return '启动结果未知，请在工作流详情核对';
   if (serverState.confirmation) {
     return `已校验，等待 Slurm 适配器 · ${serverState.confirmation.id}`;
   }
@@ -134,17 +172,21 @@ function isInputMutationLocked({
   uploadPending = false,
   savePending = false,
   confirmPending = false,
+  startPending = false,
   uploadLocked = false,
   saveLocked = false,
   confirmLocked = false,
+  startLocked = false,
 } = {}) {
   return Boolean(
     uploadPending
     || savePending
     || confirmPending
+    || startPending
     || uploadLocked
     || saveLocked
     || confirmLocked
+    || startLocked
   );
 }
 
@@ -161,6 +203,7 @@ function failClosedAfterUncertainWrite(sourceKind, serverState, errorMessage) {
 
 export default function CompetitionNewCalculation() {
   const { provider, mode } = useCompetitionData();
+  const navigate = useNavigate();
   const [sourceKind, setSourceKind] = useState('builtin');
   const [selectedStep, setSelectedStep] = useState('relax');
   const [parameters, setParameters] = useState(() => structuredClone(DEFAULT_PARAMETERS));
@@ -170,9 +213,12 @@ export default function CompetitionNewCalculation() {
   const [uploadPending, setUploadPending] = useState(false);
   const [savePending, setSavePending] = useState(false);
   const [confirmPending, setConfirmPending] = useState(false);
+  const [startPending, setStartPending] = useState(false);
+  const [startUncertain, setStartUncertain] = useState(false);
   const uploadLock = useRef(false);
   const saveLock = useRef(false);
   const confirmLock = useRef(false);
+  const startLock = useRef(false);
   const inputVersion = useRef(0);
   const user = readStoredUser();
   const readOnly = mode === 'demo' || !canWriteCompetitionData(user);
@@ -183,13 +229,19 @@ export default function CompetitionNewCalculation() {
   const canConfirm = canWrite
     && Boolean(serverState.workflow?.id)
     && !serverState.confirmation;
+  const canStart = canWrite
+    && serverState.confirmation?.status === 'validated'
+    && !startPending
+    && !startUncertain;
   const inputMutationLocked = isInputMutationLocked({
     uploadPending,
     savePending,
     confirmPending,
+    startPending,
     uploadLocked: uploadLock.current,
     saveLocked: saveLock.current,
     confirmLocked: confirmLock.current,
+    startLocked: startLock.current,
   });
 
   function inputMutationLockedNow() {
@@ -197,14 +249,17 @@ export default function CompetitionNewCalculation() {
       uploadPending,
       savePending,
       confirmPending,
+      startPending,
       uploadLocked: uploadLock.current,
       saveLocked: saveLock.current,
       confirmLocked: confirmLock.current,
+      startLocked: startLock.current,
     });
   }
 
   function clearPersistedState({ clearUpload }) {
     inputVersion.current += 1;
+    setStartUncertain(false);
     setServerState((current) => invalidateServerState(current, { clearUpload }));
   }
 
@@ -223,6 +278,7 @@ export default function CompetitionNewCalculation() {
     const requestVersion = inputVersion.current + 1;
     inputVersion.current = requestVersion;
     setOriginalFileName(file?.name || '');
+    setStartUncertain(false);
     setServerState((current) => invalidateServerState(current, { clearUpload: true }));
     if (!file) return;
 
@@ -345,6 +401,41 @@ export default function CompetitionNewCalculation() {
       }
     } finally {
       setConfirmPending(false);
+    }
+  }
+
+  async function handleStartWorkflow() {
+    if (!canStart || startLock.current) return;
+    const workflowId = serverState.confirmation.id;
+    let outcome = null;
+    setServerState((current) => ({ ...current, error: '' }));
+    setStartPending(true);
+    try {
+      const executed = await runLockedWrite(
+        startLock,
+        canStart,
+        () => executeStartWorkflow({
+          mode,
+          user,
+          workflowId,
+          pending: false,
+          write: async () => {
+            outcome = await provider.startWorkflow(serverState.confirmation.id);
+          },
+        }),
+      );
+      if (!executed || !isValidStartOutcome(outcome, workflowId)) {
+        throw new Error('workflow start response is invalid');
+      }
+      navigate(`/dashboard/workflows/${encodeURIComponent(workflowId)}`);
+    } catch {
+      setStartUncertain(true);
+      setServerState((current) => ({
+        ...current,
+        error: '启动结果未知，请在工作流详情核对',
+      }));
+    } finally {
+      setStartPending(false);
     }
   }
 
@@ -567,6 +658,8 @@ export default function CompetitionNewCalculation() {
               uploadPending,
               savePending,
               confirmPending,
+              startPending,
+              startUncertain,
             })}
           </span>
           {serverState.error ? <p role="alert">{serverState.error}</p> : null}
@@ -590,6 +683,17 @@ export default function CompetitionNewCalculation() {
             <Send size={16} aria-hidden="true" />
             {confirmPending ? '校验中' : '确认并校验'}
           </button>
+          {serverState.confirmation?.status === 'validated' ? (
+            <button
+              className="competition-command-button is-primary"
+              type="button"
+              disabled={!canStart || startPending}
+              onClick={handleStartWorkflow}
+            >
+              <Play size={16} aria-hidden="true" />
+              {startPending ? '启动中' : '开始计算'}
+            </button>
+          ) : null}
         </div>
       </footer>
     </main>

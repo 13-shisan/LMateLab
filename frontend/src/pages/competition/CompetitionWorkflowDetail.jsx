@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 import { canWriteCompetitionData } from '../../config/competitionAccess';
 import {
   useCompetitionData,
+  useCompetitionPollingResource,
   useCompetitionResource,
 } from '../../features/competition/CompetitionDataContext';
 import {
@@ -106,11 +107,87 @@ function findRetryableFailedStep(steps) {
     if (
       step
       && typeof step === 'object'
-      && step.status === 'failed'
+      && ['failed', 'scientific_failed'].includes(step.status)
       && ['relax', 'scf', 'band', 'dos'].includes(step.key)
     ) return step;
   }
   return null;
+}
+
+function shouldPollWorkflow(mode, status) {
+  return mode === 'live'
+    && [
+      'preparing',
+      'submitting',
+      'queued',
+      'running',
+      'awaiting_acceptance',
+      'cancelling',
+    ].includes(status);
+}
+
+function createAttemptLogRequestKey(workflowId, attemptId, stream) {
+  if (
+    typeof workflowId !== 'string'
+    || workflowId.trim() === ''
+    || workflowId !== workflowId.trim()
+    || !isSafeAttemptIdentifier(attemptId)
+    || !['stdout', 'stderr'].includes(stream)
+  ) return null;
+  return JSON.stringify([workflowId, attemptId, stream]);
+}
+
+function isSafeAttemptIdentifier(value) {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
+
+function selectLatestAttemptStep(steps, selectedStepKey) {
+  if (!Array.isArray(steps)) return null;
+  const candidates = steps.filter((step) => (
+    step
+    && typeof step === 'object'
+    && ['relax', 'scf', 'band', 'dos'].includes(step.key)
+    && isSafeAttemptIdentifier(step.attempt_id)
+  ));
+  const selected = candidates.find((step) => step.key === selectedStepKey);
+  return selected || candidates[candidates.length - 1] || null;
+}
+
+function normalizeAttemptLogState(resource, expectedStream, attemptId, expectedRequestKey) {
+  if (!isSafeAttemptIdentifier(attemptId)) {
+    return { status: 'empty', message: '当前步骤暂无日志', content: '' };
+  }
+  if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+    return { status: 'error', message: '日志暂时不可用', content: '' };
+  }
+  if (
+    typeof expectedRequestKey !== 'string'
+    || resource.requestKey !== expectedRequestKey
+  ) {
+    return { status: 'loading', message: '日志加载中', content: '' };
+  }
+  if (resource.status === 'loading') {
+    return { status: 'loading', message: '日志加载中', content: '' };
+  }
+  if (resource.status !== 'ready') {
+    return resource.status === 'empty'
+      ? { status: 'empty', message: '当前日志为空', content: '' }
+      : { status: 'error', message: '日志暂时不可用', content: '' };
+  }
+  const data = resource.data;
+  const prototype = data && typeof data === 'object' ? Object.getPrototypeOf(data) : undefined;
+  if (
+    (prototype !== Object.prototype && prototype !== null)
+    || data.stream !== expectedStream
+    || typeof data.content !== 'string'
+  ) {
+    return { status: 'error', message: '日志暂时不可用', content: '' };
+  }
+  if (data.content === '') {
+    return { status: 'empty', message: '当前日志为空', content: '' };
+  }
+  return { status: 'ready', message: '', content: data.content };
 }
 
 export default function CompetitionWorkflowDetail() {
@@ -118,14 +195,44 @@ export default function CompetitionWorkflowDetail() {
   const { provider, mode } = useCompetitionData();
   const [commandError, setCommandError] = useState('');
   const [commandPending, setCommandPending] = useState(false);
+  const [selectedStepKey, setSelectedStepKey] = useState('');
+  const [logStream, setLogStream] = useState('stdout');
   const user = readStoredUser();
   const readOnly = mode === 'demo' || !canWriteCompetitionData(user);
   const loadWorkflow = useCallback(
     () => (workflowId ? provider.getWorkflow(workflowId) : Promise.resolve(null)),
     [provider, workflowId],
   );
-  const state = useCompetitionResource(loadWorkflow);
+  const state = useCompetitionPollingResource(loadWorkflow, {
+    enabled: (current) => shouldPollWorkflow(mode, current?.status),
+    requestKey: workflowId ? `workflow:${workflowId}` : null,
+  });
   const detailState = normalizeWorkflowDetailState(state, workflowId);
+  const workflow = detailState.status === 'ready' ? detailState.workflow : null;
+  const workflowSteps = Array.isArray(workflow?.steps) ? workflow.steps : [];
+  const loggableSteps = workflowSteps.filter((step) => isSafeAttemptIdentifier(step?.attempt_id));
+  const selectedAttemptStep = selectLatestAttemptStep(workflowSteps, selectedStepKey);
+  const selectedAttemptId = selectedAttemptStep?.attempt_id || null;
+  const logRequestKey = createAttemptLogRequestKey(
+    workflow?.id,
+    selectedAttemptId,
+    logStream,
+  );
+  const loadAttemptLog = useCallback(
+    () => (
+      workflow && selectedAttemptId
+        ? provider.getAttemptLog(workflow.id, selectedAttemptId, logStream)
+        : Promise.resolve(null)
+    ),
+    [provider, workflow, selectedAttemptId, logStream],
+  );
+  const logResource = useCompetitionResource(loadAttemptLog, { requestKey: logRequestKey });
+  const logState = normalizeAttemptLogState(
+    logResource,
+    logStream,
+    selectedAttemptId,
+    logRequestKey,
+  );
 
   if (detailState.status !== 'ready') {
     return (
@@ -139,9 +246,7 @@ export default function CompetitionWorkflowDetail() {
     );
   }
 
-  const workflow = detailState.workflow;
   const dataKindLabel = workflowDataKindLabel(workflow.data_kind);
-  const workflowSteps = Array.isArray(workflow.steps) ? workflow.steps : [];
   const failedStep = findRetryableFailedStep(workflowSteps);
 
   async function handleCancel() {
@@ -201,6 +306,12 @@ export default function CompetitionWorkflowDetail() {
         {readOnly ? <PreviewReadOnlyNotice /> : null}
       </header>
 
+      {state.refreshError === 'refresh-failed' ? (
+        <p className="competition-result-failure-warning" role="status">
+          状态刷新暂时失败，已保留上一次有效数据并将自动重试
+        </p>
+      ) : null}
+
       <section className="competition-workflow-evidence" aria-labelledby="competition-workflow-identity-title">
         <div className="competition-workflow-section-heading">
           <h2 id="competition-workflow-identity-title">不可变标识</h2>
@@ -222,6 +333,57 @@ export default function CompetitionWorkflowDetail() {
           <span>固定 relax → SCF → BAND / DOS</span>
         </div>
         <WorkflowTimeline steps={workflowSteps} />
+      </section>
+
+      <section className="competition-workflow-evidence" aria-labelledby="competition-workflow-log-title">
+        <div className="competition-workflow-section-heading">
+          <h2 id="competition-workflow-log-title">有界日志</h2>
+          <span>当前 latest attempt · 单次响应不累积</span>
+        </div>
+        {loggableSteps.length > 0 ? (
+          <>
+            <div className="competition-workflow-filters">
+              <label className="competition-workflow-status">
+                <span>步骤</span>
+                <select
+                  value={selectedAttemptStep?.key || ''}
+                  onChange={(event) => setSelectedStepKey(event.target.value)}
+                >
+                  {loggableSteps.map((step) => (
+                    <option key={step.key} value={step.key}>
+                      {step.key.toUpperCase()} · attempt {step.attempt}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="competition-source-segment" role="group" aria-label="日志流">
+                {['stdout', 'stderr'].map((stream) => (
+                  <button
+                    className={logStream === stream ? 'is-active' : ''}
+                    key={stream}
+                    type="button"
+                    aria-pressed={logStream === stream}
+                    onClick={() => setLogStream(stream)}
+                  >
+                    {stream}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {logState.status === 'ready' ? (
+              <pre className="competition-result-log">{logState.content}</pre>
+            ) : (
+              <p
+                className="competition-workflow-log-state"
+                role={logState.status === 'error' ? 'alert' : 'status'}
+              >
+                {logState.message}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="competition-workflow-log-state" role="status">当前步骤暂无日志</p>
+        )}
       </section>
 
       <footer className="competition-workflow-command-bar">

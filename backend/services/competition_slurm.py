@@ -6,17 +6,30 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
 
+try:
+    import fcntl as _fcntl
+except ImportError:
+    _fcntl = None
+
 
 FIXED_STEPS = frozenset({"relax", "scf", "band", "dos"})
 PROBE_MODES = frozenset({"success", "fail", "cancel"})
+RUNNER_MODES = {
+    "probe": PROBE_MODES,
+    "vasp": FIXED_STEPS,
+}
 _JOB_ID_RE = re.compile(r"^([1-9][0-9]*)(?:;[A-Za-z0-9_.-]+)?$")
 _LOG_NAMES = {"stdout": "stdout.log", "stderr": "stderr.log"}
+_MAX_SUBMISSION_SCRIPT_BYTES = 1024 * 1024
+_SCRIPT_READ_CHUNK_BYTES = 64 * 1024
+_IS_LINUX = sys.platform.startswith("linux")
 
 
 class SlurmError(RuntimeError):
@@ -33,6 +46,181 @@ class SlurmCommandTimeout(SlurmError):
 
 class SlurmOutputTooLarge(SlurmError):
     pass
+
+
+def _script_stat_signature(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _hash_script_descriptor(descriptor: int) -> str:
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > _MAX_SUBMISSION_SCRIPT_BYTES
+        ):
+            raise ValueError("submission script is invalid")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        total = 0
+        while chunk := os.read(descriptor, _SCRIPT_READ_CHUNK_BYTES):
+            total += len(chunk)
+            if total > _MAX_SUBMISSION_SCRIPT_BYTES:
+                raise ValueError("submission script is invalid")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            total != before.st_size
+            or _script_stat_signature(before) != _script_stat_signature(after)
+        ):
+            raise ValueError("submission script changed while hashing")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script is unavailable") from exc
+    return digest.hexdigest()
+
+
+def _open_hashed_script(path: Path) -> tuple[int, str]:
+    candidate = Path(path)
+    if candidate.is_symlink():
+        raise ValueError("submission script is unavailable")
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(candidate, flags)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script is unavailable") from exc
+    try:
+        return descriptor, _hash_script_descriptor(descriptor)
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    remaining = memoryview(payload)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written < 1:
+            raise OSError("submission script snapshot write failed")
+        remaining = remaining[written:]
+
+
+def _copy_script_descriptor(source: int, destination: int) -> str:
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(source)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > _MAX_SUBMISSION_SCRIPT_BYTES
+        ):
+            raise ValueError("submission script is invalid")
+        os.lseek(source, 0, os.SEEK_SET)
+        os.lseek(destination, 0, os.SEEK_SET)
+        os.ftruncate(destination, 0)
+        total = 0
+        while chunk := os.read(source, _SCRIPT_READ_CHUNK_BYTES):
+            total += len(chunk)
+            if total > _MAX_SUBMISSION_SCRIPT_BYTES:
+                raise ValueError("submission script is invalid")
+            _write_all(destination, chunk)
+            digest.update(chunk)
+        after = os.fstat(source)
+        if total != before.st_size or _script_stat_signature(before) != _script_stat_signature(after):
+            raise ValueError("submission script changed while copying")
+
+        snapshot = os.fstat(destination)
+        if not stat.S_ISREG(snapshot.st_mode) or snapshot.st_size != total:
+            raise ValueError("submission script snapshot is invalid")
+        os.lseek(destination, 0, os.SEEK_SET)
+        if _hash_script_descriptor(destination) != digest.hexdigest():
+            raise ValueError("submission script snapshot identity changed")
+        os.lseek(destination, 0, os.SEEK_SET)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script snapshot is unavailable") from exc
+    return digest.hexdigest()
+
+
+def _create_private_snapshot_descriptor() -> int:
+    if _IS_LINUX:
+        memfd_create = getattr(os, "memfd_create", None)
+        allow_sealing = getattr(os, "MFD_ALLOW_SEALING", None)
+        close_on_exec = getattr(os, "MFD_CLOEXEC", None)
+        if memfd_create is None or allow_sealing is None or close_on_exec is None:
+            raise ValueError("submission script snapshot is unavailable")
+        try:
+            return memfd_create(
+                "lmatelab-slurm-script",
+                allow_sealing | close_on_exec,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError("submission script snapshot is unavailable") from exc
+
+    raise ValueError("submission script snapshot is unavailable")
+
+
+def _seal_linux_snapshot(descriptor: int) -> None:
+    if _fcntl is None:
+        raise ValueError("submission script snapshot is unavailable")
+    required_names = (
+        "F_ADD_SEALS",
+        "F_GET_SEALS",
+        "F_SEAL_WRITE",
+        "F_SEAL_GROW",
+        "F_SEAL_SHRINK",
+        "F_SEAL_SEAL",
+    )
+    if any(not hasattr(_fcntl, name) for name in required_names):
+        raise ValueError("submission script snapshot is unavailable")
+    required_seals = (
+        _fcntl.F_SEAL_WRITE
+        | _fcntl.F_SEAL_GROW
+        | _fcntl.F_SEAL_SHRINK
+        | _fcntl.F_SEAL_SEAL
+    )
+    try:
+        _fcntl.fcntl(descriptor, _fcntl.F_ADD_SEALS, required_seals)
+        applied_seals = _fcntl.fcntl(descriptor, _fcntl.F_GET_SEALS)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("submission script snapshot is unavailable") from exc
+    if applied_seals & required_seals != required_seals:
+        raise ValueError("submission script snapshot is unavailable")
+
+
+def _snapshot_script_descriptor(
+    source: int,
+) -> tuple[int, str]:
+    snapshot = _create_private_snapshot_descriptor()
+    try:
+        digest = _copy_script_descriptor(source, snapshot)
+        if _IS_LINUX:
+            _seal_linux_snapshot(snapshot)
+            if _hash_script_descriptor(snapshot) != digest:
+                raise ValueError("submission script snapshot identity changed")
+        os.lseek(snapshot, 0, os.SEEK_SET)
+        return snapshot, digest
+    except BaseException:
+        os.close(snapshot)
+        raise
+
+
+def calculate_script_sha256(path: Path) -> str:
+    descriptor, digest = _open_hashed_script(path)
+    try:
+        return digest
+    finally:
+        os.close(descriptor)
 
 
 @dataclass(frozen=True)
@@ -66,23 +254,24 @@ class SlurmSubmission:
     attempt_number: int
     attempt_directory: Path
     script_path: Path
-    probe_mode: str
+    runner_kind: str
+    runner_mode: str
+    script_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
-        for name in ("workflow_id", "attempt_id"):
-            value = getattr(self, name)
-            try:
-                parsed = uuid.UUID(value)
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ValueError(f"{name} must be a canonical UUID") from exc
-            if str(parsed) != value:
-                raise ValueError(f"{name} must be a canonical UUID")
+        _validate_canonical_uuid("workflow_id", self.workflow_id)
+        _validate_canonical_uuid("attempt_id", self.attempt_id)
         if self.step_key not in FIXED_STEPS:
             raise ValueError("step_key is not part of the fixed workflow")
         if isinstance(self.attempt_number, bool) or self.attempt_number < 1:
             raise ValueError("attempt_number must be a positive integer")
-        if self.probe_mode not in PROBE_MODES:
-            raise ValueError("probe_mode is not allowed")
+        if self.runner_mode not in RUNNER_MODES.get(self.runner_kind, frozenset()):
+            raise ValueError("runner mode is not allowed")
+        object.__setattr__(
+            self,
+            "script_sha256",
+            calculate_script_sha256(self.script_path),
+        )
 
     @property
     def job_name(self) -> str:
@@ -90,7 +279,11 @@ class SlurmSubmission:
 
     @property
     def comment(self) -> str:
-        return f"lmatelab:workflow={self.workflow_id};attempt={self.attempt_id}"
+        return (
+            f"lmatelab:workflow={self.workflow_id};attempt={self.attempt_id};"
+            f"runner={self.runner_kind};mode={self.runner_mode};"
+            f"script_sha256={self.script_sha256}"
+        )
 
 
 @dataclass(frozen=True)
@@ -172,16 +365,26 @@ class SlurmClient:
             return len(value)
         return len(value.encode("utf-8", errors="replace"))
 
-    def _run(self, argv: list[str]) -> SlurmCommandResult:
+    def _run(
+        self,
+        argv: list[str],
+        *,
+        pass_fds: tuple[int, ...] = (),
+    ) -> SlurmCommandResult:
         command_name = PurePosixPath(argv[0]).name
+        run_kwargs = {
+            "shell": False,
+            "check": False,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "timeout": self.timeout_seconds,
+        }
+        if pass_fds:
+            run_kwargs["pass_fds"] = pass_fds
         try:
             completed = self._executor(
                 argv,
-                shell=False,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.timeout_seconds,
+                **run_kwargs,
             )
         except subprocess.TimeoutExpired as exc:
             raise SlurmCommandTimeout(f"{command_name} timed out") from exc
@@ -199,10 +402,37 @@ class SlurmClient:
             raise SlurmCommandError(f"{command_name} failed")
         return result
 
-    def _submission_argv(self, submission: SlurmSubmission, *, test_only: bool) -> list[str]:
-        script_path = submission.script_path.resolve()
-        if script_path not in self._allowed_scripts:
+    def _open_submission_script(self, submission: SlurmSubmission) -> int:
+        candidate = Path(submission.script_path)
+        try:
+            resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError("submission script is unavailable") from exc
+        if resolved not in self._allowed_scripts:
             raise ValueError("submission script is not allowlisted")
+        source, source_digest = _open_hashed_script(candidate)
+        snapshot = None
+        try:
+            if source_digest != submission.script_sha256:
+                raise ValueError("submission script identity changed")
+            snapshot, snapshot_digest = _snapshot_script_descriptor(source)
+            if snapshot_digest != submission.script_sha256:
+                raise ValueError("submission script identity changed")
+            return snapshot
+        except BaseException:
+            if snapshot is not None:
+                os.close(snapshot)
+            raise
+        finally:
+            os.close(source)
+
+    def _submission_argv(
+        self,
+        submission: SlurmSubmission,
+        *,
+        test_only: bool,
+        script_argument: str,
+    ) -> list[str]:
         attempt_directory = self._attempt_directory(
             submission.workflow_id,
             submission.attempt_id,
@@ -223,19 +453,38 @@ class SlurmClient:
                 f"--chdir={attempt_directory}",
                 f"--output={attempt_directory / 'stdout.log'}",
                 f"--error={attempt_directory / 'stderr.log'}",
-                str(script_path),
-                submission.probe_mode,
+                script_argument,
+                submission.runner_mode,
                 submission.workflow_id,
                 submission.attempt_id,
             ]
         )
         return argv
 
+    def _run_submission(
+        self,
+        submission: SlurmSubmission,
+        *,
+        test_only: bool,
+    ) -> SlurmCommandResult:
+        descriptor = self._open_submission_script(submission)
+        try:
+            return self._run(
+                self._submission_argv(
+                    submission,
+                    test_only=test_only,
+                    script_argument=f"/proc/self/fd/{descriptor}",
+                ),
+                pass_fds=(descriptor,),
+            )
+        finally:
+            os.close(descriptor)
+
     def test_submission(self, submission: SlurmSubmission) -> SlurmCommandResult:
-        return self._run(self._submission_argv(submission, test_only=True))
+        return self._run_submission(submission, test_only=True)
 
     def submit(self, submission: SlurmSubmission) -> str:
-        result = self._run(self._submission_argv(submission, test_only=False))
+        result = self._run_submission(submission, test_only=False)
         match = _JOB_ID_RE.fullmatch(result.stdout)
         if match is None:
             raise ValueError("sbatch returned an invalid job id")

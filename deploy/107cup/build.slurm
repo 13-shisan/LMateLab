@@ -116,6 +116,11 @@ python -m unittest \
   tests.test_competition_workflow_service \
   tests.test_competition_workflow_routes \
   tests.test_competition_slurm \
+  tests.test_competition_slurm_linux \
+  tests.test_competition_attempt_inputs \
+  tests.test_competition_vasp \
+  tests.test_competition_coordinator \
+  tests.test_competition_lifespan \
   -v
 
 cd "$project/frontend"

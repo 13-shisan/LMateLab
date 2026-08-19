@@ -35,3 +35,10 @@ class WorkflowMutationResult(BaseModel):
     template_version: str
     source_kind: str
     structure_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class LogTailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stream: Literal["stdout", "stderr"]
+    content: str
