@@ -233,7 +233,11 @@ class CoordinatorTestCase(unittest.TestCase):
 
         Base.metadata.create_all(self.engine)
         self.addCleanup(self.engine.dispose)
-        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self.SessionLocal = sessionmaker(
+            bind=self.engine,
+            expire_on_commit=False,
+            autoflush=False,
+        )
         with self.SessionLocal() as session:
             owner = User(
                 email="coordinator-owner@example.com",

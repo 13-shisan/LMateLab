@@ -603,7 +603,11 @@ def _next_event_sequence(session: Session, workflow_id: str) -> int:
             WorkflowEvent.workflow_id == workflow_id
         )
     )
-    return int(current or 0) + 1
+    maximum = int(current or 0)
+    for pending in session.new:
+        if isinstance(pending, WorkflowEvent) and pending.workflow_id == workflow_id:
+            maximum = max(maximum, int(pending.sequence))
+    return maximum + 1
 
 
 def append_workflow_event(

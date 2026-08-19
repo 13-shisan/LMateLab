@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=lmatelab-web
 #SBATCH --account=competition
-#SBATCH --partition=P107-RTX5090
-#SBATCH --qos=qos_p107-rtx5090
+#SBATCH --partition=P107-A100
+#SBATCH --qos=qos_p107-a100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
