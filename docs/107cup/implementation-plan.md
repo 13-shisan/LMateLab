@@ -143,7 +143,7 @@
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PARTIAL | PR #31 已合并为 `eae6ac1`并同步至 107；预检 Job `39383` 完成 VASPKIT/POTCAR 校验后以 `FAILED/127:0` 停在 VASP 环境加载，未执行 `vasp_std` | 合并 module 初始化修复并在 107 重跑预检；完整 manifest 通过前不进入正式四步工作流 |
+| 7. VASP 四步闭环 | PARTIAL | PR #32 合并提交 `b25eb7a` 已同步至 107；预检 Job `40039` 以 `COMPLETED/0:0` 通过 VASPKIT、POTCAR、`vasp_std`、动态库、权限和 manifest 门禁，且未执行 VASP | 继续 Task 13 正式构建、隔离候选服务和稳定服务安全切换；完成前不进入 Task 14 真实四步工作流 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -785,3 +785,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 第二次预检 Job `39383` 在 `anode02` 以 `FAILED/127:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/preflight-39383`。VASPKIT 成功生成并校验固定 POTCAR；现场仅有 `POSCAR`、`POTCAR.spec`、`POTCAR`、`potcar-source-sha256.txt` 和 `vaspkit-version.txt`，没有 `vasp-std-path.txt`、`vasp-std-ldd.txt` 或 manifest。
 - Job `39383` 停在 `source env-nvhpc.sh` 之前后边界；该环境脚本执行 `module load mkl/2026.0`，而 Stage 7 批处理脚本未像已验证的构建脚本那样先加载 `/etc/profile.d/modules.sh`。修复范围仅为在预检和正式 runner 中按相同顺序初始化 modules；合并并在 107 重跑预检成功前，阶段 7 继续保持 `PARTIAL`。
 - module 初始化修复在 `codex/107cup-stage7-module-init` 按 TDD 完成本地门禁：新合同首先对两个 Stage 7 脚本各失败一次，增加固定 `source /etc/profile.d/modules.sh` 并保证其早于 `env-nvhpc.sh` 后转为通过；Linux 夹具中的伪环境脚本也会真实调用 `module load mkl/2026.0`。Windows 后端完整回归 `435` 项通过、`23` 项按平台条件跳过，WSL 两组 Bash 行为测试 `12/12`通过，前端 `125/125`、定向 ESLint、demo/live 两种构建（各 `1857` 个模块）、三个 Stage 7 Bash 语法和 Python 编译检查全部通过。该分支尚未合并，本轮未在 107 提交新作业；本地通过不替代合并后的真实预检。
+- module 初始化 PR #32 已合并为 `b25eb7ae55c4aaea32e0e93779a830df643aa40a`，Windows 本地 `origin/main` 与 107 只读 checkout 均已固定到该提交，107 工作树干净。
+- 部署前快照 Job `40038` 在 `anode16` 运行 2 秒后以 `COMPLETED/0:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/b25eb7ae55c4aaea32e0e93779a830df643aa40a/before-40038`，manifest SHA-256 为 `59171ae15c3c3d0f56fb543c1bd43f861a97ddb81ba818524ea36270422995a8`。稳定服务仍为 Job `39370`、`anode02:18731`、发布 `93465522424ce0db24dabdfca04efe22fc523fa7`；两套 SQLite 完整性均为 `ok`，4090 入口 `/`、`/dashboard`、live 和 ready 均返回 `200`。
+- Stage 7 预检 Job `40039` 在 `anode01` 运行 3 秒后以 `COMPLETED/0:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/preflight-40039`。证据目录为 `0700`、全部文件为 `0600`，manifest SHA-256 为 `06fe38bf27b163684f628db1c3ee4e89134b199ae08240ed2ad327d5b6fc1879`，两层自校验均通过。
+- Job `40039` 验证 VASPKIT `1.5.1`、Mo_sv/S 两个固定源哈希、合并 POTCAR 哈希 `509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045`、`Mo_sv -> S` TITEL 顺序和 `/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/bin/vasp_std`；`ldd` 无 `not found`，stderr 为空。现场不存在 `runtime-time.txt`、`vasp-exit-code.txt`、`OUTCAR` 或 `vasprun.xml`，因此该作业只是环境预检，不是 VASP 计算成功证据。Stage 7 保持 `PARTIAL`，下一门禁是 Task 13 正式构建与隔离候选服务。
