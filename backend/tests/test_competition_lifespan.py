@@ -569,6 +569,7 @@ class CompetitionServiceContractTests(unittest.TestCase):
         )
         release_assignment = 'release=$(readlink -f "$root/current")'
         release_export = 'export LMATELAB_RELEASE_ROOT="$release"'
+        workflow_root_export = 'export LMATELAB_WORKFLOW_ROOT="$root/data/workflows"'
         probe_export = (
             'export LMATELAB_SLURM_PROBE_SCRIPT='
             '"$release/source/deploy/107cup/slurm/probe.slurm"'
@@ -584,11 +585,13 @@ class CompetitionServiceContractTests(unittest.TestCase):
         for required in (
             release_assignment,
             release_export,
+            workflow_root_export,
             probe_export,
             vasp_export,
             enabled_export,
         ):
             self.assertIn(required, source)
+        self.assertLess(source.index(workflow_root_export), source.index(enabled_export))
         self.assertLess(source.index(release_assignment), source.index(vasp_export))
         self.assertNotIn(
             'LMATELAB_VASP_STAGE_SCRIPT="$root/current/',
