@@ -38,6 +38,7 @@ export LMATELAB_VASP_STAGE_SCRIPT="$release/source/deploy/107cup/slurm/vasp-stag
 export LMATELAB_FRONTEND_DIST="$release/frontend-dist"
 export LMATELAB_GIT_COMMIT="$commit"
 export LMATELAB_COORDINATOR_ENABLED=0
+export PYTHONPATH="$release/source/backend"
 
 cd "$release/source/backend"
 exec "$python_env/bin/python" \

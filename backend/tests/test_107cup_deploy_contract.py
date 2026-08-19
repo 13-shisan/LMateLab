@@ -1178,8 +1178,13 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "envs/python",
             "stage7-acceptance.py",
             "--profile scf_nonconvergence_v1",
+            'export PYTHONPATH="$release/source/backend"',
         ):
             self.assertIn(required, slurm_source)
+        self.assertLess(
+            slurm_source.index('export PYTHONPATH="$release/source/backend"'),
+            slurm_source.index('exec "$python_env/bin/python"'),
+        )
         for forbidden in ("vasp_std", "vasp_gam", "vasp_ncl", "mpirun", "vaspkit"):
             self.assertNotIn(forbidden, slurm_source.lower())
 
