@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 from pydantic import BaseModel, ConfigDict
@@ -27,6 +27,7 @@ from schemas_workflow import DraftCreateRequest, LogTailResponse
 from services.competition_coordinator import CompetitionCoordinator
 from services.competition_inputs import InputValidationError, MAX_STRUCTURE_BYTES
 from services.competition_reconcile import CompetitionReconciler, ReconcileError
+from services.competition_results import CompetitionResultService, ResultServiceError
 from services.competition_slurm import SlurmClient, SlurmError
 from services.competition_vasp import AcceptanceReport, VaspPolicyError
 from services.competition_workflows import (
@@ -102,6 +103,10 @@ def get_competition_slurm_client(
             headers={"X-Error-Code": "scheduler_unavailable"},
         )
     return client
+
+
+def get_competition_result_service() -> CompetitionResultService:
+    return CompetitionResultService(workflow_root=workflow_root())
 
 
 def _metadata(value: str | dict[str, Any] | None) -> dict[str, Any]:
@@ -815,9 +820,131 @@ def cancel_attempt(
 def list_results(
     query: str = Query("", max_length=100),
     status_filter: str = Query("", alias="status", max_length=50),
-    _current_user: User = Depends(require_viewer_or_operator),
+    current_user: User = Depends(require_viewer_or_operator),
+    db: Session = Depends(get_db),
+    service: CompetitionResultService = Depends(get_competition_result_service),
 ):
-    return {"items": [], "total": 0, "data_kind": "live"}
+    requested_status = (status_filter or "all").strip().lower()
+    if requested_status not in {"all", "succeeded", "failed", "parse-error"}:
+        raise HTTPException(status_code=400, detail="result status is invalid")
+    statement = (
+        _visible_runs_statement(current_user)
+        .where(WorkflowRun.status.in_(("succeeded", "failed")))
+        .options(
+            selectinload(WorkflowRun.owner),
+            selectinload(WorkflowRun.steps).selectinload(WorkflowStep.attempts),
+            selectinload(WorkflowRun.files),
+            selectinload(WorkflowRun.events),
+        )
+        .order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id)
+    )
+    items = [service.summary(run) for run in db.scalars(statement).unique().all()]
+    needle = query.strip().casefold()
+    if needle:
+        items = [
+            item
+            for item in items
+            if needle
+            in " ".join(
+                str(item.get(key) or "")
+                for key in ("material", "source", "workflow_id")
+            ).casefold()
+        ]
+    if requested_status != "all":
+        items = [item for item in items if item.get("status") == requested_status]
+    return {"items": items, "total": len(items), "data_kind": "live"}
+
+
+def _result_run(
+    db: Session,
+    current_user: User,
+    workflow_id: str,
+) -> WorkflowRun:
+    run = db.scalar(
+        _visible_runs_statement(current_user)
+        .where(
+            WorkflowRun.id == workflow_id,
+            WorkflowRun.status.in_(("succeeded", "failed")),
+        )
+        .options(
+            selectinload(WorkflowRun.owner),
+            selectinload(WorkflowRun.steps).selectinload(WorkflowStep.attempts),
+            selectinload(WorkflowRun.files),
+            selectinload(WorkflowRun.events),
+        )
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="result was not found")
+    return run
+
+
+def _raise_result_error(exc: ResultServiceError) -> None:
+    if exc.code in {"artifact_kind_invalid", "plot_kind_invalid"}:
+        http_status = status.HTTP_400_BAD_REQUEST
+        detail = "result artifact request is invalid"
+    elif exc.code == "result_not_terminal":
+        http_status = status.HTTP_409_CONFLICT
+        detail = "workflow result is not terminal"
+    elif exc.code in {"artifact_unavailable", "artifact_missing"}:
+        http_status = status.HTTP_409_CONFLICT
+        detail = "result artifact is unavailable"
+    else:
+        http_status = status.HTTP_409_CONFLICT
+        detail = "result evidence could not be verified"
+    raise HTTPException(
+        status_code=http_status,
+        detail=detail,
+        headers={"X-Error-Code": exc.code},
+    ) from None
+
+
+@router.get("/results/{workflow_id}")
+def get_result(
+    workflow_id: str,
+    current_user: User = Depends(require_viewer_or_operator),
+    db: Session = Depends(get_db),
+    service: CompetitionResultService = Depends(get_competition_result_service),
+):
+    return service.detail(_result_run(db, current_user, workflow_id))
+
+
+@router.get("/results/{workflow_id}/{kind}-plot")
+def get_result_plot(
+    workflow_id: str,
+    kind: Literal["band", "dos"],
+    current_user: User = Depends(require_viewer_or_operator),
+    db: Session = Depends(get_db),
+    service: CompetitionResultService = Depends(get_competition_result_service),
+):
+    run = _result_run(db, current_user, workflow_id)
+    try:
+        return service.plot(run, kind)
+    except ResultServiceError as exc:
+        _raise_result_error(exc)
+
+
+@router.get("/results/{workflow_id}/artifacts/{kind}")
+def download_result_artifact(
+    workflow_id: str,
+    kind: str,
+    current_user: User = Depends(require_viewer_or_operator),
+    db: Session = Depends(get_db),
+    service: CompetitionResultService = Depends(get_competition_result_service),
+):
+    run = _result_run(db, current_user, workflow_id)
+    try:
+        artifact = service.artifact(db, run, kind)
+    except ResultServiceError as exc:
+        _raise_result_error(exc)
+    return Response(
+        content=artifact.content,
+        media_type=artifact.media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{artifact.filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/vasp/records")
@@ -827,14 +954,85 @@ def list_vasp_records(
     element_mode: str = Query("", max_length=20),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    _current_user: User = Depends(require_viewer_or_operator),
+    current_user: User = Depends(require_viewer_or_operator),
+    db: Session = Depends(get_db),
+    service: CompetitionResultService = Depends(get_competition_result_service),
 ):
+    mode = (element_mode or "at_least").strip().lower()
+    if mode not in {"at_least", "only"}:
+        raise HTTPException(status_code=400, detail="element mode is invalid")
+    requested_elements = [item.strip() for item in elements.split(",") if item.strip()]
+    if len(requested_elements) != len(set(requested_elements)) or any(
+        re.fullmatch(r"[A-Z][a-z]?", item) is None for item in requested_elements
+    ):
+        raise HTTPException(status_code=400, detail="element filter is invalid")
+    statement = (
+        _visible_runs_statement(current_user)
+        .where(WorkflowRun.status.in_(("succeeded", "failed")))
+        .options(
+            selectinload(WorkflowRun.owner),
+            selectinload(WorkflowRun.steps).selectinload(WorkflowStep.attempts),
+            selectinload(WorkflowRun.files),
+            selectinload(WorkflowRun.events),
+        )
+        .order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id)
+    )
+    records = [service.database_record(run) for run in db.scalars(statement).unique().all()]
+    available_elements = sorted(
+        {element for record in records for element in record.get("elements", [])}
+    )
+    needle = query.strip().casefold()
+    if needle:
+        records = [
+            record
+            for record in records
+            if needle
+            in " ".join(
+                str(record.get(key) or "")
+                for key in ("formula", "source", "workflow_id")
+            ).casefold()
+        ]
+    required = set(requested_elements)
+    if required:
+        records = [
+            record
+            for record in records
+            if (
+                set(record.get("elements", [])) == required
+                if mode == "only"
+                else required.issubset(set(record.get("elements", [])))
+            )
+        ]
+    total = len(records)
+    start = (page - 1) * page_size
     return {
-        "items": [],
-        "total": 0,
+        "items": records[start : start + page_size],
+        "total": total,
         "page": page,
         "page_size": page_size,
-        "available_elements": [],
-        "metadata": {},
+        "available_elements": available_elements,
+        "metadata": {
+            "source": {"label": "来源", "kind": "text", "priority": 1},
+            "workflow_id": {"label": "工作流", "kind": "text", "priority": 1},
+            "status": {"label": "状态", "kind": "text", "priority": 1},
+            "bandgap_eV": {
+                "label": "带隙",
+                "unit": "eV",
+                "decimals": 4,
+                "kind": "number",
+                "priority": 1,
+            },
+            "completed_at": {"label": "完成时间", "kind": "text", "priority": 2},
+        },
         "data_kind": "live",
     }
+
+
+@router.get("/vasp/records/{workflow_id}")
+def get_vasp_record(
+    workflow_id: str,
+    current_user: User = Depends(require_viewer_or_operator),
+    db: Session = Depends(get_db),
+    service: CompetitionResultService = Depends(get_competition_result_service),
+):
+    return service.database_record(_result_run(db, current_user, workflow_id))

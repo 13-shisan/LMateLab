@@ -953,7 +953,10 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(2, body["page"])
         self.assertEqual(20, body["page_size"])
         self.assertEqual([], body["available_elements"])
-        self.assertEqual({}, body["metadata"])
+        self.assertEqual(
+            {"source", "workflow_id", "status", "bandgap_eV", "completed_at"},
+            set(body["metadata"]),
+        )
         self.assertEqual("live", body["data_kind"])
 
     def test_invalid_upload_and_payload_are_4xx_without_internal_paths(self):
