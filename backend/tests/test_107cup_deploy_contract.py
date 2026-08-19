@@ -90,6 +90,16 @@ class VaspStageFixture:
         return path
 
     def _write_stubs(self):
+        self.modules = self._write_executable(
+            "modules.sh",
+            """
+#!/bin/bash
+module() {
+  test "$*" = 'load mkl/2026.0'
+  printf '%s\n' "$*" > "$FIXTURE_MARKERS/modules"
+}
+""",
+        )
         self._write_executable(
             "vaspkit",
             """
@@ -118,6 +128,7 @@ esac
             "env-nvhpc.sh",
             """
 #!/bin/bash
+module load mkl/2026.0
 printf '%s\n' sourced > "$FIXTURE_MARKERS/environment"
 export PATH="$FIXTURE_BIN:$PATH"
 """,
@@ -186,6 +197,7 @@ exit "$status"
         source_path = DEPLOY_ROOT / "slurm" / "vasp-stage.slurm"
         self.original_source = source_path.read_text(encoding="utf-8")
         dependencies = {
+            "/etc/profile.d/modules.sh": self.modules,
             "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit": self.bin
             / "vaspkit",
             "/home/scc/pb23030683/POTCAR/PBE/Mo_sv/POTCAR": self.mo_source,
@@ -342,6 +354,16 @@ class Stage7PreflightFixture:
         return path
 
     def _write_stubs(self):
+        self.modules = self._write_executable(
+            "modules.sh",
+            """
+#!/bin/bash
+module() {
+  test "$*" = 'load mkl/2026.0'
+  printf '%s\n' "$*" > "$FIXTURE_MARKERS/modules"
+}
+""",
+        )
         self.vaspkit = self._write_executable(
             "vaspkit",
             """
@@ -358,6 +380,7 @@ printf '%s' "$FIXTURE_VASPKIT_OUTPUT"
             "env-nvhpc.sh",
             """
 #!/bin/bash
+module load mkl/2026.0
 printf '%s\n' sourced > "$FIXTURE_MARKERS/environment"
 export PATH="$FIXTURE_BIN:$PATH"
 """,
@@ -392,6 +415,7 @@ printf '%s\n' 'fixture dependency resolution'
             f"root={shlex.quote(self.competition_root.as_posix())}",
         )
         paths = {
+            "/etc/profile.d/modules.sh": self.modules,
             "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit": self.vaspkit,
             "/home/scc/pb23030683/POTCAR/PBE/Mo_sv/POTCAR": self.mo_source,
             "/home/scc/pb23030683/POTCAR/PBE/S/POTCAR": self.s_source,
@@ -585,6 +609,7 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
                 for phase in (
                     "sha256sum",
                     "vaspkit",
+                    "modules",
                     "environment",
                     "time",
                     "mpirun",
@@ -645,6 +670,7 @@ class Stage7PreflightLinuxBehaviorTests(unittest.TestCase):
         run = self.fixture.run()
         self.assertEqual(0, run.result.returncode, run.result)
         self.assertTrue(self.fixture.reached("vaspkit"))
+        self.assertTrue(self.fixture.reached("modules"))
         self.assertTrue(self.fixture.reached("environment"))
         self.assertTrue(self.fixture.reached("ldd"))
         self.assertFalse(self.fixture.reached("vasp_std"))
@@ -986,6 +1012,19 @@ class CompetitionDeployContractTests(unittest.TestCase):
                     source.index(full_line_extractor),
                     source.index('test "${#vaspkit_markers[@]}" -eq 1'),
                 )
+
+    def test_stage7_scripts_initialize_modules_before_vasp_environment(self):
+        module_init = "source /etc/profile.d/modules.sh"
+        vasp_environment = (
+            "source /home/scc/pb23030683/software/"
+            "vasp.6.4.2-GPU-Cell/env-nvhpc.sh"
+        )
+        for script_name in ("slurm/stage7-preflight.slurm", "slurm/vasp-stage.slurm"):
+            with self.subTest(script_name=script_name):
+                source = self.read_required(script_name)
+                self.assertEqual(1, source.count(module_init))
+                self.assertEqual(1, source.count(vasp_environment))
+                self.assertLess(source.index(module_init), source.index(vasp_environment))
 
     def test_stage7_preflight_hashes_all_evidence_with_self_checked_manifests(self):
         source = self.read_required("slurm/stage7-preflight.slurm")

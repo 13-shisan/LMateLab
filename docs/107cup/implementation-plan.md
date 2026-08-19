@@ -143,7 +143,7 @@
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PARTIAL | 固定 MoS2 实现已由 PR #30 合并；首次 107 预检 Job `39373` 以 `FAILED/1:0` 结束，失败于 VASPKIT banner 严格整行比较，未执行 `vasp_std`、未进入正式构建 | 当前预检修复仅在本地完成；必须先经 PR 合并并在 107 提交新预检通过，才能继续 Task 13 后续门禁 |
+| 7. VASP 四步闭环 | PARTIAL | PR #31 已合并为 `eae6ac1`并同步至 107；预检 Job `39383` 完成 VASPKIT/POTCAR 校验后以 `FAILED/127:0` 停在 VASP 环境加载，未执行 `vasp_std` | 合并 module 初始化修复并在 107 重跑预检；完整 manifest 通过前不进入正式四步工作流 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -781,3 +781,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 阶段 7 实现 PR #30 已合并；107 预检 Job `39373` 在 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/preflight-39373` 以 `FAILED/1:0` 结束。真实 VASPKIT 输出为 `|         VASPKIT Standard Edition 1.5.1 (27 Jan. 2024)         |`，旧脚本由 `grep` 保留整行后与 `VASPKIT Standard Edition 1.5.1` 严格比较，因边框和日期必然不匹配。
 - Job `39373` 在该版本门禁处停止，没有执行 `vasp_std`，也没有进入正式构建；不得将该保留失败现场记为 VASP 成功或四步链证据。
 - 预检修复在 `codex/107cup-stage7-preflight-fix` 严格按 TDD 仅在本地完成：受限提取唯一 VASPKIT 规范版本令牌并仍严格等于 `1.5.1`，在所有证据生成后写入不自包含的 `manifest.txt` 和仅哈希该文件的 `manifest.sha256`，两层均在作业内自校验；正式 `vasp-stage.slurm` runner 的同根因整行比较也已同步为完全相同的受限提取。阶段 7 保持 `PARTIAL`；该修复必须经 PR 合并并在 107 重新提交预检通过后，才能继续。
+- PR #31 已合并为 `eae6ac17575143d81e737ae7395def69960d1c95`，107 只读 checkout 已同步到该提交。预检前快照 Job `39382` 以 `COMPLETED/0:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/eae6ac17575143d81e737ae7395def69960d1c95/before-39382`，manifest SHA-256 为 `030a0a56958e7694493dbaf3efe8d860aed3a3e5b46fc51de783af934cd10b39`。
+- 第二次预检 Job `39383` 在 `anode02` 以 `FAILED/127:0` 结束，证据位于 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/preflight-39383`。VASPKIT 成功生成并校验固定 POTCAR；现场仅有 `POSCAR`、`POTCAR.spec`、`POTCAR`、`potcar-source-sha256.txt` 和 `vaspkit-version.txt`，没有 `vasp-std-path.txt`、`vasp-std-ldd.txt` 或 manifest。
+- Job `39383` 停在 `source env-nvhpc.sh` 之前后边界；该环境脚本执行 `module load mkl/2026.0`，而 Stage 7 批处理脚本未像已验证的构建脚本那样先加载 `/etc/profile.d/modules.sh`。修复范围仅为在预检和正式 runner 中按相同顺序初始化 modules；合并并在 107 重跑预检成功前，阶段 7 继续保持 `PARTIAL`。
+- module 初始化修复在 `codex/107cup-stage7-module-init` 按 TDD 完成本地门禁：新合同首先对两个 Stage 7 脚本各失败一次，增加固定 `source /etc/profile.d/modules.sh` 并保证其早于 `env-nvhpc.sh` 后转为通过；Linux 夹具中的伪环境脚本也会真实调用 `module load mkl/2026.0`。Windows 后端完整回归 `435` 项通过、`23` 项按平台条件跳过，WSL 两组 Bash 行为测试 `12/12`通过，前端 `125/125`、定向 ESLint、demo/live 两种构建（各 `1857` 个模块）、三个 Stage 7 Bash 语法和 Python 编译检查全部通过。该分支尚未合并，本轮未在 107 提交新作业；本地通过不替代合并后的真实预检。
