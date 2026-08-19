@@ -15,6 +15,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_ROOT = REPO_ROOT / "deploy" / "107cup"
 VALID_WORKFLOW_ID = "11111111-1111-4111-8111-111111111111"
 VALID_ATTEMPT_ID = "22222222-2222-4222-8222-222222222222"
+REAL_VASPKIT_BANNER = (
+    "|         VASPKIT Standard Edition 1.5.1 "
+    "(27 Jan. 2024)         |\n"
+)
 
 
 class VaspStageFixture:
@@ -248,7 +252,7 @@ exit "$status"
                 "FIXTURE_PUBLISH_COLLISION": publish_collision or "",
                 "FIXTURE_VASPKIT_OUTPUT": vaspkit_output
                 if vaspkit_output is not None
-                else "VASPKIT Standard Edition 1.5.1\n",
+                else REAL_VASPKIT_BANNER,
                 "FIXTURE_VASP_STATUS": str(vasp_status),
                 "FIXTURE_STAGE": values["stage"],
                 "FIXTURE_SCONTROL_RECORD": scontrol_record
@@ -277,6 +281,174 @@ exit "$status"
             timeout=10,
             check=False,
         )
+
+    def reached(self, name):
+        return (self.markers / name).is_file()
+
+
+class Stage7PreflightFixture:
+    evidence_names = {
+        "POSCAR",
+        "POTCAR.spec",
+        "potcar-source-sha256.txt",
+        "POTCAR",
+        "vaspkit-version.txt",
+        "vasp-std-path.txt",
+        "vasp-std-ldd.txt",
+    }
+
+    def __init__(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="lmatelab-stage7-preflight-")
+        self.root = Path(self.temporary.name)
+        self.bash = shutil.which("bash")
+        if self.bash is None:
+            self.cleanup()
+            raise unittest.SkipTest("bash is unavailable")
+        self.bin = self.root / "bin"
+        self.markers = self.root / "markers"
+        self.competition_root = self.root / "competition"
+        self.release = self.competition_root / "releases" / ("a" * 40)
+        self.template = (
+            self.release / "source" / "backend" / "competition_templates" / "mos2_v1"
+        )
+        self.dependencies = self.root / "dependencies"
+        for directory in (self.bin, self.markers, self.template, self.dependencies):
+            directory.mkdir(parents=True, exist_ok=True)
+        (self.competition_root / "current").symlink_to(
+            self.release, target_is_directory=True
+        )
+        (self.template / "POSCAR").write_text(
+            "MoS2 preflight fixture\n", encoding="utf-8", newline="\n"
+        )
+        self.mo_source = self.dependencies / "Mo_sv.POTCAR"
+        self.s_source = self.dependencies / "S.POTCAR"
+        self.mo_source.write_bytes(b"Mo preflight source\n")
+        self.s_source.write_bytes(b"S preflight source\n")
+        self.potcar_content = (
+            b"TITEL  = PAW_PBE Mo_sv 02Feb2006\n"
+            b"TITEL  = PAW_PBE S 06Sep2000\n"
+        )
+        self._write_stubs()
+        self._rewrite_runner()
+        self.next_job_id = 50000
+
+    def cleanup(self):
+        self.temporary.cleanup()
+
+    def _write_executable(self, name, source):
+        path = self.bin / name
+        path.write_text(source.lstrip(), encoding="utf-8", newline="\n")
+        path.chmod(0o700)
+        return path
+
+    def _write_stubs(self):
+        self.vaspkit = self._write_executable(
+            "vaspkit",
+            """
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/vaspkit"
+printf '%s\n' \
+  'TITEL  = PAW_PBE Mo_sv 02Feb2006' \
+  'TITEL  = PAW_PBE S 06Sep2000' > POTCAR
+printf '%s' "$FIXTURE_VASPKIT_OUTPUT"
+""",
+        )
+        self.environment = self._write_executable(
+            "env-nvhpc.sh",
+            """
+#!/bin/bash
+printf '%s\n' sourced > "$FIXTURE_MARKERS/environment"
+export PATH="$FIXTURE_BIN:$PATH"
+""",
+        )
+        self.vasp_std = self._write_executable(
+            "vasp_std",
+            """
+#!/bin/bash
+printf '%s\n' invoked > "$FIXTURE_MARKERS/vasp_std"
+exit 99
+""",
+        )
+        self._write_executable(
+            "ldd",
+            """
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" > "$FIXTURE_MARKERS/ldd"
+printf '%s\n' 'fixture dependency resolution'
+""",
+        )
+
+    def _rewrite_runner(self):
+        source = (DEPLOY_ROOT / "slurm" / "stage7-preflight.slurm").read_text(
+            encoding="utf-8"
+        )
+        root_assignment = "root=/home/scc/pb23030683/lmatelab-107cup"
+        if source.count(root_assignment) != 1:
+            raise AssertionError("fixed competition root assignment changed")
+        rewritten = source.replace(
+            root_assignment,
+            f"root={shlex.quote(self.competition_root.as_posix())}",
+        )
+        paths = {
+            "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit": self.vaspkit,
+            "/home/scc/pb23030683/POTCAR/PBE/Mo_sv/POTCAR": self.mo_source,
+            "/home/scc/pb23030683/POTCAR/PBE/S/POTCAR": self.s_source,
+            "/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh": self.environment,
+        }
+        for original, replacement_path in paths.items():
+            if rewritten.count(original) != 1:
+                raise AssertionError(f"fixed preflight dependency changed: {original}")
+            rewritten = rewritten.replace(
+                original, shlex.quote(replacement_path.as_posix())
+            )
+        hashes = {
+            VaspStageFixture.hashes["mo"]: hashlib.sha256(
+                self.mo_source.read_bytes()
+            ).hexdigest(),
+            VaspStageFixture.hashes["s"]: hashlib.sha256(
+                self.s_source.read_bytes()
+            ).hexdigest(),
+            VaspStageFixture.hashes["combined"]: hashlib.sha256(
+                self.potcar_content
+            ).hexdigest(),
+        }
+        for original, replacement in hashes.items():
+            if rewritten.count(original) != 1:
+                raise AssertionError(f"fixed preflight hash changed: {original}")
+            rewritten = rewritten.replace(original, replacement)
+        self.runner = self.root / "stage7-preflight.fixture.slurm"
+        self.runner.write_text(rewritten, encoding="utf-8", newline="\n")
+        self.runner.chmod(0o700)
+
+    def run(self, *, banner=REAL_VASPKIT_BANNER):
+        for marker in self.markers.iterdir():
+            marker.unlink()
+        job_id = str(self.next_job_id)
+        self.next_job_id += 1
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "SLURM_JOB_ID": job_id,
+                "FIXTURE_BIN": self.bin.as_posix(),
+                "FIXTURE_MARKERS": self.markers.as_posix(),
+                "FIXTURE_VASPKIT_OUTPUT": banner,
+            }
+        )
+        result = subprocess.run(
+            [self.bash, self.runner],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        evidence = (
+            self.competition_root / "evidence" / "stage7" / f"preflight-{job_id}"
+        )
+        return SimpleNamespace(result=result, evidence=evidence)
 
     def reached(self, name):
         return (self.markers / name).is_file()
@@ -375,8 +547,23 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
                 self._assert_reserved_symlinks_are_rejected(names, stage=stage)
 
     def test_vaspkit_banner_must_be_exact_and_unique(self):
-        banner = "VASPKIT Standard Edition 1.5.1\n"
-        for output in ("VASPKIT Standard Edition 1.5.0\n", banner + banner):
+        wrong_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.0")
+        extended_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1.1")
+        suffixed_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1rc1")
+        prerelease_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1-rc1")
+        build_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1+build7")
+        underscored_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1_rc1")
+        spaced_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1 rc1")
+        for output in (
+            wrong_banner,
+            extended_banner,
+            suffixed_banner,
+            prerelease_banner,
+            build_banner,
+            underscored_banner,
+            spaced_banner,
+            REAL_VASPKIT_BANNER + REAL_VASPKIT_BANNER,
+        ):
             with self.subTest(output=output):
                 result = self.fixture.run(vaspkit_output=output)
                 self.assertNotEqual(0, result.returncode, result)
@@ -446,6 +633,66 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
             self.assertEqual(1, restored.count(replacement))
             restored = restored.replace(replacement, original)
         self.assertEqual(self.fixture.original_source, restored)
+
+
+@unittest.skipUnless(os.name == "posix", "preflight behavior requires POSIX")
+class Stage7PreflightLinuxBehaviorTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = Stage7PreflightFixture()
+        self.addCleanup(self.fixture.cleanup)
+
+    def test_success_creates_self_checked_private_manifests_without_running_vasp(self):
+        run = self.fixture.run()
+        self.assertEqual(0, run.result.returncode, run.result)
+        self.assertTrue(self.fixture.reached("vaspkit"))
+        self.assertTrue(self.fixture.reached("environment"))
+        self.assertTrue(self.fixture.reached("ldd"))
+        self.assertFalse(self.fixture.reached("vasp_std"))
+
+        manifest = run.evidence / "manifest.txt"
+        manifest_sha = run.evidence / "manifest.sha256"
+        listed_names = {
+            line.split(None, 1)[1]
+            for line in manifest.read_text(encoding="utf-8").splitlines()
+        }
+        self.assertEqual(self.fixture.evidence_names, listed_names)
+        self.assertNotIn("manifest.txt", listed_names)
+        self.assertNotIn("manifest.sha256", listed_names)
+        for name in listed_names:
+            self.assertFalse(Path(name).is_absolute(), name)
+            self.assertNotIn("..", Path(name).parts, name)
+            self.assertFalse(name.startswith("./"), name)
+        for checksum_file in (manifest, manifest_sha):
+            check = subprocess.run(
+                ["sha256sum", "-c", checksum_file.name],
+                cwd=run.evidence,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, check.returncode, check)
+
+        all_files = {*self.fixture.evidence_names, "manifest.txt", "manifest.sha256"}
+        self.assertEqual(all_files, {path.name for path in run.evidence.iterdir()})
+        for name in all_files:
+            self.assertEqual(0o600, (run.evidence / name).stat().st_mode & 0o777)
+        for directory in (
+            self.fixture.competition_root / "evidence",
+            self.fixture.competition_root / "evidence" / "stage7",
+            run.evidence,
+        ):
+            self.assertEqual(0o700, directory.stat().st_mode & 0o777)
+
+    def test_version_suffixes_stop_before_vasp_environment(self):
+        for suffix in ("-rc1", "+build7", "_rc1", " rc1"):
+            with self.subTest(suffix=suffix):
+                run = self.fixture.run(
+                    banner=REAL_VASPKIT_BANNER.replace("1.5.1", f"1.5.1{suffix}")
+                )
+                self.assertNotEqual(0, run.result.returncode, run.result)
+                self.assertTrue(self.fixture.reached("vaspkit"))
+                self.assertFalse(self.fixture.reached("environment"))
+                self.assertFalse(self.fixture.reached("vasp_std"))
 
 
 class CompetitionDeployContractTests(unittest.TestCase):
@@ -715,6 +962,61 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', preflight)
         self.assertIn('test "${vaspkit_markers[0]}" = "$vaspkit_banner"', preflight)
         self.assertLess(preflight.index("mapfile -t vaspkit_markers"), preflight.index("env-nvhpc.sh"))
+
+    def test_stage7_scripts_share_full_line_vaspkit_extractor(self):
+        banner_assignment = "vaspkit_banner='VASPKIT Standard Edition 1.5.1'"
+        full_line_extractor = (
+            "sed -En 's/^[[:space:]]*\\|[[:space:]]+VASPKIT[[:space:]]+"
+            "Standard[[:space:]]+Edition[[:space:]]+"
+            "([0-9]+\\.[0-9]+\\.[0-9]+)[[:space:]]+\\([0-9]{2}"
+            "[[:space:]][[:alpha:]]{3}\\.[[:space:]][0-9]{4}\\)"
+            "[[:space:]]+\\|[[:space:]]*$/VASPKIT Standard Edition \\1/p' "
+            "vaspkit-version.txt"
+        )
+        for script_name in ("slurm/stage7-preflight.slurm", "slurm/vasp-stage.slurm"):
+            with self.subTest(script_name=script_name):
+                source = self.read_required(script_name)
+                self.assertEqual(1, source.count(banner_assignment))
+                self.assertEqual(1, source.count(full_line_extractor))
+                self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', source)
+                self.assertIn(
+                    'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
+                )
+                self.assertLess(
+                    source.index(full_line_extractor),
+                    source.index('test "${#vaspkit_markers[@]}" -eq 1'),
+                )
+
+    def test_stage7_preflight_hashes_all_evidence_with_self_checked_manifests(self):
+        source = self.read_required("slurm/stage7-preflight.slurm")
+        final_evidence = source.index(
+            'ldd "$(command -v vasp_std)" > vasp-std-ldd.txt'
+        )
+        for required in (
+            "! -name manifest.txt",
+            "! -name manifest.sha256",
+            "-printf '%P\\0'",
+            "LC_ALL=C sort -z",
+        ):
+            self.assertIn(required, source)
+
+        manifest = source.index("> manifest.txt", final_evidence)
+        check_manifest = source.index("sha256sum -c manifest.txt", manifest)
+        manifest_sha = source.index(
+            "sha256sum manifest.txt > manifest.sha256", check_manifest
+        )
+        check_manifest_sha = source.index(
+            "sha256sum -c manifest.sha256", manifest_sha
+        )
+        chmod_evidence = source.index(
+            "find . -maxdepth 1 -type f -exec chmod 600 -- {} +",
+            check_manifest_sha,
+        )
+        self.assertLess(final_evidence, manifest)
+        self.assertLess(manifest, check_manifest)
+        self.assertLess(check_manifest, manifest_sha)
+        self.assertLess(manifest_sha, check_manifest_sha)
+        self.assertLess(check_manifest_sha, chmod_evidence)
 
     def test_stage7_runner_uses_private_scratch_and_no_overwrite_publication(self):
         source = self.read_required("slurm/vasp-stage.slurm")

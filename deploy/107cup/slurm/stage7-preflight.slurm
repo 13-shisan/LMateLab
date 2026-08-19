@@ -42,7 +42,7 @@ printf '%s  Mo_sv\n%s  S\n' "$mo_source_sha" "$s_source_sha" > potcar-source-sha
   2>&1 | tee vaspkit-version.txt
 vaspkit_banner='VASPKIT Standard Edition 1.5.1'
 mapfile -t vaspkit_markers < <(
-  grep -E 'VASPKIT[[:space:]]+Standard[[:space:]]+Edition' vaspkit-version.txt || true
+  sed -En 's/^[[:space:]]*\|[[:space:]]+VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]+\([0-9]{2}[[:space:]][[:alpha:]]{3}\.[[:space:]][0-9]{4}\)[[:space:]]+\|[[:space:]]*$/VASPKIT Standard Edition \1/p' vaspkit-version.txt
 )
 test "${#vaspkit_markers[@]}" -eq 1
 test "${vaspkit_markers[0]}" = "$vaspkit_banner"
@@ -55,4 +55,13 @@ test "${#potcar_titles[@]}" -eq 2
 source /home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh
 command -v vasp_std | tee vasp-std-path.txt
 ldd "$(command -v vasp_std)" > vasp-std-ldd.txt
-chmod 600 ./*
+find . -maxdepth 1 -type f \
+  ! -name manifest.txt \
+  ! -name manifest.sha256 \
+  -printf '%P\0' \
+  | LC_ALL=C sort -z \
+  | xargs -0 sha256sum -- > manifest.txt
+sha256sum -c manifest.txt
+sha256sum manifest.txt > manifest.sha256
+sha256sum -c manifest.sha256
+find . -maxdepth 1 -type f -exec chmod 600 -- {} +

@@ -113,7 +113,7 @@ printf '%s  Mo_sv\n%s  S\n' "$mo_source_sha" "$s_source_sha" > potcar-source-sha
   2>&1 | tee vaspkit-version.txt
 vaspkit_banner='VASPKIT Standard Edition 1.5.1'
 mapfile -t vaspkit_markers < <(
-  grep -E 'VASPKIT[[:space:]]+Standard[[:space:]]+Edition' vaspkit-version.txt || true
+  sed -En 's/^[[:space:]]*\|[[:space:]]+VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]+\([0-9]{2}[[:space:]][[:alpha:]]{3}\.[[:space:]][0-9]{4}\)[[:space:]]+\|[[:space:]]*$/VASPKIT Standard Edition \1/p' vaspkit-version.txt
 )
 test "${#vaspkit_markers[@]}" -eq 1
 test "${vaspkit_markers[0]}" = "$vaspkit_banner"
