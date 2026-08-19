@@ -1665,12 +1665,13 @@ def _extract_titles(handle: BinaryIO, expected_titles: tuple[str, ...]) -> list[
                 raise VaspPolicyError(
                     "potcar_titles_invalid", "POTCAR title metadata exceeds the policy limit"
                 )
-            if not line.startswith(b"TITEL"):
+            candidate = line.lstrip(b" \t")
+            if not candidate.startswith(b"TITEL"):
                 continue
             if len(titles) >= len(expected_titles):
                 raise VaspPolicyError("potcar_titles_invalid", "POTCAR has additional titles")
             try:
-                text = line.decode("ascii").rstrip("\r\n")
+                text = candidate.decode("ascii").rstrip("\r\n")
             except UnicodeDecodeError:
                 raise VaspPolicyError(
                     "potcar_titles_invalid", "POTCAR title metadata is invalid"

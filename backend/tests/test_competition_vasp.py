@@ -96,6 +96,24 @@ class PotcarPolicyTests(unittest.TestCase):
         self.assertEqual("1.5.1", result["vaspkit_version"])
         self.assertEqual(len(self.potcar), result["size_bytes"])
 
+    def test_potcar_accepts_title_records_with_leading_ascii_whitespace(self):
+        self.potcar = (
+            b"   TITEL  = PAW_PBE Mo_sv 02Feb2006\n"
+            b"\tTITEL  = PAW_PBE S 06Sep2000\n"
+        )
+        self.contract = PotcarContract(
+            symbols=("Mo_sv", "S"),
+            titles=("PAW_PBE Mo_sv", "PAW_PBE S"),
+            source_sha256=("a" * 64, "b" * 64),
+            combined_sha256=hashlib.sha256(self.potcar).hexdigest(),
+            vaspkit_version="1.5.1",
+        )
+        self.write_valid_inputs()
+
+        result = validate_potcar(self.root, contract=self.contract)
+
+        self.assertEqual(["PAW_PBE Mo_sv", "PAW_PBE S"], result["titles"])
+
     def test_fixed_stage_policy_has_only_the_approved_stages_and_outputs(self):
         self.assertEqual(("relax", "scf", "band", "dos"), FIXED_STAGE_ORDER)
         self.assertEqual(
