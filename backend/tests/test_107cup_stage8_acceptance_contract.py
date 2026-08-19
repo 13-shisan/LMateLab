@@ -22,6 +22,7 @@ class Stage8AcceptanceContractTests(unittest.TestCase):
         source = HARNESS.read_text(encoding="utf-8")
         self.assertIn("4b566547-961b-4e10-a8d0-99431f2e2229", source)
         self.assertIn("db9c793d-cf8f-4207-823b-5943d825f21d", source)
+        self.assertLess(source.index("import models"), source.index("from models_workflow import"))
         self.assertIn("PRAGMA query_only=ON", source)
         self.assertIn("STAGE8_ACCEPTANCE_OK", source)
         self.assertNotIn("session.commit", source)
