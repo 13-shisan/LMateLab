@@ -462,7 +462,7 @@ relax -> SCF -> BAND -> DOS
 - [x] DOS 只复用已验收 SCF 产物并记录输入文件哈希。
 - [x] 记录 VASP 版本、VASPKIT 版本、GPU/CPU、峰值内存、耗时和 Slurm ExitCode。
 - [x] 执行一个完整成功工作流。
-- [ ] 执行一个人为失败工作流并验证后续步骤没有 Job ID。
+- [x] 执行一个人为失败工作流并验证后续步骤没有 Job ID。
 
 真实 VASP 完成必须同时具备 Slurm `COMPLETED/0:0`、VASP 正常结束标记、阶段文件集合和哈希；缺一项都不能显示成功。
 
