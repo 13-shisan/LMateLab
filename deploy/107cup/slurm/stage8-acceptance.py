@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from competition_runtime import release_commit, workflow_root
 from database import engine
+import models  # noqa: F401 - register User before workflow relationship mapping
 from models_workflow import WorkflowRun, WorkflowStep, canonical_json
 from services.competition_results import CompetitionResultService
 
