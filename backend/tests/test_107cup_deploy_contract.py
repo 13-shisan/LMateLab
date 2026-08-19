@@ -19,6 +19,11 @@ REAL_VASPKIT_BANNER = (
     "|         VASPKIT Standard Edition 1.5.1 "
     "(27 Jan. 2024)         |\n"
 )
+REAL_VASPKIT_OUTPUT = (
+    "VASPKIT startup notice\n"
+    f"{REAL_VASPKIT_BANNER}"
+    "When using VASPKIT in your research, cite the VASPKIT paper.\n"
+)
 
 
 class VaspStageFixture:
@@ -264,7 +269,7 @@ exit "$status"
                 "FIXTURE_PUBLISH_COLLISION": publish_collision or "",
                 "FIXTURE_VASPKIT_OUTPUT": vaspkit_output
                 if vaspkit_output is not None
-                else REAL_VASPKIT_BANNER,
+                else REAL_VASPKIT_OUTPUT,
                 "FIXTURE_VASP_STATUS": str(vasp_status),
                 "FIXTURE_STAGE": values["stage"],
                 "FIXTURE_SCONTROL_RECORD": scontrol_record
@@ -446,7 +451,7 @@ printf '%s\n' 'fixture dependency resolution'
         self.runner.write_text(rewritten, encoding="utf-8", newline="\n")
         self.runner.chmod(0o700)
 
-    def run(self, *, banner=REAL_VASPKIT_BANNER):
+    def run(self, *, banner=REAL_VASPKIT_OUTPUT):
         for marker in self.markers.iterdir():
             marker.unlink()
         job_id = str(self.next_job_id)
@@ -624,6 +629,13 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
                     self.assertTrue(path.is_file(), str(path))
                     self.assertEqual(0o600, path.stat().st_mode & 0o777)
                     self.assertTrue(os.path.samefile(path, scratch / name), name)
+                self.assertEqual(
+                    "VASPKIT Standard Edition 1.5.1\n",
+                    (self.fixture.attempt / "vaspkit-version.txt").read_text(
+                        encoding="utf-8"
+                    ),
+                )
+                self.assertFalse((scratch / "vaspkit-output.txt").exists())
                 for name in outputs:
                     self.assertTrue((self.fixture.attempt / name).is_file(), name)
 
@@ -702,6 +714,11 @@ class Stage7PreflightLinuxBehaviorTests(unittest.TestCase):
         self.assertEqual(all_files, {path.name for path in run.evidence.iterdir()})
         for name in all_files:
             self.assertEqual(0o600, (run.evidence / name).stat().st_mode & 0o777)
+        self.assertEqual(
+            "VASPKIT Standard Edition 1.5.1\n",
+            (run.evidence / "vaspkit-version.txt").read_text(encoding="utf-8"),
+        )
+        self.assertFalse((run.evidence / "vaspkit-output.txt").exists())
         for directory in (
             self.fixture.competition_root / "evidence",
             self.fixture.competition_root / "evidence" / "stage7",
@@ -997,7 +1014,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "([0-9]+\\.[0-9]+\\.[0-9]+)[[:space:]]+\\([0-9]{2}"
             "[[:space:]][[:alpha:]]{3}\\.[[:space:]][0-9]{4}\\)"
             "[[:space:]]+\\|[[:space:]]*$/VASPKIT Standard Edition \\1/p' "
-            "vaspkit-version.txt"
+            "vaspkit-output.txt"
         )
         for script_name in ("slurm/stage7-preflight.slurm", "slurm/vasp-stage.slurm"):
             with self.subTest(script_name=script_name):
@@ -1008,6 +1025,11 @@ class CompetitionDeployContractTests(unittest.TestCase):
                 self.assertIn(
                     'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
                 )
+                self.assertIn(
+                    "printf '%s\\n' \"$vaspkit_banner\" > vaspkit-version.txt",
+                    source,
+                )
+                self.assertIn("rm -- vaspkit-output.txt", source)
                 self.assertLess(
                     source.index(full_line_extractor),
                     source.index('test "${#vaspkit_markers[@]}" -eq 1'),
