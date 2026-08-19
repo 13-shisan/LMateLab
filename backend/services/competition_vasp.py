@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ElementTree
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
-from numbers import Real
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import MappingProxyType
@@ -58,6 +57,10 @@ _RUNTIME_RSS_RE: Final = re.compile(
     r"^\s*Maximum resident set size \(kbytes\):\s*(?P<value>\S+)\s*$"
 )
 _INCAR_NEDOS_RE: Final = re.compile(r"^\s*NEDOS\s*=\s*(?P<value>\S+)\s*$")
+_EFERMI_RE: Final = re.compile(
+    r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?$",
+    re.ASCII,
+)
 _BAND_KPOINTS_SHA256: Final = (
     "70415ce261ae121768664a9e2477c418846a1fbe9799209030f25f9cdccd778c"
 )
@@ -1120,15 +1123,54 @@ def _parse_outcar(opened: _OpenedAcceptanceEvidence) -> str:
 def _parse_vasprun_xml(
     snapshot: _OpenedParserSnapshot,
     directory: _OpenedParserSnapshotDirectory,
-) -> None:
+) -> tuple[str, ...]:
     _verify_parser_snapshot(snapshot, directory)
+    path: list[str] = []
+    efermi_values: list[str] = []
     try:
-        for _event, element in ElementTree.iterparse(snapshot.path, events=("end",)):
+        for event, element in ElementTree.iterparse(
+            snapshot.path, events=("start", "end")
+        ):
+            if event == "start":
+                path.append(element.tag)
+                continue
+            if (
+                len(path) >= 4
+                and path[0] == "modeling"
+                and path[-3:] == ["calculation", "dos", "i"]
+                and element.attrib.get("name") == "efermi"
+                and len(efermi_values) < 2
+            ):
+                text = element.text
+                efermi_values.append(
+                    text if text is not None and len(text) <= 64 else ""
+                )
             element.clear()
+            path.pop()
     except (ElementTree.ParseError, OSError, ValueError, MemoryError):
         _verify_parser_snapshot(snapshot, directory)
-        raise VaspPolicyError("vasprun_unparseable", "vasprun.xml is incomplete or invalid") from None
+        raise VaspPolicyError(
+            "vasprun_unparseable", "vasprun.xml is incomplete or invalid"
+        ) from None
     _verify_parser_snapshot(snapshot, directory)
+    return tuple(efermi_values)
+
+
+def _parse_scf_efermi(values: tuple[str, ...]) -> float:
+    if len(values) != 1:
+        raise VaspPolicyError("scf_efermi_invalid", "SCF Fermi level is invalid")
+    text = values[0].strip()
+    if not text or _EFERMI_RE.fullmatch(text) is None:
+        raise VaspPolicyError("scf_efermi_invalid", "SCF Fermi level is invalid")
+    try:
+        value = float(text)
+    except ValueError:
+        raise VaspPolicyError(
+            "scf_efermi_invalid", "SCF Fermi level is invalid"
+        ) from None
+    if not math.isfinite(value):
+        raise VaspPolicyError("scf_efermi_invalid", "SCF Fermi level is invalid")
+    return value
 
 
 def _load_vasprun(
@@ -1344,7 +1386,7 @@ def accept_vasp_attempt(
             )
 
         try:
-            _parse_vasprun_xml(
+            vasprun_efermi_values = _parse_vasprun_xml(
                 parser_snapshots["vasprun.xml"], parser_snapshot_directory
             )
             vasprun = _load_vasprun(
@@ -1389,13 +1431,14 @@ def accept_vasp_attempt(
             _passed_check(checks, "contcar")
 
         if stage == "scf":
-            efermi = getattr(vasprun, "efermi", None)
-            if isinstance(efermi, bool) or not isinstance(efermi, Real) or not math.isfinite(float(efermi)):
+            try:
+                efermi = _parse_scf_efermi(vasprun_efermi_values)
+            except VaspPolicyError as error:
                 return _failed_acceptance(
-                    check_name="scf_efermi", reason_code="scf_efermi_invalid", checks=checks,
+                    check_name="scf_efermi", reason_code=error.code, checks=checks,
                     measurements=measurements, artifacts=artifacts,
                 )
-            measurements["efermi_ev"] = float(efermi)
+            measurements["efermi_ev"] = efermi
             _passed_check(checks, "scf_efermi")
 
         if stage == "band":

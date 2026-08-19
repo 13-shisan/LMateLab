@@ -1064,7 +1064,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
                 b"vasp.6.4.2 28Jun24\n"
                 b" General timing and accounting informations for this job:\n"
             ),
-            "vasprun.xml": b"<?xml version='1.0'?><modeling></modeling>\n",
+            "vasprun.xml": self.vasprun_xml("1.25"),
         }
         for name, content in common.items():
             self.write(name, content)
@@ -1085,6 +1085,17 @@ class ScientificAcceptanceTests(unittest.TestCase):
             efermi=efermi,
             parameters=parameters or {},
         )
+
+    @staticmethod
+    def vasprun_xml(*efermi_values: str) -> bytes:
+        efermi_elements = "".join(
+            f'<i name="efermi">{value}</i>' for value in efermi_values
+        )
+        return (
+            "<?xml version='1.0'?><modeling><calculation><dos>"
+            f"{efermi_elements}"
+            "</dos></calculation></modeling>\n"
+        ).encode("ascii")
 
     @staticmethod
     def valid_artifact(name="OUTCAR", digest="a" * 64, size_bytes=1):
@@ -2108,14 +2119,42 @@ class ScientificAcceptanceTests(unittest.TestCase):
             vasprun_loader=lambda _path: self.fake_vasprun(ionic=False),
         )
 
-    def test_scf_fermi_level_must_be_finite_real_number(self):
+    def test_scf_fermi_level_comes_from_pinned_xml_when_pymatgen_skips_dos(self):
         self.write_complete_outputs("scf")
-        for value in (math.nan, math.inf, -math.inf, "1.25", True, None):
-            with self.subTest(value=value):
+        self.write("vasprun.xml", self.vasprun_xml("     -1.73484146 "))
+
+        report = self.accept(
+            "scf",
+            vasprun_loader=lambda _path: self.fake_vasprun(efermi=None),
+        )
+
+        self.assertTrue(report.accepted, report.as_dict())
+        self.assertEqual(-1.73484146, report.measurements["efermi_ev"])
+
+    def test_scf_fermi_level_must_be_one_finite_xml_number(self):
+        self.write_complete_outputs("scf")
+        for values in (
+            (),
+            ("nan",),
+            ("inf",),
+            ("-inf",),
+            ("1.25 eV",),
+            ("1.25", "2.50"),
+        ):
+            with self.subTest(values=values):
+                self.write("vasprun.xml", self.vasprun_xml(*values))
                 self.assert_rejected(
                     "scf_efermi_invalid",
-                    vasprun_loader=lambda _path, value=value: self.fake_vasprun(efermi=value),
+                    vasprun_loader=lambda _path: self.fake_vasprun(efermi=1.25),
                 )
+
+        self.write(
+            "vasprun.xml",
+            b"<?xml version='1.0'?><modeling><metadata>"
+            b'<i name="efermi">1.25</i>'
+            b"</metadata></modeling>\n",
+        )
+        self.assert_rejected("scf_efermi_invalid")
 
     def test_band_requires_exact_fixed_kpoints_hash_and_path(self):
         self.write_complete_outputs("band")
