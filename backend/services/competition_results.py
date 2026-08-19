@@ -227,12 +227,14 @@ class ExistingVaspScientificParser:
             from ase.io import write as ase_write
 
             atoms = self._atoms(sources["relax"])
-            buffer = io.StringIO()
             if kind == "structure-cif":
+                buffer = io.BytesIO()
                 ase_write(buffer, atoms, format="cif")
+                return buffer.getvalue()
             else:
+                buffer = io.StringIO()
                 ase_write(buffer, atoms, format="vasp", vasp5=True, direct=True)
-            return buffer.getvalue().encode("utf-8")
+                return buffer.getvalue().encode("utf-8")
         parsers = self._legacy_parsers()
         if kind == "band-data":
             return parsers._band_dat_text_from_vasprun(str(sources["band"].path)).encode("utf-8")

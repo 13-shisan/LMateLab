@@ -23,7 +23,12 @@ from models_workflow import (
     WorkflowTemplate,
     canonical_json,
 )
-from services.competition_results import CompetitionResultService, ResultServiceError
+from services.competition_results import (
+    CompetitionResultService,
+    ExistingVaspScientificParser,
+    ResultServiceError,
+    VerifiedArtifact,
+)
 from routers.competition_workflows import get_competition_result_service, router
 
 
@@ -31,6 +36,29 @@ WORKFLOW_ID = "11111111-1111-4111-8111-111111111111"
 FAILED_WORKFLOW_ID = "22222222-2222-4222-8222-222222222222"
 RELEASE_COMMIT = "a" * 40
 STEP_KEYS = ("relax", "scf", "band", "dos")
+
+
+class ExistingVaspScientificParserTests(unittest.TestCase):
+    def test_structure_exports_use_the_binary_and_text_buffers_required_by_ase(self):
+        path = Path("competition_templates/mos2_v1/POSCAR").resolve()
+        source = VerifiedArtifact(
+            path=path,
+            relative_path="fixture/POSCAR",
+            logical_path="POSCAR",
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            size_bytes=path.stat().st_size,
+            attempt_id=None,
+            step_key="relax",
+        )
+        parser = ExistingVaspScientificParser()
+
+        cif = parser.export_artifact("structure-cif", {"relax": source})
+        poscar = parser.export_artifact("structure-poscar", {"relax": source})
+
+        self.assertTrue(cif.startswith(b"data_"))
+        self.assertIn(b"_cell_length_a", cif)
+        self.assertIn(b"Mo", poscar)
+        self.assertIn(b"Direct", poscar)
 
 
 class FakeScientificParser:
