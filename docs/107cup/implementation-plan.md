@@ -139,11 +139,11 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `40262` 在 `P107-A100/anode17:18731` 运行发布 `e3ea99c7c8eff76c37c7fc2bda4b205d5e9a4501`；4090 转发 `18739` 与公网入口均已验证新服务，旧 Job `40249` 已核对归属后停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
+| 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `40273` 在 `P107-A100/anode16:18731` 运行发布 `e58b769c435da7eaf9c6a9e672a3f4f99ab6401f`；4090 转发 `18740`、公网和 Operator 入口均返回新服务，旧 Job `40262` 与旧转发 `18739` 已停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PARTIAL | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 已得到 SCF `scientific_failed/electronic_not_converged`，但终态聚合因同一事务内事件序号冲突回滚，BAND/DOS 暂未落为 `blocked` | 合并事件序列修复并用新服务收敛现有失败链，四重验证 BAND/DOS 零 attempt、零目录和零 Job ID |
+| 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -814,3 +814,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 固定失败链创建器 Job `40263` 以 `COMPLETED/0:0` 结束，创建工作流 `db9c793d-cf8f-4207-823b-5943d825f21d`。Relax attempt `2f5a7850-e3c3-4ffe-b2ab-fdaacf0562b8`、Job `40264` 通过科学验收；SCF attempt `2f3080ae-b445-4575-975a-e85cccbeafc9`、Job `40265` 在 Slurm 层为 `COMPLETED/0:0`，科学状态精确为 `scientific_failed/electronic_not_converged`。BAND/DOS 没有 attempt、目录或 Job ID，但事务回滚使其暂时仍显示 `waiting`，工作流顶层仍显示 `running`。
 - 诊断 Job `40269` 因诊断包装未设置前端路径，在业务诊断前失败且未修改工作流；诊断 Job `40270` 保留了真实 traceback：终态聚合同时创建 BAND 和 DOS 的 `workflow_step_blocked` 事件时触发 `UNIQUE constraint failed: workflow_events.workflow_id, workflow_events.sequence`。生产 `SessionLocal` 使用 `autoflush=False`，旧 `_next_event_sequence()` 只查询数据库，两个尚未 flush 的事件因而都取得 sequence `16`，事务整体回滚。
 - 事件序列修复在 `codex/107cup-stage7-event-sequence` 将协调器测试会话改为与生产一致的 `autoflush=False`，并令 `_next_event_sequence()` 同时考虑 `session.new` 中同一工作流的待写事件。目标测试先 RED 后 GREEN，协调器套件 `40/40`、Stage 7 本地完整后端回归 `440/440` 通过，25 项仅因 Windows/POSIX 条件跳过；前端 `125/125` 和 Bash 语法检查亦通过。稳定 `service.slurm` 同时固定到 `P107-A100/qos_p107-a100`，避免长期网页服务再次占用 VASP runner 的 RTX5090 QOS；VASP runner 保持 RTX5090 不变。该修复合并、重建和现有失败链真实收敛前，阶段 7 继续为 `PARTIAL`。
+- 事件序列修复 PR #40 已合并为 `e58b769c435da7eaf9c6a9e672a3f4f99ab6401f`。构建 Job `40272` 在 `P107-RTX5090/anode02` 以 `COMPLETED/0:0` 结束，通过后端 `440/440`（另 4 项平台跳过）、前端 `125/125` 和 1857 模块构建；新 release manifest 含 545 项，SHA-256 为 `0b006c6e0b7dbb1dbcfefcb2da048be704ff532cbddd8332ee7c42a02fe90373`。
+- 新稳定服务 Job `40273` 运行于 `P107-A100/anode16:18731`；4090 内部转发、Nginx 和 Windows Operator 隧道分别切换到 `18740`、公网 `18733` 和本地 `21763`，三处 live/ready 均返回 Job `40273` 与提交 `e58b769...`。新入口验证后，旧服务 Job `40262` 与旧转发 `18739` 已核对归属并停止。
+- 短时只读核验 Job `40274` 在 `anode16` 以 `COMPLETED/0:0` 结束：SQLite 完整性为 `ok`，失败 workflow 顶层为 `failed`，四步为 `succeeded/scientific_failed/blocked/blocked`，事件序号连续唯一 `1-18`，阻断事件为 `16/17`；attempt 表和目录恰有 Relax/SCF 两项，Job ID 恰为 `40264/40265`，BAND/DOS 零 attempt、零目录和零 Job ID。
+- Demo Viewer 浏览器验收与数据库、目录和调度证据一致：Dashboard 为 2 个工作流、0 个运行中、1 个成功和 1 个需关注；失败详情明确显示 SCF `electronic_not_converged`、BAND/DOS 已阻断且 Attempt 为 0，Viewer 命令禁用。完整证据见 `docs/107cup/stage7-vasp-evidence.md`。阶段 7 至此改为 `DONE`，阶段 8 继续为 `PENDING`。
