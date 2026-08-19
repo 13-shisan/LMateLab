@@ -381,7 +381,14 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
 
     def test_vaspkit_banner_must_be_exact_and_unique(self):
         wrong_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.0")
-        for output in (wrong_banner, REAL_VASPKIT_BANNER + REAL_VASPKIT_BANNER):
+        extended_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1.1")
+        suffixed_banner = REAL_VASPKIT_BANNER.replace("1.5.1", "1.5.1rc1")
+        for output in (
+            wrong_banner,
+            extended_banner,
+            suffixed_banner,
+            REAL_VASPKIT_BANNER + REAL_VASPKIT_BANNER,
+        ):
             with self.subTest(output=output):
                 result = self.fixture.run(vaspkit_output=output)
                 self.assertNotEqual(0, result.returncode, result)
@@ -731,19 +738,28 @@ class CompetitionDeployContractTests(unittest.TestCase):
             ),
         )
         banner_assignment = "vaspkit_banner='VASPKIT Standard Edition 1.5.1'"
-        extraction = (
+        bounded_extraction = (
             "grep -Eo "
             "'VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+"
-            "[0-9]+\\.[0-9]+\\.[0-9]+' vaspkit-version.txt"
+            "[0-9]+\\.[0-9]+\\.[0-9]+([^[:alnum:].]|$)' vaspkit-version.txt"
         )
+        strip_delimiter = "sed -E 's/[^[:alnum:].]$//'"
         for script_name in ("slurm/stage7-preflight.slurm", "slurm/vasp-stage.slurm"):
             with self.subTest(script_name=script_name):
                 source = self.read_required(script_name)
                 self.assertEqual(1, source.count(banner_assignment))
-                self.assertEqual(1, source.count(extraction))
+                self.assertEqual(1, source.count(bounded_extraction))
+                self.assertEqual(1, source.count(strip_delimiter))
                 self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', source)
                 self.assertIn(
                     'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
+                )
+                self.assertLess(
+                    source.index(bounded_extraction), source.index(strip_delimiter)
+                )
+                self.assertLess(
+                    source.index(strip_delimiter),
+                    source.index('test "${#vaspkit_markers[@]}" -eq 1'),
                 )
 
     def test_stage7_preflight_hashes_all_evidence_with_self_checked_manifests(self):
