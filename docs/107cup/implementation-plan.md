@@ -139,11 +139,11 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `40249` 在 `P107-A100/anode16:18731` 运行发布 `6ac224fbca09d35854c9cd054e00cadfe017b020`；4090 转发 `18738` 与公网入口均已验证 `200`，旧 Job `40211` 已核对归属后停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
+| 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `40262` 在 `P107-A100/anode17:18731` 运行发布 `e3ea99c7c8eff76c37c7fc2bda4b205d5e9a4501`；4090 转发 `18739` 与公网入口均已验证新服务，旧 Job `40249` 已核对归属后停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PARTIAL | 真实工作流 `4b566547-961b-4e10-a8d0-99431f2e2229` 的 Relax/SCF/BAND/DOS Job `40212/40250/40251/40252` 均为 `COMPLETED/0:0` 且科学验收通过；固定失败创建器 Job `40253` 因发布脚本缺少 backend 模块路径而在建立工作流前失败 | 合并并部署 acceptance import 修复，重跑 `scf_nonconvergence_v1`，验证 SCF 失败后 BAND/DOS 零 attempt、零 Job ID |
+| 7. VASP 四步闭环 | PARTIAL | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 已得到 SCF `scientific_failed/electronic_not_converged`，但终态聚合因同一事务内事件序号冲突回滚，BAND/DOS 暂未落为 `blocked` | 合并事件序列修复并用新服务收敛现有失败链，四重验证 BAND/DOS 零 attempt、零目录和零 Job ID |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -810,3 +810,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 成功链工作流 `4b566547-961b-4e10-a8d0-99431f2e2229` 已全部验收：Relax Job `40212`、SCF Job `40250`、BAND Job `40251`、DOS Job `40252` 均为 `COMPLETED/0:0` 且科学验收通过；页面同时显示四个独立 attempt 目录、资源耗时和固定输出哈希。
 - 首次固定失败链创建作业 `40253` 为 `FAILED/1:0`，唯一原因是 `stage7-acceptance.py` 以发布内绝对路径执行时没有将 `source/backend` 加入模块搜索路径，在导入 `competition_runtime` 时立即终止。该作业没有创建工作流或提交 VASP 作业，不得作为受控不收敛证据。
 - `codex/107cup-stage7-acceptance-import-fix` 已用部署契约先 RED 后 GREEN 固定 `PYTHONPATH="$release/source/backend"` 且确保在 Python 启动前生效；完整 Stage 7 后端回归 `438/438` 通过，23 项仅因 Windows/POSIX 条件跳过，Bash 语法与 `git diff --check` 通过。修复合并、在 107 重建并完成 `scf_nonconvergence_v1` 真实失败链前，阶段 7 仍为 `PARTIAL`。
+- acceptance import 修复 PR #39 已合并为 `e3ea99c7c8eff76c37c7fc2bda4b205d5e9a4501`。构建 Job `40259` 以 `COMPLETED/0:0` 结束，通过后端 `440/440`（另 4 项平台跳过）和前端 `125/125`，发布 manifest 含 `545` 项，SHA-256 为 `461b87da725b038c1a8567052b7baf55bcf7eb60ab601cbc381dbbda9acdf490`。稳定服务 Job `40262` 运行于 `P107-A100/anode17:18731`，4090 内部转发为 `127.0.0.1:18739`，公网、Dashboard、live 和 ready 均返回该新服务；旧 Job `40249` 和旧转发 `18738` 已核对后停止。
+- 固定失败链创建器 Job `40263` 以 `COMPLETED/0:0` 结束，创建工作流 `db9c793d-cf8f-4207-823b-5943d825f21d`。Relax attempt `2f5a7850-e3c3-4ffe-b2ab-fdaacf0562b8`、Job `40264` 通过科学验收；SCF attempt `2f3080ae-b445-4575-975a-e85cccbeafc9`、Job `40265` 在 Slurm 层为 `COMPLETED/0:0`，科学状态精确为 `scientific_failed/electronic_not_converged`。BAND/DOS 没有 attempt、目录或 Job ID，但事务回滚使其暂时仍显示 `waiting`，工作流顶层仍显示 `running`。
+- 诊断 Job `40269` 因诊断包装未设置前端路径，在业务诊断前失败且未修改工作流；诊断 Job `40270` 保留了真实 traceback：终态聚合同时创建 BAND 和 DOS 的 `workflow_step_blocked` 事件时触发 `UNIQUE constraint failed: workflow_events.workflow_id, workflow_events.sequence`。生产 `SessionLocal` 使用 `autoflush=False`，旧 `_next_event_sequence()` 只查询数据库，两个尚未 flush 的事件因而都取得 sequence `16`，事务整体回滚。
+- 事件序列修复在 `codex/107cup-stage7-event-sequence` 将协调器测试会话改为与生产一致的 `autoflush=False`，并令 `_next_event_sequence()` 同时考虑 `session.new` 中同一工作流的待写事件。目标测试先 RED 后 GREEN，协调器套件 `40/40`、Stage 7 本地完整后端回归 `440/440` 通过，25 项仅因 Windows/POSIX 条件跳过；前端 `125/125` 和 Bash 语法检查亦通过。稳定 `service.slurm` 同时固定到 `P107-A100/qos_p107-a100`，避免长期网页服务再次占用 VASP runner 的 RTX5090 QOS；VASP runner 保持 RTX5090 不变。该修复合并、重建和现有失败链真实收敛前，阶段 7 继续为 `PARTIAL`。

@@ -1272,8 +1272,8 @@ class CompetitionDeployContractTests(unittest.TestCase):
         source = self.read_required("service.slurm")
         for required in (
             "#SBATCH --account=competition",
-            "#SBATCH --partition=P107-RTX5090",
-            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --partition=P107-A100",
+            "#SBATCH --qos=qos_p107-a100",
             "#SBATCH --time=4-00:00:00",
             "alembic -c alembic.ini upgrade head",
             "alembic -c alembic_digest.ini upgrade head",
