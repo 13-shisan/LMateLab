@@ -52,6 +52,7 @@ test "${#potcar_titles[@]}" -eq 2
 [[ "${potcar_titles[0]}" == PAW_PBE\ Mo_sv* ]]
 [[ "${potcar_titles[1]}" == PAW_PBE\ S\ * ]]
 
+source /etc/profile.d/modules.sh
 source /home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh
 command -v vasp_std | tee vasp-std-path.txt
 ldd "$(command -v vasp_std)" > vasp-std-ldd.txt
