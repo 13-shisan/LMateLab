@@ -41,6 +41,7 @@ test -f "$frontend_root/index.html"
 test -f "$source_root/backend/main_107cup.py"
 
 export LMATELAB_RELEASE_ROOT="$release"
+export LMATELAB_WORKFLOW_ROOT="$root/data/workflows"
 export LMATELAB_SLURM_PROBE_SCRIPT="$release/source/deploy/107cup/slurm/probe.slurm"
 export LMATELAB_VASP_STAGE_SCRIPT="$release/source/deploy/107cup/slurm/vasp-stage.slurm"
 export LMATELAB_COORDINATOR_ENABLED="${LMATELAB_COORDINATOR_ENABLED:-1}"

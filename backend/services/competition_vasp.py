@@ -663,13 +663,11 @@ def _evidence_signature(identity: os.stat_result) -> tuple[int, int, int, int, i
     )
 
 
-def _directory_signature(identity: os.stat_result) -> tuple[int, int, int, int, int]:
+def _directory_signature(identity: os.stat_result) -> tuple[int, int, int]:
     return (
         identity.st_dev,
         identity.st_ino,
         identity.st_mode,
-        identity.st_size,
-        identity.st_mtime_ns,
     )
 
 
