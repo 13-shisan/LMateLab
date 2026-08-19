@@ -139,11 +139,11 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `40091` 在 `P107-A100/anode16:18731` 运行发布 `c677e7b8f163610a21fbb5729a9538d979ac107b`；公网入口经 4090 `18736` 返回 `stable/live`，两套 SQLite 完整性为 `ok`，旧 Job `40081` 已受控停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
+| 3. 最小 107 网页服务 | PARTIAL | 稳定 Job `40249` 在 `P107-A100/anode16:18731` 运行发布 `6ac224fbca09d35854c9cd054e00cadfe017b020`；4090 转发 `18738` 与公网入口均已验证 `200`，旧 Job `40211` 已核对归属后停止 | 增加服务与 4090 转发自动恢复，并补运行手册 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PARTIAL | PR #34 合并提交 `c677e7b` 已部署；真实工作流 `4b566547-961b-4e10-a8d0-99431f2e2229` 的 Relax Job `40090` 在执行 VASP 前因稳定服务未导出工作流根目录而失败。修复分支 `ac363d2` 已由构建 Job `40097` 完整通过，但尚未合并和部署 | 合并修复 PR，按新 `main` 重建并安全替换服务，再重试 Relax；通过后继续 SCF、BAND/DOS 和受控失败链 |
+| 7. VASP 四步闭环 | PARTIAL | 真实工作流 `4b566547-961b-4e10-a8d0-99431f2e2229` 的 Relax/SCF/BAND/DOS Job `40212/40250/40251/40252` 均为 `COMPLETED/0:0` 且科学验收通过；固定失败创建器 Job `40253` 因发布脚本缺少 backend 模块路径而在建立工作流前失败 | 合并并部署 acceptance import 修复，重跑 `scf_nonconvergence_v1`，验证 SCF 失败后 BAND/DOS 零 attempt、零 Job ID |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -454,14 +454,14 @@ Slurm comment 含 workflow_id 和 attempt_id
 relax -> SCF -> BAND -> DOS
 ```
 
-- [ ] 每一步创建独立 attempt 目录和独立 Slurm Job ID。
-- [ ] 前一步只有通过阶段验收函数后，下一步才允许提交。
-- [ ] relax 验收结构输出、电子收敛、离子收敛和正常结束标记。
-- [ ] SCF 验收 CHGCAR、WAVECAR、费米能级和正常结束标记。
-- [ ] BAND 只复用已验收 SCF 产物并记录输入文件哈希。
-- [ ] DOS 只复用已验收 SCF 产物并记录输入文件哈希。
-- [ ] 记录 VASP 版本、VASPKIT 版本、GPU/CPU、峰值内存、耗时和 Slurm ExitCode。
-- [ ] 执行一个完整成功工作流。
+- [x] 每一步创建独立 attempt 目录和独立 Slurm Job ID。
+- [x] 前一步只有通过阶段验收函数后，下一步才允许提交。
+- [x] relax 验收结构输出、电子收敛、离子收敛和正常结束标记。
+- [x] SCF 验收 CHGCAR、WAVECAR、费米能级和正常结束标记。
+- [x] BAND 只复用已验收 SCF 产物并记录输入文件哈希。
+- [x] DOS 只复用已验收 SCF 产物并记录输入文件哈希。
+- [x] 记录 VASP 版本、VASPKIT 版本、GPU/CPU、峰值内存、耗时和 Slurm ExitCode。
+- [x] 执行一个完整成功工作流。
 - [ ] 执行一个人为失败工作流并验证后续步骤没有 Job ID。
 
 真实 VASP 完成必须同时具备 Slurm `COMPLETED/0:0`、VASP 正常结束标记、阶段文件集合和哈希；缺一项都不能显示成功。
@@ -806,3 +806,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 原成功链工作流 `4b566547-961b-4e10-a8d0-99431f2e2229` 的 Relax retry attempt `3f1a34a4-6efb-4de2-a299-cbec2c1a96cb`、Job `40212` 已通过科学验收，耗时 `24.92 s`、峰值 RSS `2305260 KiB`。随后 SCF attempt `de4c6c9b-f61d-4a50-9d9a-28a1f4b2f6a6`、Job `40213` 在 Slurm 层为 `COMPLETED/0:0`，耗时 `34.47 s`、峰值 RSS `2362168 KiB`，但科学验收以 `scf_efermi_invalid` 失败；BAND 和 DOS 均未产生 attempt，正确保持阻断。
 - SCF 现场 `vasprun.xml` 为 `70852` 字节，且只有一个规范 `<calculation><dos><i name="efermi">-1.73484146</i>` 记录。根因是默认 Pymatgen loader 为限制开销使用 `parse_dos=False` 和 `parse_eigen=False`，验收却仍读取 `Vasprun.efermi`，导致真实有效值被误判为空。
 - 修复分支 `codex/107cup-stage7-scf-efermi` 已按 RED/GREEN 完成本地实现：从已固定、已哈希复核的 XML 快照流式提取唯一有限十进制 `efermi`，且缺失、重复、`nan/inf`、非数值或错误 XML 路径仍失败关闭。`competition_vasp` 单模块 `100/100` 通过；Stage 7 相关 15 模块 `440/440` 通过，25 项仅因 Windows/POSIX 条件跳过。该结论仍是本地事实；修复 PR 合并、107 Slurm 构建、服务替换和原 SCF 证据重验收完成前，Stage 7 继续为 `PARTIAL`。
+- SCF Fermi 修复 PR #38 已合并为 `6ac224fbca09d35854c9cd054e00cadfe017b020`。构建 Job `40248` 通过后端 `440/440`（另 4 项平台跳过）和前端 `125/125`，生成 545 项 manifest，SHA-256 为 `e998cb0363533e4913a12d75d318de9fb8b688a2a1ce44b0161224530471d3d4`。稳定服务 Job `40249` 运行于 `P107-A100/anode16:18731`，4090 内部转发已切换到 `127.0.0.1:18738`，公网与 Operator 入口均返回新 Job 和提交。
+- 成功链工作流 `4b566547-961b-4e10-a8d0-99431f2e2229` 已全部验收：Relax Job `40212`、SCF Job `40250`、BAND Job `40251`、DOS Job `40252` 均为 `COMPLETED/0:0` 且科学验收通过；页面同时显示四个独立 attempt 目录、资源耗时和固定输出哈希。
+- 首次固定失败链创建作业 `40253` 为 `FAILED/1:0`，唯一原因是 `stage7-acceptance.py` 以发布内绝对路径执行时没有将 `source/backend` 加入模块搜索路径，在导入 `competition_runtime` 时立即终止。该作业没有创建工作流或提交 VASP 作业，不得作为受控不收敛证据。
+- `codex/107cup-stage7-acceptance-import-fix` 已用部署契约先 RED 后 GREEN 固定 `PYTHONPATH="$release/source/backend"` 且确保在 Python 启动前生效；完整 Stage 7 后端回归 `438/438` 通过，23 项仅因 Windows/POSIX 条件跳过，Bash 语法与 `git diff --check` 通过。修复合并、在 107 重建并完成 `scf_nonconvergence_v1` 真实失败链前，阶段 7 仍为 `PARTIAL`。
