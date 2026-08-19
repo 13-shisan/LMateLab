@@ -440,7 +440,7 @@ class AttemptInputTests(unittest.TestCase):
             os.symlink(target, source)
         except OSError as error:
             self.skipTest(f"symlink creation unavailable: {error}")
-        self.assert_policy_error("input_source_invalid", "relax")
+        self.assert_policy_error("input_path_invalid", "relax")
 
     def test_rejects_nonregular_source(self):
         source = self.root / self._stage5_directory_id / "relax" / "INCAR"
