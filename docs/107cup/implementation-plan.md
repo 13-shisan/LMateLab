@@ -143,7 +143,7 @@
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | PARTIAL | 固定 MoS2 四步闭环已在实现检查点 `f2fe8acd4251b25a8d47f876be0213cca0062a2c` 完成本地实现和回归；尚未合并、部署或产生任何 107 VASP Job ID | 合并实现 PR 后完成 Task 13 部署门禁，再执行成功和人为失败两条真实链 |
+| 7. VASP 四步闭环 | PARTIAL | 固定 MoS2 实现已由 PR #30 合并；首次 107 预检 Job `39373` 以 `FAILED/1:0` 结束，失败于 VASPKIT banner 严格整行比较，未执行 `vasp_std`、未进入正式构建 | 当前预检修复仅在本地完成；必须先经 PR 合并并在 107 提交新预检通过，才能继续 Task 13 后续门禁 |
 | 8. 结果解析与证据包 | PENDING | 前端结果/数据库形态和复用边界已确认，现有 BAND/DOS 解析能力尚未接入工作流 | 可追溯导出且失败不得显示成功 |
 | 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
@@ -778,3 +778,6 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Task 12 本地门禁通过：后端完整 14 模块回归 `430` 项通过、`21` 项按 Windows/POSIX 条件跳过；前端 `125/125`、竞赛范围 ESLint、demo/live 两种 `107cup` Vite 构建均通过且每次转换 `1857` 个模块；WSL runner 行为测试 `10/10`，三个 Stage 7 Bash 文件通过 `bash -n`，内部验收脚本通过 `py_compile`。
 - 仓库检查未发现本分支新增的 `shell=True`、`eval`、`bash -c`、`sh -c`、Docker/Singularity 或 POTCAR 内容路径，凭据模式扫描无命中，`git diff --check` 通过。构建保留既有 Browserslist、3Dmol 依赖 `eval` 和大 chunk 警告，不把第三方依赖警告误报为本阶段失败。
 - 上述只证明本地源码和合同门禁。分支尚未合并，107 未构建或部署该实现，本次没有连接 107、提交 Slurm 或执行 VASPKIT/VASP，因而没有真实 VASP Job ID、正常结束标记、四步文件集合或人为失败链证据。阶段 7 仅改为 `PARTIAL`，阶段 8 继续为 `PENDING`；必须在实现 PR 合并并同步固定提交后，再按 Task 13 和 Task 14 完成真实 107 验收。
+- 阶段 7 实现 PR #30 已合并；107 预检 Job `39373` 在 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/preflight-39373` 以 `FAILED/1:0` 结束。真实 VASPKIT 输出为 `|         VASPKIT Standard Edition 1.5.1 (27 Jan. 2024)         |`，旧脚本由 `grep` 保留整行后与 `VASPKIT Standard Edition 1.5.1` 严格比较，因边框和日期必然不匹配。
+- Job `39373` 在该版本门禁处停止，没有执行 `vasp_std`，也没有进入正式构建；不得将该保留失败现场记为 VASP 成功或四步链证据。
+- 预检修复在 `codex/107cup-stage7-preflight-fix` 严格按 TDD 仅在本地完成：受限提取唯一 VASPKIT 规范版本令牌并仍严格等于 `1.5.1`，在所有证据生成后写入不自包含的 `manifest.txt` 和仅哈希该文件的 `manifest.sha256`，两层均在作业内自校验。阶段 7 保持 `PARTIAL`；该修复必须经 PR 合并并在 107 重新提交预检通过后，才能继续。

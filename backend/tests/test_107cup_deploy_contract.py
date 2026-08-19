@@ -2,6 +2,7 @@ import ast
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -715,6 +716,62 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', preflight)
         self.assertIn('test "${vaspkit_markers[0]}" = "$vaspkit_banner"', preflight)
         self.assertLess(preflight.index("mapfile -t vaspkit_markers"), preflight.index("env-nvhpc.sh"))
+
+    def test_stage7_preflight_extracts_real_vaspkit_banner_as_one_exact_token(self):
+        source = self.read_required("slurm/stage7-preflight.slurm")
+        real_banner = (
+            "|         VASPKIT Standard Edition 1.5.1 "
+            "(27 Jan. 2024)         |"
+        )
+        canonical_banner = "VASPKIT Standard Edition 1.5.1"
+        self.assertEqual(
+            [canonical_banner],
+            re.findall(
+                r"VASPKIT\s+Standard\s+Edition\s+[0-9]+\.[0-9]+\.[0-9]+",
+                real_banner,
+            ),
+        )
+        extraction = (
+            "grep -Eo "
+            "'VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+"
+            "[0-9]+\\.[0-9]+\\.[0-9]+' vaspkit-version.txt"
+        )
+        self.assertEqual(1, source.count(extraction))
+        self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', source)
+        self.assertIn(
+            'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
+        )
+
+    def test_stage7_preflight_hashes_all_evidence_with_self_checked_manifests(self):
+        source = self.read_required("slurm/stage7-preflight.slurm")
+        final_evidence = source.index(
+            'ldd "$(command -v vasp_std)" > vasp-std-ldd.txt'
+        )
+        for required in (
+            "! -name manifest.txt",
+            "! -name manifest.sha256",
+            "-printf '%P\\0'",
+            "LC_ALL=C sort -z",
+        ):
+            self.assertIn(required, source)
+
+        manifest = source.index("> manifest.txt", final_evidence)
+        check_manifest = source.index("sha256sum -c manifest.txt", manifest)
+        manifest_sha = source.index(
+            "sha256sum manifest.txt > manifest.sha256", check_manifest
+        )
+        check_manifest_sha = source.index(
+            "sha256sum -c manifest.sha256", manifest_sha
+        )
+        chmod_evidence = source.index(
+            "find . -maxdepth 1 -type f -exec chmod 600 -- {} +",
+            check_manifest_sha,
+        )
+        self.assertLess(final_evidence, manifest)
+        self.assertLess(manifest, check_manifest)
+        self.assertLess(check_manifest, manifest_sha)
+        self.assertLess(manifest_sha, check_manifest_sha)
+        self.assertLess(check_manifest_sha, chmod_evidence)
 
     def test_stage7_runner_uses_private_scratch_and_no_overwrite_publication(self):
         source = self.read_required("slurm/vasp-stage.slurm")
