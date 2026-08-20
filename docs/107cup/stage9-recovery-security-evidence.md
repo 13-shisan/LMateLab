@@ -6,7 +6,7 @@
 
 - Stage 9 的恢复合同、安全边界、107 隔离回滚、真实结果只读复核和浏览器 Viewer 验收均已通过。
 - 故障注入没有使用正式 SQLite、正式 `current` 或 Stage 7/8 attempt；没有创建或重跑 VASP 作业。
-- 功能 PR `#50` 已合并，固定功能提交为 `7a2c2d62f7368436a9c1f03d9df9ea044d41d011`，合并提交和当前运行 release 为 `551ba97fbfca3093c19ef4e98e636bcaa9b88fef`。
+- 功能 PR `#50` 与验收证据 PR `#51` 已合并；固定功能提交为 `7a2c2d62f7368436a9c1f03d9df9ea044d41d011`，功能合并提交和当前运行 release 为 `551ba97fbfca3093c19ef4e98e636bcaa9b88fef`。
 - 正式服务已更新为 Job `40917`，运行在 `P107-A100/anode17:18731`；4090 内部、Windows Operator 和公网入口均返回该 Job 的同一健康身份。
 - Stage 9 状态为 `DONE`。Stage 3 仍为 `PARTIAL`：服务和 4090 转发自动恢复是后续独立门禁，本阶段没有把人工切换等同于自动恢复。
 

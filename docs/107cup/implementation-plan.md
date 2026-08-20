@@ -145,7 +145,7 @@
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
-| 9. 恢复、安全和回归 | DONE | PR `#50` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
+| 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
 
 ## 6. 阶段 1：竞赛仓库初始化
@@ -843,4 +843,4 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Job `40916` 对 Stage 7/8 固定成功/失败工作流进行只读复核并输出 `STAGE8_ACCEPTANCE_OK`，没有创建 VASP 作业或修改历史 attempt。最终快照 Job `40923` 的运行时终态为 `COMPLETED/0:0`；平台随后已清除短作业的 `scontrol/sacct` 记录，该限制与原始日志一并保留。
 - 新服务 Job `40917` 运行于 `P107-A100/anode17:18731`。4090 `18740`、Windows `127.0.0.1:21763` 和公网 `222.195.94.37:18733` 的 live/ready 均返回 Job `40917`、提交 `551ba97...` 和同一 manifest；旧 Job `40832` 经归属核对后停止为 `CANCELLED/0:15`。
 - 隔离 Playwright Viewer 会话以零控制台错误通过只读验收：新建、取消、重试均禁用；成功工作流显示四个 Job、日志、结构、BAND/DOS；失败工作流保持 SCF `electronic_not_converged` 与 BAND/DOS 零 attempt；VASP 数据库显示两条真实记录。
-- 完整证据见 `docs/107cup/stage9-recovery-security-evidence.md`。Stage 9 至此为 `DONE`，Stage 3 仍因服务和转发自动恢复未实现而保持 `PARTIAL`；下一阶段进入比赛交付验收。
+- 验收证据 PR #51 记录完整证据于 `docs/107cup/stage9-recovery-security-evidence.md`。Stage 9 至此为 `DONE`，Stage 3 仍因服务和转发自动恢复未实现而保持 `PARTIAL`；下一阶段进入比赛交付验收。
