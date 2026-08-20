@@ -1248,6 +1248,7 @@ class CompetitionReconciler:
                 "reason",
                 "source",
                 "stale",
+                "stale_since",
                 "state",
             )
         )
@@ -1544,6 +1545,17 @@ class CompetitionReconciler:
 
         previous = metadata.get("scheduler_observation")
         evidence = self._observation_evidence(observation)
+        if observation.stale:
+            previous_stale_since = (
+                previous.get("stale_since")
+                if isinstance(previous, dict) and previous.get("stale") is True
+                else None
+            )
+            evidence["stale_since"] = (
+                previous_stale_since
+                if isinstance(previous_stale_since, str)
+                else observation.observed_at.isoformat()
+            )
         state_changed = (
             not isinstance(previous, dict)
             or self._observation_signature(previous)
@@ -1551,7 +1563,12 @@ class CompetitionReconciler:
         )
         metadata["scheduler_observation"] = evidence
         runner_kind = contract.submission.runner_kind
-        status = self._workload_scheduler_status(runner_kind, observation.state)
+        status = (
+            expected_status
+            if observation.stale
+            and observation.error_code != "scheduler_ownership_mismatch"
+            else self._workload_scheduler_status(runner_kind, observation.state)
+        )
 
         now = self._clock()
         attempt_values = {
@@ -1617,6 +1634,7 @@ class CompetitionReconciler:
                     "job_id": attempt.slurm_job_id,
                     "raw_state": observation.raw_state,
                     "stale": observation.stale,
+                    "stale_since": evidence.get("stale_since"),
                     "status": status,
                 },
             )

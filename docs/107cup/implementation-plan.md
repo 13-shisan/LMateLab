@@ -145,7 +145,7 @@
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
-| 9. 恢复、安全和回归 | PENDING | 仅有部署契约和基础安全检查 | 故障、竞态和恶意输入全部失败关闭 |
+| 9. 恢复、安全和回归 | PARTIAL | 已建立 Stage 9 分支并实现可信状态保留、stale 时间、恢复/安全/前端回归门禁及运行手册；尚待合并后的 107 Slurm 与浏览器验收 | 完成本地全量、107 隔离故障演练和正式入口只读核验 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
 
 ## 6. 阶段 1：竞赛仓库初始化
@@ -829,3 +829,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 用户在登录浏览器中确认结果列表、成功结果结构/BAND/DOS、失败结果、VASP 只读数据库和 CIF、POSCAR、BAND、DOS、证据包五种下载均正常。该人工确认与 Job `40308` 的 Viewer/Operator 字节级下载验收共同关闭浏览器门禁。
 - 旧 Job `40273/40309/40786` 经用户、作业名、命令和日志路径归属核对后受控停止，三者均显示 `CANCELLED`；临时 `18741 -> anode19:18731` 已撤销。清理后仅保留正式 `18740`，三处正式入口仍返回 Job `40832`。
 - Stage 8 至此为 `DONE`。没有重跑 VASP，也没有加入 Agent、机器学习、任意材料或任意命令功能；下一阶段按阶段 9 的恢复、安全和回归范围另行执行。
+
+### 17.9 Stage 9 实施启动
+
+- 从 `origin/main` 提交 `027c10f39f93e174c0ff2871d911f18b70116f0d` 创建 `codex/107cup-stage9-recovery-security`，正式 Job `40832`、正式 SQLite、正式 `current` 和 Stage 7/8 证据均未用于故障注入。
+- 修正 Slurm 暂时不可用时覆盖可信状态的问题：普通失联保留最后 `queued/running`，记录固定首次 `stale_since` 并停止推进；作业身份不匹配仍降为 `unknown`。
+- 新增 `test_competition_recovery.py`、`test_competition_security.py` 和 `competitionWorkflowE2E.test.mjs`，覆盖重启对账、数据库失败、取消竞态、网关错误目标、回滚不可变、路径/符号链接/注入、超大日志、非法文件名和非归属作业拒绝。
+- 强化 `verify-runtime.sh`：所有调度和 HTTP 查询均有超时，精确核对 Job、节点、commit、manifest、release/data mode、SQLite 完整性和登录节点进程；配置公开入口时若目标不一致则失败关闭且不自动切换。
+- 隔离操作、六层测试和证据要求见 `docs/107cup/recovery-runbook.md`。当前仅完成第一批本地聚焦测试，Stage 9 保持 `PARTIAL`，不得提前记录为完成。

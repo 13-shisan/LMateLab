@@ -122,6 +122,8 @@ python -m unittest \
   tests.test_competition_coordinator \
   tests.test_competition_lifespan \
   tests.test_competition_results \
+  tests.test_competition_recovery \
+  tests.test_competition_security \
   tests.test_107cup_stage8_acceptance_contract \
   -v
 

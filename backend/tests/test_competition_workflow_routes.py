@@ -791,6 +791,8 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             "attempt_dir",
             "slurm_state",
             "exit_code",
+            "scheduler_stale",
+            "stale_since",
             "reason",
             "accepted",
             "acceptance",
