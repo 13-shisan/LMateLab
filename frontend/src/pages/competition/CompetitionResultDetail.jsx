@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { Download } from 'lucide-react';
 
 import {
   useCompetitionData,
@@ -17,6 +18,14 @@ import VaspStructureViewer from '../db/vasp-detail/VaspStructureViewer';
 import VaspTaskSummary from '../db/vasp-detail/VaspTaskSummary';
 import '../db/vasp-detail/VaspTaskDetail.css';
 import './CompetitionPages.css';
+
+const RESULT_ARTIFACT_KINDS = new Set([
+  'structure-cif',
+  'structure-poscar',
+  'band-data',
+  'dos-data',
+  'evidence-bundle',
+]);
 
 function inferArtifactKind(path, filename) {
   const hasSuppliedFilename = filename !== undefined
@@ -345,6 +354,13 @@ function resultDbKey(dataKind) {
   return '107cup-result';
 }
 
+function normalizeResultArtifacts(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((kind) => (
+    typeof kind === 'string' && RESULT_ARTIFACT_KINDS.has(kind)
+  )))];
+}
+
 function displayFailureValue(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') return value;
@@ -434,6 +450,47 @@ function ResultFailureEvidence({ result }) {
   );
 }
 
+function ResultEvidenceDownload({ artifacts, workflowId, downloadFile }) {
+  const [downloading, setDownloading] = useState(false);
+  const [actionError, setActionError] = useState('');
+  if (!artifacts.includes('evidence-bundle')) return null;
+
+  async function downloadEvidence() {
+    setActionError('');
+    setDownloading(true);
+    try {
+      const encodedId = encodeURIComponent(workflowId);
+      await downloadFile(
+        `/api/competition/results/${encodedId}/artifacts/evidence-bundle`,
+        `${workflowId}-evidence.json`,
+      );
+    } catch (error) {
+      setActionError(String(error?.message || error));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="competition-result-download-action">
+      <button
+        className="vasp-detail-button competition-result-download-button"
+        type="button"
+        disabled={downloading}
+        onClick={downloadEvidence}
+      >
+        <Download size={15} aria-hidden="true" />
+        {downloading ? '正在下载证据包…' : '下载证据包'}
+      </button>
+      {actionError ? (
+        <div className="competition-result-download-error" role="alert">
+          下载失败：{actionError}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function CompetitionResultDetail() {
   const { workflowId } = useParams();
   const { provider, mode } = useCompetitionData();
@@ -482,6 +539,7 @@ export default function CompetitionResultDetail() {
   const resultSteps = normalizeResultSteps(result.steps);
   const materialLabel = displayIdentity(result.material);
   const scientificDbKey = resultDbKey(result.data_kind);
+  const resultArtifacts = normalizeResultArtifacts(result.artifacts);
 
   return (
     <main className="competition-result-detail-page">
@@ -496,6 +554,11 @@ export default function CompetitionResultDetail() {
           </div>
           <p>{workflowId}</p>
         </div>
+        <ResultEvidenceDownload
+          artifacts={resultArtifacts}
+          workflowId={workflowId}
+          downloadFile={downloadScientificFile}
+        />
       </header>
 
       <section className="competition-result-evidence" aria-labelledby="competition-result-identity-title">

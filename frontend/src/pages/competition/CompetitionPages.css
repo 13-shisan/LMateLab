@@ -934,6 +934,34 @@
   margin-bottom: 20px;
 }
 
+.competition-result-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.competition-result-download-action {
+  min-width: 0;
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 8px;
+}
+
+.competition-result-download-button {
+  white-space: nowrap;
+}
+
+.competition-result-download-error {
+  max-width: 360px;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .competition-results-header h1,
 .competition-results-header p,
 .competition-result-detail-header h1,
@@ -1208,6 +1236,19 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .competition-result-detail-header {
+    flex-direction: column;
+  }
+
+  .competition-result-download-action {
+    width: 100%;
+    justify-items: start;
+  }
+
+  .competition-result-download-error {
+    text-align: left;
   }
 
   .competition-results-heading span,

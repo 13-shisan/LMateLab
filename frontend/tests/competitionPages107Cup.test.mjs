@@ -2393,6 +2393,46 @@ test('result detail sanitizes identity and workflow step evidence before JSX', (
   assert.match(source, /const\s+materialLabel\s*=\s*displayIdentity\(result\.material\);/);
 });
 
+test('result evidence download is capability-gated and shared by success and failure views', () => {
+  const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
+  const normalizeResultArtifacts = loadFunction(source, 'normalizeResultArtifacts', {
+    RESULT_ARTIFACT_KINDS: new Set([
+      'structure-cif',
+      'structure-poscar',
+      'band-data',
+      'dos-data',
+      'evidence-bundle',
+    ]),
+  });
+
+  assert.deepEqual(
+    normalizeResultArtifacts([
+      'evidence-bundle',
+      'structure-cif',
+      'evidence-bundle',
+      'private-file',
+      null,
+      {},
+    ]),
+    ['evidence-bundle', 'structure-cif'],
+  );
+  for (const invalid of [undefined, null, '', {}, new Set(['evidence-bundle'])]) {
+    assert.deepEqual(normalizeResultArtifacts(invalid), []);
+  }
+
+  assert.match(source, /artifacts\.includes\(['"]evidence-bundle['"]\)/);
+  assert.match(source, /<Download\s+size=\{15\}\s+aria-hidden=['"]true['"]\s*\/>/);
+  assert.match(source, /正在下载证据包/);
+  assert.match(source, /下载失败：\{actionError\}/);
+  assert.match(source, /const\s+resultArtifacts\s*=\s*normalizeResultArtifacts\(result\.artifacts\);/);
+  assert.match(source, /<ResultEvidenceDownload[\s\S]*?artifacts=\{resultArtifacts\}[\s\S]*?downloadFile=\{downloadScientificFile\}/);
+  assert.ok(
+    source.indexOf('<ResultEvidenceDownload') < source.indexOf("detailState.variant === 'success'"),
+    'the evidence action must render before the success/failure branch',
+  );
+  assert.match(source, /\/artifacts\/evidence-bundle/);
+});
+
 test('failure evidence completeness rejects unsafe array entries', () => {
   const source = read('../src/pages/competition/CompetitionResultDetail.jsx');
   const displayFailureValue = loadFunction(source, 'displayFailureValue');
