@@ -123,12 +123,12 @@
 
 - 4090 用户态 Nginx：`/home/Pwjb/.config/lmatelab-107cup-proxy/conf/nginx.conf`。
 - Nginx 监听：`0.0.0.0:18733`。
-- 4090 到 107 的正式内部 SSH 转发：`127.0.0.1:18740 -> 11.11.10.18:18731 (anode18)`；Stage 8 临时转发 `18741` 已在浏览器验收后撤销。
+- 4090 到 107 的正式内部 SSH 转发：`127.0.0.1:18740 -> 11.11.10.17:18731 (anode17)`；临时转发 `18741` 已撤销。
 - 4090 上的 107 SSH 复用主连接使用 `/home/Pwjb/.ssh/cm-107cup`，socket 权限为 `0600`，配置 96 小时 `ControlPersist` 和 30 秒保活；它减少重复二次验证，但不是永久自动恢复机制。
 - 公网入口：`http://222.195.94.37:18733`。
 - 已验证白名单 IP 返回 `200`，未授权 IP 返回 `403`。
 - 运行中的 Nginx 已替换为只读公开入口：登录端点只允许 POST，其余页面和 API 只允许 GET；注册 POST、非登录 POST 和登录端点 PUT 实测均为 `403`。
-- 当前 4090 内部入口、Windows Operator 入口 `http://127.0.0.1:21763` 与公网入口均返回 Stage 8 服务 Job `40832`、节点 `anode18`、提交 `6242132c30e8772288e31d9fb5eec930d2f44962` 和 manifest `627b8c0409758e7226b58d5ba198fbc6f69f3140ab799ea3273b0110ca072e8c`；三处 `live/ready` 均为 `200`。
+- 当前 4090 内部入口、Windows Operator 入口 `http://127.0.0.1:21763` 与公网入口均返回 Stage 9 服务 Job `40917`、节点 `anode17`、提交 `551ba97fbfca3093c19ef4e98e636bcaa9b88fef` 和 manifest `163b52ad998f947f575589df07e1bafa36423e122e3eab00ba2008e0d031a58d`；三处 `live/ready` 均为 `200`。
 - 该快照入口为 HTTP，尚未完成 TLS 和自动恢复。
 
 ## 5. 阶段状态总表
@@ -139,13 +139,13 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | PARTIAL | Stage 8 稳定 Job `40832` 在 `P107-A100/anode18:18731` 运行发布 `6242132c30e8772288e31d9fb5eec930d2f44962`；旧服务已清理，4090 正式转发 `18740`、公网和 Operator 入口均返回该服务 | 增加服务与正式转发自动恢复并补运行手册 |
+| 3. 最小 107 网页服务 | PARTIAL | Stage 9 稳定 Job `40917` 在 `P107-A100/anode17:18731` 运行发布 `551ba97fbfca3093c19ef4e98e636bcaa9b88fef`；旧 Job `40832` 已受控停止，4090 正式转发 `18740`、公网和 Operator 入口均返回新服务 | 增加服务与正式转发自动恢复；运行手册已完成但自动恢复尚未实现 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
-| 9. 恢复、安全和回归 | PARTIAL | 已建立 Stage 9 分支并实现可信状态保留、stale 时间、恢复/安全/前端回归门禁及运行手册；尚待合并后的 107 Slurm 与浏览器验收 | 完成本地全量、107 隔离故障演练和正式入口只读核验 |
+| 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
 | 10. 比赛交付验收 | PENDING | 尚无完整演示包 | 六层测试和真实演示复跑全部通过 |
 
 ## 6. 阶段 1：竞赛仓库初始化
@@ -511,17 +511,18 @@ relax -> SCF -> BAND -> DOS
 - Create: `backend/tests/test_competition_security.py`
 - Create: `frontend/tests/competitionWorkflowE2E.test.mjs`
 - Create: `docs/107cup/recovery-runbook.md`
+- Create: `docs/107cup/stage9-recovery-security-evidence.md`
 - Modify: `deploy/107cup/verify-runtime.sh`
 
-- [ ] 服务重启时恢复未完成工作流并与 Slurm 对账。
-- [ ] Slurm 暂时不可用时保留最后可信状态并标记陈旧时间，不伪造失败或成功。
-- [ ] 数据库写入失败时不提交下一阶段。
-- [ ] 取消与完成竞态以 `sacct` 最终状态和事件序列收敛。
-- [ ] 网关目标变化时公开入口失败关闭，不改为生产 4090 LMateLab。
-- [ ] 发布回滚不修改历史 attempt 和证据包。
-- [ ] 路径穿越、符号链接逃逸、参数注入、超大日志和非法文件名全部拒绝。
-- [ ] 验证平台不能查看或控制同一账号下的非 LMateLab 作业。
-- [ ] 重跑后端、前端、假 Slurm、107 真实 Slurm、真实 VASP 和浏览器六层测试。
+- [x] 服务重启时恢复未完成工作流并与 Slurm 对账。
+- [x] Slurm 暂时不可用时保留最后可信状态并标记陈旧时间，不伪造失败或成功。
+- [x] 数据库写入失败时不提交下一阶段。
+- [x] 取消与完成竞态以最终调度状态、已提交取消意图和事件序列收敛。
+- [x] 网关目标变化时公开入口失败关闭，不改为生产 4090 LMateLab。
+- [x] 发布回滚不修改历史 attempt 和证据包。
+- [x] 路径穿越、符号链接逃逸、参数注入、超大日志和非法文件名全部拒绝。
+- [x] 验证平台不能查看或控制同一账号下的非 LMateLab 作业。
+- [x] 重跑后端、前端、假 Slurm、107 真实 Slurm、真实 VASP 只读验收和浏览器六层测试。
 
 ## 15. 阶段 10：比赛交付验收
 
@@ -837,3 +838,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 新增 `test_competition_recovery.py`、`test_competition_security.py` 和 `competitionWorkflowE2E.test.mjs`，覆盖重启对账、数据库失败、取消竞态、网关错误目标、回滚不可变、路径/符号链接/注入、超大日志、非法文件名和非归属作业拒绝。
 - 强化 `verify-runtime.sh`：所有调度和 HTTP 查询均有超时，精确核对 Job、节点、commit、manifest、release/data mode、SQLite 完整性和登录节点进程；配置公开入口时若目标不一致则失败关闭且不自动切换。
 - 隔离操作、六层测试和证据要求见 `docs/107cup/recovery-runbook.md`。当前仅完成第一批本地聚焦测试，Stage 9 保持 `PARTIAL`，不得提前记录为完成。
+- 功能 PR #50 已合并，功能提交为 `7a2c2d62f7368436a9c1f03d9df9ea044d41d011`，合并提交为 `551ba97fbfca3093c19ef4e98e636bcaa9b88fef`。107 构建 Job `40860` 在 `P107-RTX5090/anode01` 通过后端 `470/470`（另有 4 项环境跳过）、前端 `129/129` 和 Vite 生产构建；release manifest SHA-256 为 `163b52ad998f947f575589df07e1bafa36423e122e3eab00ba2008e0d031a58d`。
+- Job `40910` 生成正式状态前快照；隔离回滚 Job `40911` 在 `anode17:18732` 启动旧 release `6242132...` 并完成独立 SQLite 迁移、live/ready 和受控关闭；Job `40913` 的后快照输出 `stable state matches before snapshot`。正式 `current` 和两库哈希均未改变。
+- Job `40916` 对 Stage 7/8 固定成功/失败工作流进行只读复核并输出 `STAGE8_ACCEPTANCE_OK`，没有创建 VASP 作业或修改历史 attempt。最终快照 Job `40923` 的运行时终态为 `COMPLETED/0:0`；平台随后已清除短作业的 `scontrol/sacct` 记录，该限制与原始日志一并保留。
+- 新服务 Job `40917` 运行于 `P107-A100/anode17:18731`。4090 `18740`、Windows `127.0.0.1:21763` 和公网 `222.195.94.37:18733` 的 live/ready 均返回 Job `40917`、提交 `551ba97...` 和同一 manifest；旧 Job `40832` 经归属核对后停止为 `CANCELLED/0:15`。
+- 隔离 Playwright Viewer 会话以零控制台错误通过只读验收：新建、取消、重试均禁用；成功工作流显示四个 Job、日志、结构、BAND/DOS；失败工作流保持 SCF `electronic_not_converged` 与 BAND/DOS 零 attempt；VASP 数据库显示两条真实记录。
+- 验收证据 PR #51 记录完整证据于 `docs/107cup/stage9-recovery-security-evidence.md`。Stage 9 至此为 `DONE`，Stage 3 仍因服务和转发自动恢复未实现而保持 `PARTIAL`；下一阶段进入比赛交付验收。
