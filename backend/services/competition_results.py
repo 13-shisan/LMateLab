@@ -102,6 +102,17 @@ def _finite_or_none(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _infer_dimensionality(pbc: list[bool], lengths: list[float]) -> int:
+    dimensionality = sum(bool(value) for value in pbc)
+    if (
+        dimensionality == 3
+        and len(lengths) == 3
+        and lengths[2] > 2.5 * max(lengths[0], lengths[1])
+    ):
+        return 2
+    return dimensionality
+
+
 class ExistingVaspScientificParser:
     """Adapter around the existing VASP plot/data parsers and ASE structures."""
 
@@ -120,7 +131,6 @@ class ExistingVaspScientificParser:
     def build_detail(
         self, workflow_id: str, sources: Mapping[str, VerifiedArtifact]
     ) -> dict[str, Any]:
-        import numpy as np
         from pymatgen.io.ase import AseAtomsAdaptor
         from pymatgen.io.vasp.outputs import Vasprun
 
@@ -196,7 +206,7 @@ class ExistingVaspScientificParser:
                     "volume": volume,
                 },
                 "density_g_cm3": density,
-                "dimensionality": int(np.count_nonzero(atoms.pbc)),
+                "dimensionality": _infer_dimensionality(pbc, lengths),
                 "atomic_positions_frac": atomic_positions,
             },
             "capabilities": {
@@ -464,6 +474,7 @@ class CompetitionResultService:
                 acceptance.get("reason_code") if acceptance is not None else observation.get("error_code")
             ),
             "accepted": acceptance.get("accepted") if acceptance is not None else None,
+            "acceptance": acceptance,
             "resources": acceptance.get("measurements", {}) if acceptance is not None else {},
             "updated_at": _timestamp(attempt.updated_at if attempt is not None else step.updated_at),
         }
