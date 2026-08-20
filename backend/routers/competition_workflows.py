@@ -125,6 +125,18 @@ def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _safe_iso_timestamp(value: object) -> str | None:
+    if type(value) is not str or not value or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.isoformat()
+
+
 def _source_label(source_kind: str) -> str:
     return "uploaded structure" if source_kind == "upload" else "built-in MoS2"
 
@@ -234,6 +246,8 @@ def _step_payload(step: WorkflowStep, workflow_id: str) -> dict[str, Any]:
         ),
         "slurm_state": _safe_match(observation.get("raw_state"), _SAFE_SLURM_STATE),
         "exit_code": _safe_match(observation.get("exit_code"), _SAFE_EXIT_CODE),
+        "scheduler_stale": observation.get("stale") is True,
+        "stale_since": _safe_iso_timestamp(observation.get("stale_since")),
         "reason": reason,
         "accepted": accepted,
         "acceptance": acceptance,

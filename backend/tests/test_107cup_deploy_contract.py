@@ -1198,6 +1198,14 @@ class CompetitionDeployContractTests(unittest.TestCase):
         ):
             self.assertIn(suite, source)
 
+    def test_formal_build_runs_stage9_recovery_and_security_suites(self):
+        source = self.read_required("build.slurm")
+        for suite in (
+            "tests.test_competition_recovery",
+            "tests.test_competition_security",
+        ):
+            self.assertIn(suite, source)
+
     def test_build_job_uses_module_python_with_a_valid_pip_environment(self):
         source = self.read_required("build.slurm")
         module_init = "source /etc/profile.d/modules.sh"

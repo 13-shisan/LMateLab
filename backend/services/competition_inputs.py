@@ -54,7 +54,18 @@ def _reject_json_constant(value: str) -> None:
 def _safe_filename(filename: str) -> str:
     if not isinstance(filename, str) or not filename.strip():
         raise InputValidationError("a non-empty audit filename is required")
-    if "/" in filename or "\\" in filename or ".." in filename:
+    try:
+        encoded = filename.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise InputValidationError("structure filename must be valid UTF-8") from exc
+    if (
+        filename != filename.strip()
+        or len(encoded) > 255
+        or any(ord(character) < 32 or ord(character) == 127 for character in filename)
+        or "/" in filename
+        or "\\" in filename
+        or ".." in filename
+    ):
         raise InputValidationError("structure filename must not contain path components")
     return filename
 

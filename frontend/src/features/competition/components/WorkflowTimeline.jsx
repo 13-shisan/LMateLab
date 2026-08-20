@@ -42,6 +42,16 @@ function displayAcceptance(value) {
   return '-';
 }
 
+function displayStaleSince(value) {
+  if (
+    typeof value !== 'string'
+    || value.length > 64
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    || !Number.isFinite(Date.parse(value))
+  ) return '-';
+  return value;
+}
+
 function describeScientificState(step) {
   if (step?.status === 'blocked') return '依赖失败，未启动';
   if (step?.status === 'awaiting_acceptance') return '等待科学验收';
@@ -117,6 +127,14 @@ export default function WorkflowTimeline({ steps = [], compact = false }) {
                   </dd>
                 </div>
                 <div><dt>Slurm state / exit_code</dt><dd>{displayEvidenceValue(step.slurm_state)} / {displayEvidenceValue(step.exit_code)}</dd></div>
+                <div>
+                  <dt>调度证据</dt>
+                  <dd>
+                    {step.scheduler_stale === true
+                      ? `状态陈旧 · ${displayStaleSince(step.stale_since)}`
+                      : '最新可信状态'}
+                  </dd>
+                </div>
                 <div><dt>reason</dt><dd>{displayEvidenceValue(step.reason)}</dd></div>
                 <div><dt>acceptance</dt><dd>{displayAcceptance(step.accepted)}</dd></div>
                 <div><dt>科学状态</dt><dd>{describeScientificState(step)}</dd></div>

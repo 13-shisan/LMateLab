@@ -2240,7 +2240,7 @@ class CompetitionReconcileTests(unittest.TestCase):
     def test_fresh_reconciler_persists_cancelled_terminal_state(self):
         self.assert_terminal_reconciliation("CANCELLED", "0:15", "cancelled")
 
-    def test_missing_live_and_accounting_records_become_unknown_stale_idempotently(self):
+    def test_missing_live_and_accounting_records_preserve_trusted_state_and_mark_stale(self):
         outcome, _base = self.accepted_attempt()
         clocks = (
             datetime(2026, 8, 15, 10, 0, tzinfo=timezone.utc),
@@ -2266,15 +2266,19 @@ class CompetitionReconcileTests(unittest.TestCase):
             )
             with Session(self.engine) as session:
                 result = reconciler.reconcile_attempt(session, outcome.attempt_id)
-            self.assertEqual(("unknown", True), (result.status, result.stale))
+            self.assertEqual(("queued", True), (result.status, result.stale))
 
         with Session(self.engine) as session:
             attempt = session.get(WorkflowAttempt, outcome.attempt_id)
             step = session.get(WorkflowStep, attempt.step_id)
             run = session.get(WorkflowRun, self.workflow_id)
             metadata = json.loads(attempt.metadata_json)
-            self.assertEqual(("unknown", "unknown", "unknown"), (attempt.status, step.status, run.status))
+            self.assertEqual(("queued", "queued", "queued"), (attempt.status, step.status, run.status))
             self.assertTrue(metadata["scheduler_observation"]["stale"])
+            self.assertEqual(
+                clocks[0].isoformat(),
+                metadata["scheduler_observation"]["stale_since"],
+            )
             self.assertEqual(
                 "scheduler_record_unavailable",
                 metadata["scheduler_observation"]["error_code"],

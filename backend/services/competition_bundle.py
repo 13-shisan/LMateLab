@@ -112,6 +112,7 @@ def _scheduler_payload(metadata: Mapping[str, Any]) -> dict[str, Any]:
         "node_list",
         "reason",
         "stale",
+        "stale_since",
         "error_code",
         "observed_at",
         "started_at",
