@@ -28,6 +28,7 @@ from services.competition_results import (
     ExistingVaspScientificParser,
     ResultServiceError,
     VerifiedArtifact,
+    _infer_dimensionality,
 )
 from routers.competition_workflows import get_competition_result_service, router
 
@@ -39,6 +40,11 @@ STEP_KEYS = ("relax", "scf", "band", "dos")
 
 
 class ExistingVaspScientificParserTests(unittest.TestCase):
+    def test_dimensionality_reuses_the_project_vacuum_axis_fallback(self):
+        self.assertEqual(2, _infer_dimensionality([True, True, True], [3.18, 3.18, 20.0]))
+        self.assertEqual(3, _infer_dimensionality([True, True, True], [3.18, 3.18, 6.0]))
+        self.assertEqual(2, _infer_dimensionality([True, True, False], [3.18, 3.18, 20.0]))
+
     def test_structure_exports_use_the_binary_and_text_buffers_required_by_ase(self):
         path = Path("competition_templates/mos2_v1/POSCAR").resolve()
         source = VerifiedArtifact(
@@ -428,6 +434,12 @@ class CompetitionResultServiceTests(unittest.TestCase):
         self.assertEqual(WORKFLOW_ID, detail["workflow_id"])
         self.assertEqual(["relax", "scf", "band", "dos"], [step["key"] for step in detail["steps"]])
         self.assertTrue(all(step["accepted"] is True for step in detail["steps"]))
+        self.assertTrue(
+            all(step["resources"]["elapsed_wall_seconds"] == 1.5 for step in detail["steps"])
+        )
+        self.assertTrue(
+            all(step["acceptance"]["artifacts"] for step in detail["steps"])
+        )
         self.assertEqual("MoS2", detail["vasp_detail"]["row"]["formula"])
         self.assertEqual(
             ["structure-cif", "structure-poscar", "band-data", "dos-data", "evidence-bundle"],

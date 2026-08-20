@@ -2353,6 +2353,19 @@ test('result detail sanitizes identity and workflow step evidence before JSX', (
       exit_code: '1:0',
       reason: 'not converged',
       accepted: false,
+      resources: {
+        elapsed_wall_seconds: 1.5,
+        process_tree_peak_rss_kbytes: 2048,
+        private_value: 'do not render',
+      },
+      acceptance: {
+        artifacts: [
+          { name: 'OUTCAR', sha256: 'a'.repeat(64), size_bytes: 12 },
+          { name: 'PRIVATE', sha256: 'b'.repeat(64), size_bytes: 4 },
+          { name: 'vasprun.xml', sha256: 'invalid', size_bytes: 2 },
+        ],
+        checks: [{ name: 'private-check', passed: true }],
+      },
     },
     { key: 'unknown', status: 'failed', job_id: {} },
     { key: 'scf', status: 'succeeded', job_id: 'duplicate' },
@@ -2366,7 +2379,16 @@ test('result detail sanitizes identity and workflow step evidence before JSX', (
   assert.equal(normalized[0].exit_code, null);
   assert.equal(normalized[0].reason, null);
   assert.equal(normalized[0].accepted, null);
+  assert.deepEqual(normalized[0].resources, {});
+  assert.equal(normalized[0].acceptance, null);
   assert.equal(normalized[1].accepted, false);
+  assert.deepEqual(normalized[1].resources, {
+    elapsed_wall_seconds: 1.5,
+    process_tree_peak_rss_kbytes: 2048,
+  });
+  assert.deepEqual(normalized[1].acceptance, {
+    artifacts: [{ name: 'OUTCAR', sha256: 'a'.repeat(64), size_bytes: 12 }],
+  });
   assert.match(source, /const\s+resultSteps\s*=\s*normalizeResultSteps\(result\.steps\);/);
   assert.match(source, /const\s+materialLabel\s*=\s*displayIdentity\(result\.material\);/);
 });

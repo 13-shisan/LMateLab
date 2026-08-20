@@ -261,6 +261,10 @@ function displayIdentity(value) {
 
 function normalizeResultSteps(steps) {
   const stepKeys = ['relax', 'scf', 'band', 'dos'];
+  const measurementKeys = ['elapsed_wall_seconds', 'process_tree_peak_rss_kbytes'];
+  const artifactNames = new Set([
+    'OUTCAR', 'vasprun.xml', 'OSZICAR', 'CONTCAR', 'CHGCAR', 'WAVECAR', 'EIGENVAL', 'DOSCAR',
+  ]);
   const statuses = new Set([
     'waiting', 'queued', 'running', 'succeeded', 'failed', 'blocked', 'stale',
     'parse-error', 'render-error',
@@ -279,6 +283,36 @@ function normalizeResultSteps(steps) {
     if (typeof value === 'boolean') return String(value);
     return null;
   };
+  const normalizeResources = (value) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(measurementKeys.flatMap((key) => (
+      typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0
+        ? [[key, value[key]]]
+        : []
+    )));
+  };
+  const normalizeAcceptance = (value) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+    const artifacts = Array.isArray(value.artifacts)
+      ? value.artifacts.flatMap((artifact) => (
+        artifact
+        && typeof artifact === 'object'
+        && !Array.isArray(artifact)
+        && artifactNames.has(artifact.name)
+        && typeof artifact.sha256 === 'string'
+        && /^[0-9a-f]{64}$/.test(artifact.sha256)
+        && Number.isInteger(artifact.size_bytes)
+        && artifact.size_bytes >= 0
+          ? [{
+            name: artifact.name,
+            sha256: artifact.sha256,
+            size_bytes: artifact.size_bytes,
+          }]
+          : []
+      ))
+      : [];
+    return { artifacts };
+  };
   return stepKeys
     .filter((key) => byKey.has(key))
     .map((key) => {
@@ -293,6 +327,8 @@ function normalizeResultSteps(steps) {
         exit_code: normalizeScalar(step.exit_code),
         reason: normalizeScalar(step.reason),
         accepted: typeof step.accepted === 'boolean' ? step.accepted : null,
+        resources: normalizeResources(step.resources),
+        acceptance: normalizeAcceptance(step.acceptance),
       };
     });
 }
