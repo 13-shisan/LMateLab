@@ -6,8 +6,9 @@
 
 - Stage 8 功能实现、107 计算节点构建、真实只读解析、稳定服务发布和三处健康入口已经通过。
 - 本次复用 Stage 7 的固定成功/失败工作流，没有创建或重跑任何 VASP 作业。
-- Chrome 登录态控制当前未能建立，因此结果列表、成功详情、失败详情、VASP 数据库和浏览器下载仍缺最终人工验收。
-- 在浏览器门禁完成前，Stage 8 保持 `PARTIAL`；旧服务 Job `40273` 和临时验证转发 `18741` 保留为回滚路径，不提前清理。
+- 用户已在登录浏览器中确认结果列表、成功详情、失败详情、VASP 数据库和五种下载均正常；该人工确认与既有 Viewer/Operator API 验收共同关闭浏览器门禁。
+- 旧服务 Job `40273/40309/40786` 已核对归属后停止，临时转发 `18741` 已撤销；清理后正式入口仍返回 Job `40832`。
+- Stage 8 状态为 `DONE`。
 
 ## 2. 源码与合并记录
 
@@ -16,41 +17,45 @@
 | 真实结果 API、解析、下载和确定性证据包 | `#42` | 合并提交 `6c6d228d94933278a36e17fa90ce61c8d690ad58` |
 | 独立验收脚本注册 `models.User` | `#43` | 合并提交 `2735dd6e93333121e6934819182dd27754153a10` |
 | ASE CIF 导出改用二进制缓冲区 | `#44` | 合并提交 `db05369fe3d0b86844d1242d5ec7a37195cf37e4` |
+| Stage 8 首轮验收证据 | `#45` | 合并提交 `d32aafd57a8a5032d52c1edab81e0802e332a967` |
+| 区分源码和运行 release | `#46` | 合并提交 `d2e86de0e36515e25a3b3b62364cdebc513925f8` |
+| 补齐资源、输出哈希和二维结构展示 | `#47` | 合并提交 `9793ed2cb89a326b13995d16f6834bbcaacc02c5` |
+| 在成功和失败结果页提供证据包下载 | `#48` | 合并提交 `6242132c30e8772288e31d9fb5eec930d2f44962` |
 
-Stage 8 功能验收和当前运行 release 固定为：
+Stage 8 当前运行 release 固定为：
 
 ```text
-db05369fe3d0b86844d1242d5ec7a37195cf37e4
+6242132c30e8772288e31d9fb5eec930d2f44962
 ```
 
-证据 PR `#45` 已合并为 `d32aafd57a8a5032d52c1edab81e0802e332a967`。Windows 本地 `main`、Gitea `main` 和 107 只读 checkout 均已同步到该文档提交且工作树为空；运行中的不可变 release 继续固定为上面的 `db05369...`，文档提交不会触发重建或重启。
+Windows 本地 `main`、Gitea `main` 和 107 只读 checkout 已同步到 PR `#48` 合并提交且工作树为空。最终状态文档合并后只同步 checkout，不重建或重启上述不可变 release。
 
 ## 3. 构建与测试
 
 最终构建 Job：
 
 ```text
-Job ID: 40307
-Partition/Node: P107-RTX5090/anode02
+Job ID: 40831
+Partition/Node: P107-RTX5090/anode01
 State/ExitCode: COMPLETED/0:0
-Backend: 457 passed, 4 platform skips
-Frontend: 125 passed
+Backend: 458 passed, 4 platform skips
+Frontend: 126 passed
 Vite: 1857 modules transformed
-Release manifest entries: 560
+Release manifest entries: 561
 ```
 
 发布清单：
 
 ```text
-/home/scc/pb23030683/lmatelab-107cup/releases/db05369fe3d0b86844d1242d5ec7a37195cf37e4/manifest.txt
-SHA-256: e12ad90ba9bb8e4af00c90926bf9ba834267828db9fafde84e1fb7b0139a4007
+/home/scc/pb23030683/lmatelab-107cup/releases/6242132c30e8772288e31d9fb5eec930d2f44962/manifest.txt
+SHA-256: 627b8c0409758e7226b58d5ba198fbc6f69f3140ab799ea3273b0110ca072e8c
 ```
 
 构建日志保留在：
 
 ```text
-/home/scc/pb23030683/lmatelab-107cup/logs/build-40307.out
-/home/scc/pb23030683/lmatelab-107cup/logs/build-40307.err
+/home/scc/pb23030683/lmatelab-107cup/logs/build-40831.out
+/home/scc/pb23030683/lmatelab-107cup/logs/build-40831.err
 ```
 
 ## 4. 真实只读验收
@@ -147,28 +152,28 @@ a99e338c6a00fa2d1129bf9fbbe910a959f3c419955370f995da8242850ba8b4  success-eviden
 ## 8. 稳定服务与入口
 
 ```text
-Service Job: 40309
-Partition/Node: P107-A100/anode19:18731
+Service Job: 40832
+Partition/Node: P107-A100/anode18:18731
 State: RUNNING
-Commit: db05369fe3d0b86844d1242d5ec7a37195cf37e4
-Manifest SHA-256: e12ad90ba9bb8e4af00c90926bf9ba834267828db9fafde84e1fb7b0139a4007
+Commit: 6242132c30e8772288e31d9fb5eec930d2f44962
+Manifest SHA-256: 627b8c0409758e7226b58d5ba198fbc6f69f3140ab799ea3273b0110ca072e8c
 ```
 
 以下三处 `live/ready` 已返回同一 Job、节点、提交和 manifest：
 
-- 4090 内部：`127.0.0.1:18740 -> anode19:18731`；
+- 4090 内部：`127.0.0.1:18740 -> 11.11.10.18:18731 (anode18)`；
 - 公网入口：`http://222.195.94.37:18733`；
 - Windows Operator：`http://127.0.0.1:21763`。
 
-临时 `127.0.0.1:18741 -> anode19:18731` 仍保留用于最终页面验收。旧 Job `40273` 仍在 `anode16` 运行作为回滚候选；完成浏览器门禁并再次确认三处正式入口后，才允许核对归属并停止旧 Job、撤销临时转发。
+用户完成人工浏览器验收后，旧 Job `40273/40309/40786` 均确认属于 `pb23030683`、作业名为 `lmatelab-web`、命令为本项目 `service.slurm`，随后受控停止并显示 `CANCELLED`。临时 `18741 -> anode19:18731` 已撤销，4090 仅保留正式 `18740` 监听。清理后 4090 内部、Windows Operator 和公网入口仍返回 Job `40832`，结果页 HTTP 状态均为 `200`。
 
-## 9. 剩余完成门禁
+## 9. 完成门禁
 
-- [ ] Viewer 和 Operator 浏览器登录后检查 `/dashboard/results`。
-- [ ] 检查成功详情 `/dashboard/results/4b566547-961b-4e10-a8d0-99431f2e2229` 的 3D 结构、BAND、DOS 和五种下载。
-- [ ] 检查失败详情 `/dashboard/results/db9c793d-cf8f-4207-823b-5943d825f21d` 不挂载科学成功区。
-- [ ] 检查 `/dashboard/database/vasp` 的真实只读记录。
-- [ ] 浏览器验收后停止旧 Job `40273`、撤销临时 `18741`，并复核三处正式入口不变。
-- [x] 证据 PR `#45` 已合并，Windows `main`、Gitea `main` 和 107 checkout 均固定到 `d32aafd57a8a5032d52c1edab81e0802e332a967`。
+- [x] Viewer/Operator API 角色合同通过，用户在当前登录浏览器中确认 `/dashboard/results` 正常显示。
+- [x] 成功详情 `/dashboard/results/4b566547-961b-4e10-a8d0-99431f2e2229` 的结构、BAND、DOS 和 CIF、POSCAR、BAND、DOS、证据包五种下载正常。
+- [x] 失败详情 `/dashboard/results/db9c793d-cf8f-4207-823b-5943d825f21d` 保持失败证据视图并提供证据包下载。
+- [x] `/dashboard/database/vasp` 的真实只读记录正常显示。
+- [x] 旧 Job `40273/40309/40786` 已停止，临时 `18741` 已撤销，三处正式入口保持 Job `40832`。
+- [x] Windows `main`、Gitea `main` 和 107 checkout 均已固定到 PR `#48` 合并提交 `6242132c30e8772288e31d9fb5eec930d2f44962`。
 
-上述全部完成后，才把 Stage 8 从 `PARTIAL` 更新为 `DONE`。
+上述门禁全部完成，Stage 8 为 `DONE`。Stage 9 另行覆盖恢复、安全、竞态和恶意输入，不把其尚未执行的内容倒算为 Stage 8 缺口。
