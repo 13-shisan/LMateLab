@@ -84,6 +84,11 @@ def _validate_node(value: str) -> str:
     return value
 
 
+def node_to_address(node: str) -> str:
+    node = _validate_node(node)
+    return f"11.11.10.{int(node[5:])}"
+
+
 def _validate_port(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1024 <= value <= 65535:
         raise RecoveryError("invalid_port")
@@ -281,11 +286,11 @@ def load_release_identity(root: Path = ROOT) -> tuple[str, str]:
 
 
 def probe_health(node: str, port: int) -> tuple[dict, dict]:
-    _validate_node(node)
+    address = node_to_address(node)
     _validate_port(port)
 
     def fetch(path: str) -> dict:
-        url = f"http://{node}:{port}{path}"
+        url = f"http://{address}:{port}{path}"
         try:
             with urllib.request.urlopen(url, timeout=5) as response:
                 body = response.read(4097)

@@ -8,15 +8,18 @@ from pathlib import Path, PurePosixPath
 
 STAGE10_MANIFEST_PATHS = (
     ".gitattributes",
+    "backend/tests/test_107cup_service_recovery.py",
     "backend/tests/test_107cup_stage10_delivery_contract.py",
     "deploy/107cup/build.slurm",
     "deploy/107cup/generate-stage10-manifest.py",
+    "deploy/107cup/service_recovery.py",
     "deploy/107cup/service.slurm",
     "deploy/107cup/slurm/stage8-acceptance.py",
     "deploy/107cup/slurm/stage8-acceptance.slurm",
     "deploy/107cup/slurm/stage10-acceptance.py",
     "deploy/107cup/slurm/stage10-acceptance.slurm",
     "deploy/107cup/submit-stage10-acceptance.sh",
+    "deploy/107cup/verify-runtime.sh",
     "docs/107cup/data-and-provenance.md",
     "docs/107cup/demo-script.md",
     "docs/107cup/deployment.md",

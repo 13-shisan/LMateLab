@@ -28,6 +28,7 @@ FORBIDDEN_ROUTE_PREFIXES = (
     "/api/academic-reports",
 )
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_NODE_RE = re.compile(r"anode(0[1-9]|1[0-9]|2[0-6])")
 
 
 def _sha256(path: Path) -> str:
@@ -117,6 +118,14 @@ def _load_json_url(url: str) -> dict:
         return json.load(response)
 
 
+def _node_to_address(node: str) -> str:
+    match = _NODE_RE.fullmatch(node)
+    if match is None:
+        raise RuntimeError("service node is invalid")
+    number = int(match.group(1))
+    return f"11.11.10.{number}"
+
+
 def _verify_runtime(root: Path, commit: str, manifest_sha256: str) -> dict:
     state_path = root / "runtime" / "service-state.json"
     state = json.loads(_read_regular(state_path, 4096))
@@ -133,13 +142,12 @@ def _verify_runtime(root: Path, commit: str, manifest_sha256: str) -> dict:
     port = state.get("port")
     if re.fullmatch(r"[1-9][0-9]*", job_id) is None:
         raise RuntimeError("service Job ID is invalid")
-    if re.fullmatch(r"anode[0-9]{2}", node) is None:
-        raise RuntimeError("service node is invalid")
+    node_address = _node_to_address(node)
     if not isinstance(port, int) or not 1024 <= port <= 65535:
         raise RuntimeError("service port is invalid")
 
-    live = _load_json_url(f"http://{node}:{port}/api/health/live")
-    ready = _load_json_url(f"http://{node}:{port}/api/health/ready")
+    live = _load_json_url(f"http://{node_address}:{port}/api/health/live")
+    ready = _load_json_url(f"http://{node_address}:{port}/api/health/ready")
     for key, value in {
         "status": "ok",
         "job_id": job_id,

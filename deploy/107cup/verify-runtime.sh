@@ -57,7 +57,9 @@ for key, value in expected.items():
 PY
 
 [[ "$job_id" =~ ^[1-9][0-9]*$ ]]
-[[ "$node" =~ ^anode[0-9]{2}$ ]]
+[[ "$node" =~ ^anode(0[1-9]|1[0-9]|2[0-6])$ ]]
+node_number=$((10#${node#anode}))
+node_address=$(printf '11.11.10.%d' "$node_number")
 [[ "$port" =~ ^[0-9]{4,5}$ ]]
 test "$port" -ge 1024
 test "$port" -le 65535
@@ -94,8 +96,8 @@ probe_endpoint() {
     --output "$destination" "$url"
 }
 
-probe_endpoint "http://$node:$port/api/health/live" "$verify_root/live.json"
-probe_endpoint "http://$node:$port/api/health/ready" "$verify_root/ready.json"
+probe_endpoint "http://$node_address:$port/api/health/live" "$verify_root/live.json"
+probe_endpoint "http://$node_address:$port/api/health/ready" "$verify_root/ready.json"
 
 python3 - "$verify_root/live.json" "$verify_root/ready.json" \
   "$job_id" "$node" "$service_commit" "$service_manifest_sha256" <<'PY'
