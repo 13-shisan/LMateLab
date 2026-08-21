@@ -57,13 +57,9 @@ def _write_private(path: Path, content: bytes) -> None:
         handle.write(content)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", type=Path, required=True)
-    args = parser.parse_args()
+def run_acceptance(output_dir: Path) -> dict:
     if not os.environ.get("SLURM_JOB_ID"):
         raise RuntimeError("Stage 8 acceptance must run through Slurm")
-    output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
     service = CompetitionResultService(workflow_root=workflow_root())
 
@@ -156,6 +152,14 @@ def main() -> int:
         )
         session.rollback()
 
+    return summary
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", type=Path, required=True)
+    args = parser.parse_args()
+    summary = run_acceptance(args.output_dir)
     print(canonical_json(summary))
     print("STAGE8_ACCEPTANCE_OK")
     return 0
