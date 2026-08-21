@@ -127,6 +127,7 @@ python -m unittest \
   tests.test_competition_recovery \
   tests.test_competition_security \
   tests.test_107cup_stage8_acceptance_contract \
+  tests.test_107cup_stage10_delivery_contract \
   -v
 
 cd "$project/frontend"
