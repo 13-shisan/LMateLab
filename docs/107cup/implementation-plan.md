@@ -863,3 +863,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 4090 用户 cron 每分钟执行一次短命令，先用 `18742` 验证候选身份，再切换 `18740`；失败时保留或恢复旧 forward。`maintenance` 普通文件允许 Operator 暂停自动恢复，便于受控停服验收。
 - SSH ControlMaster 失效时状态固定为 `ssh_authentication_required`，必须人工二次验证；cron 不保存验证码、密码或私钥内容。安装、检查、停止和恢复步骤见 `docs/107cup/service-recovery-runbook.md`。
 - 当前仅完成本地 TDD 第一轮；正式 Job `40917`、4090 cron、现有 forward、正式 SQLite 和 `current` 尚未修改，Stage 3 保持 `PARTIAL`。
+
+### 17.11 Stage 3 首次正式构建失败
+
+- PR #52 已将自动恢复实现合并到 `main`，合并提交为 `3310972b93e58a3627605c6bcc2ce225db412fa2`；107 checkout 已同步到该固定提交。
+- 发布前快照 Job `41038` 为 `COMPLETED/0:0`，证据保存在 `/home/scc/pb23030683/lmatelab-107cup/evidence/previews/3310972b93e58a3627605c6bcc2ce225db412fa2/before-41038`。
+- 正式构建 Job `41039` 在 `anode01` 运行 485 项后端测试时以 `FAILED/1:0` 结束；唯一失败为 `RuntimeVerifierExecutionTests.test_gateway_identity_match_passes_and_old_job_target_fails_closed`。根因是既有 runtime verifier 执行夹具只生成旧 `service-*` 文件，没有生成 PR #52 新增且校验器强制要求的 `service-state.json`。
+- 失败构建没有切换 `current`；稳定发布仍为 `551ba97...`，服务 Job `40917` 仍在 `anode17` 健康运行。4090 cron 和正式转发均未修改。
+- 修复范围仅限为该执行夹具生成与旧字段、live 身份及 release manifest 一致的 `service-state.json`。热修复通过独立 PR 合并并在 107 重新完成正式构建前，Stage 3 继续保持 `PARTIAL`。
+- Windows 热修复定向门禁通过 `49` 项，另有 `14` 项按 POSIX 条件跳过；其中本次修复的 runtime verifier 执行用例必须由 107 Linux 正式构建给出 GREEN 证据，不能用 Windows skip 替代。
