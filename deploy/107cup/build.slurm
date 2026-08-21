@@ -109,6 +109,8 @@ python -m unittest \
   tests.test_107cup_authz \
   tests.test_107cup_runtime \
   tests.test_107cup_deploy_contract \
+  tests.test_107cup_service_recovery \
+  tests.test_107cup_relay_recovery \
   tests.test_107cup_preview_deploy_contract \
   tests.test_health_readiness \
   tests.test_competition_workflow_models \

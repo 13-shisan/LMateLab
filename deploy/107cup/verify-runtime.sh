@@ -24,11 +24,37 @@ for name in service-job-id service-node service-port service-commit service-mani
   test "$(wc -c < "$path")" -le 256
 done
 
+service_state="$runtime/service-state.json"
+test -f "$service_state"
+test ! -L "$service_state"
+test "$(wc -c < "$service_state")" -le 4096
+
 job_id=$(<"$runtime/service-job-id")
 node=$(<"$runtime/service-node")
 port=$(<"$runtime/service-port")
 service_commit=$(<"$runtime/service-commit")
 service_manifest_sha256=$(<"$runtime/service-manifest-sha256")
+
+python3 - "$service_state" "$job_id" "$node" "$port" \
+  "$service_commit" "$service_manifest_sha256" <<'PY'
+import json
+import sys
+
+path, job_id, node, port, commit, manifest = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    state = json.load(handle)
+expected = {
+    "schema": "lmatelab-107cup-service-state-v1",
+    "job_id": job_id,
+    "node": node,
+    "port": int(port),
+    "commit": commit,
+    "manifest_sha256": manifest,
+}
+for key, value in expected.items():
+    if state.get(key) != value:
+        raise SystemExit(f"service state mismatch: {key}")
+PY
 
 [[ "$job_id" =~ ^[1-9][0-9]*$ ]]
 [[ "$node" =~ ^anode[0-9]{2}$ ]]

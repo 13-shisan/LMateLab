@@ -12,6 +12,7 @@
 #SBATCH --error=/home/scc/pb23030683/lmatelab-107cup/logs/service-%j.err
 
 set -euo pipefail
+umask 077
 
 : "${SLURM_JOB_ID:?service.slurm must run through Slurm}"
 
@@ -39,6 +40,7 @@ port="${LMATELAB_PORT:-18731}"
 
 test -f "$frontend_root/index.html"
 test -f "$source_root/backend/main_107cup.py"
+test -f "$source_root/deploy/107cup/service_recovery.py"
 
 export LMATELAB_RELEASE_ROOT="$release"
 export LMATELAB_WORKFLOW_ROOT="$root/data/workflows"
@@ -54,13 +56,6 @@ export LMATELAB_STARTED_AT="$started_at"
 export MPLCONFIGDIR="$root/runtime/cache/matplotlib"
 mkdir -p "$MPLCONFIGDIR" "$VASP_ELEMENTS_CACHE_DIR"
 
-printf '%s\n' "$SLURM_JOB_ID" > "$root/runtime/service-job-id"
-printf '%s\n' "${SLURMD_NODENAME:-$(hostname)}" > "$root/runtime/service-node"
-printf '%s\n' "$port" > "$root/runtime/service-port"
-printf '%s\n' "$commit" > "$root/runtime/service-commit"
-printf '%s\n' "$manifest_sha256" > "$root/runtime/service-manifest-sha256"
-printf '%s\n' "$started_at" > "$root/runtime/service-started-at"
-
 source "$python_env/bin/activate"
 cd "$source_root/backend"
 alembic -c alembic.ini upgrade head
@@ -70,4 +65,62 @@ python "$source_root/deploy/107cup/migrate-competition-roles.py" \
   --backup-dir "$root/backups/competition-roles" \
   --operator-alias "$LMATELAB_OPERATOR_ALIAS"
 
-exec uvicorn main_107cup:app --host 0.0.0.0 --port "$port" --workers 1
+server_pid=
+shutdown_server() {
+  trap - TERM INT
+  if test -n "${server_pid:-}" && kill -0 "$server_pid" 2>/dev/null; then
+    kill -TERM "$server_pid"
+  fi
+  if test -n "${server_pid:-}"; then
+    set +e
+    wait "$server_pid"
+    set -e
+  fi
+  exit 0
+}
+trap shutdown_server TERM INT
+
+uvicorn main_107cup:app --host 0.0.0.0 --port "$port" --workers 1 &
+server_pid=$!
+
+ready=0
+for _attempt in $(seq 1 60); do
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    break
+  fi
+  if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      "http://127.0.0.1:$port/api/health/live" >/dev/null \
+    && curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      "http://127.0.0.1:$port/api/health/ready" >/dev/null; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+
+if test "$ready" -ne 1; then
+  if kill -0 "$server_pid" 2>/dev/null; then
+    kill -TERM "$server_pid"
+  fi
+  set +e
+  wait "$server_pid"
+  server_status=$?
+  set -e
+  printf 'service failed readiness before state publication; server_status=%s\n' \
+    "$server_status" >&2
+  exit 1
+fi
+
+python "$source_root/deploy/107cup/service_recovery.py" publish \
+  --job-id "$SLURM_JOB_ID" \
+  --node "${SLURMD_NODENAME:-$(hostname)}" \
+  --port "$port" \
+  --commit "$commit" \
+  --manifest-sha256 "$manifest_sha256" \
+  --started-at "$started_at"
+
+set +e
+wait "$server_pid"
+server_status=$?
+set -e
+exit "$server_status"

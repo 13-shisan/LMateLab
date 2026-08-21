@@ -908,6 +908,11 @@ class CompetitionDeployContractTests(unittest.TestCase):
         ):
             self.assertIn(suite, source)
 
+    def test_formal_build_runs_stage3_recovery_suites(self):
+        source = self.read_required("build.slurm")
+        self.assertIn("tests.test_107cup_service_recovery", source)
+        self.assertIn("tests.test_107cup_relay_recovery", source)
+
     def test_formal_release_materializes_the_fixed_stage6_script_path(self):
         source = self.read_required("build.slurm")
         self.assertIn('"$staging/deploy/107cup"', source)
@@ -1287,9 +1292,12 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "alembic -c alembic_digest.ini upgrade head",
             "uvicorn main_107cup:app",
             "--workers 1",
-            "service-job-id",
-            "service-node",
-            "service-port",
+            "service_recovery.py",
+            "publish",
+            "/api/health/live",
+            "/api/health/ready",
+            "trap shutdown_server TERM INT",
+            'wait "$server_pid"',
             "migrate-competition-roles.py",
             "--operator-alias",
         ):
@@ -1297,6 +1305,70 @@ class CompetitionDeployContractTests(unittest.TestCase):
         for forbidden in ("celery worker", "celery beat", "redis-server", "gunicorn"):
             self.assertNotIn(forbidden, source)
         self.assertNotIn("#SBATCH --time=7-00:00:00", source)
+        self.assertNotIn("exec uvicorn", source)
+        self.assertLess(source.index("uvicorn main_107cup:app"), source.index(" publish "))
+
+    def test_service_recovery_is_bounded_owned_and_single_candidate(self):
+        source = self.read_required("service_recovery.py")
+        wrapper = self.read_required("recover-service.sh")
+        for required in (
+            "/home/scc/pb23030683/lmatelab-107cup",
+            "/home/scc/pb23030683/projects/LMateLab-107Cup",
+            "/usr/bin/scontrol",
+            "/usr/bin/sbatch",
+            "service-recovery.lock",
+            "service-state.json",
+            "service-recovery-state.json",
+            "candidate_job_id",
+            "retry_budget_exhausted",
+            "candidate_ownership_mismatch",
+            "--parsable",
+        ):
+            self.assertIn(required, source)
+        self.assertIn("max_attempts: int = 3", source)
+        self.assertNotIn("shell=True", source)
+        self.assertNotIn("scancel", source)
+        self.assertIn("service_recovery.py\" recover", wrapper)
+        for forbidden in ("uvicorn", "npm ", "pip install", "while true"):
+            self.assertNotIn(forbidden, wrapper)
+
+    def test_relay_recovery_probes_candidate_before_switch_and_preserves_crontab(self):
+        relay = self.read_required("relay/ensure_forward.py")
+        installer = self.read_required("relay/install-recovery.sh")
+        reauth = self.read_required("relay/reauth-control-master.sh")
+        for required in (
+            "CONTROL_SOCKET",
+            "cm-107cup",
+            "MAIN_PORT = 18740",
+            "PROBE_PORT = 18742",
+            "node_to_target",
+            "unknown_existing_forward",
+            "forward_rollback_failed",
+            "maintenance_marker_unsafe",
+            "BatchMode=yes",
+            "--adopt-current",
+        ):
+            self.assertIn(required, relay)
+        self.assertNotIn("shell=True", relay)
+        self.assertNotIn("password", relay.lower())
+        self.assertLess(
+            relay.index("self.control.forward(PROBE_PORT"),
+            relay.index("self.control.cancel(MAIN_PORT"),
+        )
+        for required in (
+            "BEGIN LMATELAB 107CUP RELAY RECOVERY",
+            "crontab -l",
+            'crontab "$updated"',
+            "* * * * *",
+            "@reboot",
+            "--adopt-current",
+            "seen_begin != seen_end",
+        ):
+            self.assertIn(required, installer)
+        self.assertIn("1048576", self.read_required("relay/ensure-forward.sh"))
+        self.assertIn("ControlPersist=96h", reauth)
+        self.assertIn("IdentitiesOnly=yes", reauth)
+        self.assertIn("id_ed25519_107cup", reauth)
 
     def test_rollback_smoke_is_isolated_and_exits_after_self_check(self):
         source = self.read_required("rollback-smoke.slurm")
@@ -1385,11 +1457,13 @@ class CompetitionDeployContractTests(unittest.TestCase):
     def test_login_node_helpers_only_submit_or_verify(self):
         build_submit = self.read_required("submit-build.sh")
         service_submit = self.read_required("submit-service.sh")
+        service_recover = self.read_required("recover-service.sh")
         verifier = self.read_required("verify-runtime.sh")
 
         self.assertIn("sbatch --parsable", build_submit)
-        self.assertIn("sbatch --parsable", service_submit)
-        for source in (build_submit, service_submit):
+        self.assertIn("recover-service.sh", service_submit)
+        self.assertIn("service_recovery.py", service_recover)
+        for source in (build_submit, service_submit, service_recover):
             self.assertNotIn("uvicorn", source)
             self.assertNotIn("npm ", source)
             self.assertNotIn("pip install", source)
