@@ -244,6 +244,21 @@ class RuntimeVerifierExecutionTests(unittest.TestCase):
         }
         for name, value in values.items():
             (self.runtime / name).write_text(value + "\n", encoding="ascii")
+        (self.runtime / "service-state.json").write_text(
+            json.dumps(
+                {
+                    "schema": "lmatelab-107cup-service-state-v1",
+                    "job_id": "41001",
+                    "node": "anode18",
+                    "port": 18731,
+                    "commit": "a" * 40,
+                    "manifest_sha256": manifest_sha,
+                    "started_at": "2026-08-20T09:00:00+08:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         for name in ("eln.db", "digests.db"):
             with sqlite3.connect(self.root / "data" / "db" / name) as connection:
                 connection.execute("CREATE TABLE health (id INTEGER)")
