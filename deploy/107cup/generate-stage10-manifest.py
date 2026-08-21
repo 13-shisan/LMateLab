@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 
 
 STAGE10_MANIFEST_PATHS = (
+    ".gitattributes",
     "backend/tests/test_107cup_stage10_delivery_contract.py",
     "deploy/107cup/build.slurm",
     "deploy/107cup/generate-stage10-manifest.py",
@@ -29,12 +30,16 @@ STAGE10_MANIFEST_PATHS = (
 )
 
 
+def _canonical_text(path: Path) -> bytes:
+    content = path.read_bytes()
+    if b"\x00" in content:
+        raise RuntimeError(f"manifest source is not UTF-8 text: {path}")
+    text = content.decode("utf-8")
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
 def _digest(path: Path) -> str:
-    value = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            value.update(block)
-    return value.hexdigest()
+    return hashlib.sha256(_canonical_text(path)).hexdigest()
 
 
 def generate(root: Path, output: Path) -> None:

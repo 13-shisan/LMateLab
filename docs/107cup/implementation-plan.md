@@ -880,3 +880,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - maintenance 验收中停止 Job `41043` 后，计算节点端口连接失败且 4090/公网返回 `502`，没有回退到原 4090 LMateLab。移除 maintenance 后只提交 Job `41044`，三层入口最终返回同一 Job、node、commit 和 manifest。
 - 停服前后两库 SHA-256 完全一致、完整性均为 `ok`；Stage 7/8 既有证据 manifest 原地复核通过，没有运行 VASP。登录节点无 LMateLab 常驻进程；ControlMaster 真实失效仍必须人工二次验证。
 - 完整证据见 `docs/107cup/stage3-service-recovery-evidence.md`。Stage 3 更新为 `DONE`。
+
+### 17.13 Stage 10 交付验收启动
+
+- PR #55 已将 Stage 10 交付合同、计算节点只读验收入口、部署/溯源/演示/最终验收文档和确定性 SHA-256 清单合并为 `db03e360b450b41f483fa98e62157ec6c993f6ba`。
+- 发布前快照 Job `41063` 完成两套正式 SQLite 完整性、服务 Job `41044` 健康状态和证据清单核对；证据位于 `evidence/previews/db03e360b450b41f483fa98e62157ec6c993f6ba/before-41063`。
+- 首次正式构建 Job `41064` 在 `P107-RTX5090/anode01` 运行后端 `489` 项，结果为 `1 failure + 4 skipped`。唯一失败是 Windows 工作树中的既有 `implementation-plan.md` 使用 CRLF，而 Git/107 检出使用 LF，导致仓库交付清单哈希跨平台不一致。构建在前端和 release 生成前失败，稳定 `current` 仍为 `e565851...`，服务仍为 Job `41044/anode16`，数据库和固定 VASP 工作流未修改。
+- 热修复范围仅为固定 UTF-8 文本在计算交付清单前规范化为 LF，并由同一合同测试复核；重新合并、在 107 Slurm 构建通过、部署新服务、执行 Stage 10 只读 Job 和浏览器验收前，Stage 10 保持 `PARTIAL`。

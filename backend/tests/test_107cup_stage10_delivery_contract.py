@@ -19,6 +19,13 @@ MANIFEST = ROOT / "docs" / "107cup" / "artifacts" / "manifest.sha256"
 
 
 class Stage10DeliveryContractTests(unittest.TestCase):
+    @staticmethod
+    def canonical_text_digest(path: Path) -> str:
+        content = path.read_bytes()
+        text = content.decode("utf-8")
+        canonical = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
     def test_acceptance_runs_on_slurm_and_reuses_read_only_stage8_gate(self):
         slurm = SLURM.read_text(encoding="utf-8")
         harness = HARNESS.read_text(encoding="utf-8")
@@ -76,6 +83,7 @@ class Stage10DeliveryContractTests(unittest.TestCase):
     def test_manifest_is_canonical_complete_and_matches_files(self):
         source = GENERATOR.read_text(encoding="utf-8")
         self.assertIn("STAGE10_MANIFEST_PATHS", source)
+        self.assertIn('replace("\\r\\n", "\\n").replace("\\r", "\\n")', source)
         self.assertIn("os.open", source)
         self.assertNotIn("glob(", source)
 
@@ -90,7 +98,7 @@ class Stage10DeliveryContractTests(unittest.TestCase):
             self.assertNotEqual(relative, "docs/107cup/artifacts/manifest.sha256")
             path = ROOT / relative
             self.assertTrue(path.is_file(), relative)
-            self.assertEqual(digest, hashlib.sha256(path.read_bytes()).hexdigest(), relative)
+            self.assertEqual(digest, self.canonical_text_digest(path), relative)
 
 
 if __name__ == "__main__":
