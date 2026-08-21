@@ -6,3 +6,4 @@
 *.mjs text eol=lf
 *.json text eol=lf
 *.env.example text eol=lf
+docs/107cup/artifacts/manifest.sha256 text eol=lf
