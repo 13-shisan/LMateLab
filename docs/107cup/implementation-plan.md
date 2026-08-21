@@ -139,7 +139,7 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | PARTIAL | Stage 9 稳定 Job `40917` 在 `P107-A100/anode17:18731` 运行发布 `551ba97fbfca3093c19ef4e98e636bcaa9b88fef`；旧 Job `40832` 已受控停止，4090 正式转发 `18740`、公网和 Operator 入口均返回新服务 | 增加服务与正式转发自动恢复；运行手册已完成但自动恢复尚未实现 |
+| 3. 最小 107 网页服务 | PARTIAL | Stage 9 稳定 Job `40917` 仍运行发布 `551ba97...`；Stage 3 恢复分支已在本地实现单候选 Slurm 恢复、候选先验转发、maintenance 和无管理员运行手册，尚未合并或部署 | 通过 PR 合并并在 107/4090 完成受控停止、唯一候选恢复、转发切换和二次验证失败关闭验收 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
@@ -241,8 +241,16 @@ sha256sum -c manifest.txt
 - Maintain: `backend/routers/health.py`
 - Maintain: `deploy/107cup/service.slurm`
 - Maintain: `deploy/107cup/verify-runtime.sh`
+- Create: `deploy/107cup/service_recovery.py`
+- Create: `deploy/107cup/recover-service.sh`
+- Create: `deploy/107cup/relay/ensure_forward.py`
+- Create: `deploy/107cup/relay/install-recovery.sh`
+- Create: `deploy/107cup/relay/reauth-control-master.sh`
+- Create: `docs/107cup/service-recovery-runbook.md`
 - Test: `backend/tests/test_107cup_runtime.py`
 - Test: `backend/tests/test_health_readiness.py`
+- Test: `backend/tests/test_107cup_service_recovery.py`
+- Test: `backend/tests/test_107cup_relay_recovery.py`
 
 - [x] 单进程 Uvicorn 仅通过 Slurm 运行。
 - [x] 前端静态文件由同一个 FastAPI 服务提供。
@@ -251,7 +259,9 @@ sha256sum -c manifest.txt
 - [x] 登录节点不存在 Uvicorn、Vite、Celery 或 Redis 常驻进程。
 - [ ] 在受控窗口让服务作业正常结束，验证 `anodeXX:18731` 和转发入口随之不可达。
 - [x] 提交新服务作业并根据新节点安全更新 4090 内部转发。
-- [ ] 编写不依赖管理员权限的启动、检查、停止和恢复运行手册。
+- [x] 编写不依赖管理员权限的启动、检查、停止和恢复运行手册。
+- [ ] 在 4090 安装每分钟短时 cron；唯一候选服务健康后才通过临时端口切换正式转发。
+- [ ] 验证 SSH master 失效时失败关闭并明确要求人工二次验证，不保存验证码或私钥。
 
 验收命令：
 
@@ -844,3 +854,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 新服务 Job `40917` 运行于 `P107-A100/anode17:18731`。4090 `18740`、Windows `127.0.0.1:21763` 和公网 `222.195.94.37:18733` 的 live/ready 均返回 Job `40917`、提交 `551ba97...` 和同一 manifest；旧 Job `40832` 经归属核对后停止为 `CANCELLED/0:15`。
 - 隔离 Playwright Viewer 会话以零控制台错误通过只读验收：新建、取消、重试均禁用；成功工作流显示四个 Job、日志、结构、BAND/DOS；失败工作流保持 SCF `electronic_not_converged` 与 BAND/DOS 零 attempt；VASP 数据库显示两条真实记录。
 - 验收证据 PR #51 记录完整证据于 `docs/107cup/stage9-recovery-security-evidence.md`。Stage 9 至此为 `DONE`，Stage 3 仍因服务和转发自动恢复未实现而保持 `PARTIAL`；下一阶段进入比赛交付验收。
+
+### 17.10 Stage 3 自动恢复补全启动
+
+- 从 PR #51 合并提交 `6f980311dbb32bfe208e414847ae8a87d196f03f` 创建 `codex/107cup-stage3-auto-recovery`，只补网页服务和 4090 正式转发恢复，不改变工作流、VASP、结果解析或数据库模型。
+- 107 端恢复状态机使用共享文件锁和原子 JSON：固定归属服务消失时只保留一个候选 Job，失败后 300 秒冷却，最多三次；调度不可用、归属不匹配、状态损坏和重试耗尽全部阻断，不调用 `scancel`。
+- `service.slurm` 改为 Uvicorn 通过本机 live/ready 后才发布 `service-state.json`，旧六项 runtime 文件继续同步；收到 TERM/INT 时由批作业包装器等待 Uvicorn 完整退出。
+- 4090 用户 cron 每分钟执行一次短命令，先用 `18742` 验证候选身份，再切换 `18740`；失败时保留或恢复旧 forward。`maintenance` 普通文件允许 Operator 暂停自动恢复，便于受控停服验收。
+- SSH ControlMaster 失效时状态固定为 `ssh_authentication_required`，必须人工二次验证；cron 不保存验证码、密码或私钥内容。安装、检查、停止和恢复步骤见 `docs/107cup/service-recovery-runbook.md`。
+- 当前仅完成本地 TDD 第一轮；正式 Job `40917`、4090 cron、现有 forward、正式 SQLite 和 `current` 尚未修改，Stage 3 保持 `PARTIAL`。
