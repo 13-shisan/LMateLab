@@ -13,6 +13,7 @@ class DraftCreateRequest(BaseModel):
     steps: list[str]
     parameters: dict[str, dict[str, int | float]]
     structure_upload_id: str | None = None
+    kpoints: dict[str, Any] | None = None
 
 
 class StructureUploadResult(BaseModel):

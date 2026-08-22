@@ -557,6 +557,56 @@ test('live structure upload leaves multipart content type to FormData', async ()
   assert.equal(Object.keys(headers).some((name) => name.toLowerCase() === 'content-type'), false);
 });
 
+test('live curated structure builder uses fixed JSON routes and returns a bundle filename', async () => {
+  const requests = [];
+  const responses = [
+    new Response(JSON.stringify({ items: [{ id: 'MoS2_monolayer' }] }), {
+      headers: { 'content-type': 'application/json' },
+    }),
+    new Response(JSON.stringify({ material_id: 'MoS2_monolayer', files: { POSCAR: 'demo' } }), {
+      headers: { 'content-type': 'application/json' },
+    }),
+    new Response(new Blob(['zip']), {
+      headers: {
+        'content-type': 'application/zip',
+        'content-disposition': 'attachment; filename="MoS2_monolayer-vasp-inputs.zip"',
+      },
+    }),
+  ];
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({ 'Content-Type': 'application/json' }),
+    fetchImpl: async (path, init) => {
+      requests.push({ path, init });
+      return responses[requests.length - 1];
+    },
+  });
+  const payload = {
+    material_id: 'MoS2_monolayer',
+    repeat_a: 2,
+    repeat_b: 2,
+    layers: 1,
+    vacuum_angstrom: 18,
+    interlayer_spacing_angstrom: 6.2,
+    strain_percent: 0,
+  };
+
+  const catalog = await provider.listCuratedStructures();
+  const built = await provider.buildCuratedStructure(payload);
+  const bundle = await provider.downloadCuratedStructureBundle(payload);
+
+  assert.equal(catalog.items[0].id, 'MoS2_monolayer');
+  assert.equal(built.files.POSCAR, 'demo');
+  assert.equal(bundle.filename, 'MoS2_monolayer-vasp-inputs.zip');
+  assert.deepEqual(requests.map(({ path }) => path), [
+    '/api/competition/agent/structures',
+    '/api/competition/agent/structures/build',
+    '/api/competition/agent/structures/bundle',
+  ]);
+  assert.equal(requests[0].init.method, undefined);
+  assert.deepEqual(JSON.parse(requests[1].init.body), payload);
+  assert.deepEqual(JSON.parse(requests[2].init.body), payload);
+});
+
 test('live structure draft and confirmation preserve server contracts exactly', async () => {
   const requests = [];
   const responses = [

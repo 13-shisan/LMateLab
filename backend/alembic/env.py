@@ -26,6 +26,7 @@ if config.config_file_name is not None:
 from database import Base
 import models  # noqa: F401
 import models_workflow  # noqa: F401
+import models_competition_agent  # noqa: F401
 
 target_metadata = Base.metadata
 

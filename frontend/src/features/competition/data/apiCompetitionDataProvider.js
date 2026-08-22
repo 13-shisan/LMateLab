@@ -224,6 +224,49 @@ export function createApiCompetitionDataProvider({
       return request(`/api/competition/vasp/records/${encodeURIComponent(id)}`);
     },
 
+    listAgentTemplates() {
+      return request('/api/competition/agent/templates');
+    },
+
+    listAgentRuns() {
+      return request('/api/competition/agent/runs');
+    },
+
+    getAgentRun(id) {
+      return request(`/api/competition/agent/runs/${encodeURIComponent(id)}`);
+    },
+
+    createAgentRun(payload) {
+      return jsonPost('/api/competition/agent/runs', payload);
+    },
+
+    approveAgentRun(id) {
+      return jsonPost(`/api/competition/agent/runs/${encodeURIComponent(id)}/approve`, {});
+    },
+
+    listCuratedStructures() {
+      return request('/api/competition/agent/structures');
+    },
+
+    buildCuratedStructure(payload) {
+      return jsonPost('/api/competition/agent/structures/build', payload);
+    },
+
+    async downloadCuratedStructureBundle(payload) {
+      const { blob, response } = await request(
+        '/api/competition/agent/structures/bundle',
+        { method: 'POST', body: JSON.stringify(payload), responseType: 'blob' },
+      );
+      return {
+        blob,
+        filename: filenameFromDisposition(
+          response.headers.get('content-disposition'),
+          `${payload.material_id}-vasp-inputs.zip`,
+        ),
+        data_kind: 'live',
+      };
+    },
+
     loadPlot(id, kind) {
       return request(`/api/competition/results/${encodeURIComponent(id)}/${encodeURIComponent(kind)}-plot`);
     },

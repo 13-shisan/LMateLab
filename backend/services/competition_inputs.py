@@ -278,7 +278,7 @@ def validate_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise InputValidationError("draft payload must be an object")
     required = {"template_version", "source_kind", "steps", "parameters"}
-    optional = {"structure_upload_id"}
+    optional = {"structure_upload_id", "kpoints"}
     if set(payload) - required - optional or required - set(payload):
         raise InputValidationError("draft payload fields do not match the fixed contract")
 
@@ -318,6 +318,28 @@ def validate_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
         normalized_parameters[step] = dict(sorted(normalized_values.items()))
 
+    normalized_kpoints = None
+    if payload.get("kpoints") is not None:
+        kpoints = payload["kpoints"]
+        if not isinstance(kpoints, dict) or set(kpoints) != {"source", "meshes"}:
+            raise InputValidationError("kpoints fields do not match the controlled contract")
+        if kpoints["source"] not in ("manual", "mock_qoder"):
+            raise InputValidationError("kpoints source must be manual or mock_qoder")
+        meshes = kpoints["meshes"]
+        if not isinstance(meshes, dict) or not meshes or set(meshes) - {"relax", "scf", "dos"}:
+            raise InputValidationError("only relax, scf, and dos KPOINTS meshes may be overridden")
+        normalized_meshes = {}
+        for step, mesh in meshes.items():
+            if type(mesh) is not list or len(mesh) != 3 or any(type(value) is not int for value in mesh):
+                raise InputValidationError(f"{step} KPOINTS mesh must contain three integers")
+            if not all(1 <= value <= 60 for value in mesh):
+                raise InputValidationError(f"{step} KPOINTS mesh values must be between 1 and 60")
+            normalized_meshes[step] = list(mesh)
+        normalized_kpoints = {
+            "source": kpoints["source"],
+            "meshes": dict(sorted(normalized_meshes.items())),
+        }
+
     normalized: dict[str, Any] = {
         "parameters": dict(sorted(normalized_parameters.items())),
         "source_kind": source_kind,
@@ -326,6 +348,8 @@ def validate_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if upload_id is not None:
         normalized["structure_upload_id"] = upload_id
+    if normalized_kpoints is not None:
+        normalized["kpoints"] = normalized_kpoints
     return {**normalized, "canonical_json": _canonical_json(normalized)}
 
 
@@ -440,9 +464,13 @@ def materialize_inputs(
             base_incar = (TEMPLATE_ROOT / TEMPLATE_VERSION / f"INCAR.{step}").read_text(
                 encoding="utf-8"
             )
+            kpoints_definition = step_definition["kpoints"]
+            reviewed_mesh = validated.get("kpoints", {}).get("meshes", {}).get(step)
+            if reviewed_mesh is not None:
+                kpoints_definition = {"mode": "gamma", "mesh": reviewed_mesh}
             contents = {
                 "INCAR": _render_incar(base_incar, validated["parameters"].get(step, {})),
-                "KPOINTS": _render_kpoints(step_definition["kpoints"]),
+                "KPOINTS": _render_kpoints(kpoints_definition),
                 "POSCAR": parsed_structure.canonical_poscar,
                 "POTCAR.spec": ("\n".join(template["potcar_symbols"]) + "\n").encode("ascii"),
             }

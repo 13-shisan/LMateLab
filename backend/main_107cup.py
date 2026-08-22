@@ -22,6 +22,7 @@ from competition_runtime import (
     coordinator_drain_timeout_seconds,
     coordinator_enabled as runtime_coordinator_enabled,
     coordinator_interval_seconds,
+    optional_business_router_imports,
     resolve_frontend_file,
     slurm_probe_script,
     slurm_user,
@@ -244,7 +245,10 @@ def build_app(
         api_router.include_router(getattr(module, router_name))
 
     business_router = APIRouter(dependencies=[Depends(require_business_access)])
-    for module_name, router_name in BUSINESS_ROUTER_IMPORTS:
+    for module_name, router_name in (
+        *BUSINESS_ROUTER_IMPORTS,
+        *optional_business_router_imports(),
+    ):
         module = importlib.import_module(module_name)
         business_router.include_router(getattr(module, router_name))
     api_router.include_router(business_router)
