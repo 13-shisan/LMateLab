@@ -6,7 +6,7 @@
 
 Stage 10 状态：`PARTIAL`。
 
-节点地址修复已通过 PR #57 合并并部署为固定提交 `4f81d727a9dc86f7a5fc1591e2831abb80b89d03`。发布前快照 Job `41477`、正式构建 Job `41478`、服务 Job `41479`、发布后快照 Job `41481` 和只读验收 Job `41482` 已完成；4090 内部入口、Windows 隧道和公网入口均指向 `41479/anode19`。全新 Viewer 桌面/移动浏览器复跑及私有截图清单已完成。全新 Operator 登录复跑、连续视频素材和三名成员独立复核仍未完成，因此状态继续为 `PARTIAL`。
+节点地址修复已通过 PR #57 合并并部署为固定提交 `4f81d727a9dc86f7a5fc1591e2831abb80b89d03`。发布前快照 Job `41477`、正式构建 Job `41478`、服务 Job `41479`、发布后快照 Job `41481` 和只读验收 Job `41482` 已完成；4090 内部入口、Windows 隧道和公网入口均指向 `41479/anode19`。全新 Viewer 桌面/移动浏览器复跑、全新 Operator 登录复跑、连续视频素材及两套私有清单均已完成。三名成员使用各自 Gitea 身份的独立复核仍未完成，因此状态继续为 `PARTIAL`。
 
 Stage 10 验收期间不得提交新的 VASP 计算。固定成功/失败链通过只读方式复核；如确实需要新算例，必须由用户另行明确授权，且不能覆盖既有 attempt 或证据。
 
@@ -32,8 +32,8 @@ Stage 10 summary SHA-256: d1956ad5fc68cd830fe87f7c71b0fa1ba8c924dede1e2447bbc278
 | 2. 假 Slurm 集成 | 通过 | Job `41478` 的后端回归包含 `test_competition_slurm` 全状态、取消和归属门禁 |
 | 3. 107 真实 Slurm | 通过 | 快照 `41477/41481`、构建 `41478`、服务 `41479` 和只读验收 `41482`；验收日志为 `STAGE10_ACCEPTANCE_OK` |
 | 4. 真实 VASP | 通过只读复核 | 成功 `40212/40250/40251/40252`，失败 `40264/40265/null/null`；两份确定性证据包哈希未变，没有提交新 VASP |
-| 5. 浏览器端到端 | PARTIAL | 全新 Viewer 桌面/移动、控制台、网络和 Canvas 检查通过；全新 Operator 登录复跑待完成 |
-| 6. 最终演示复跑 | PARTIAL | Viewer 演示路径已复跑；连续视频素材和三名成员复核待完成 |
+| 5. 浏览器端到端 | 通过 | 全新 Viewer 桌面/移动和全新 Operator 桌面会话的控制台、网络、权限边界及 Canvas 检查通过；Operator 验收未触发写请求 |
+| 6. 最终演示复跑 | PARTIAL | Viewer 与 Operator 演示路径及连续视频素材已完成；三名成员独立复核待完成 |
 
 任何一层失败都不能被下一层成功替代。机器门禁输出 `STAGE10_ACCEPTANCE_OK` 只表示发布、服务、数据库、路由和固定科学数据的只读核对通过，不代表浏览器和三人复核自动通过。
 
@@ -82,7 +82,7 @@ Stage 10 Slurm 验收必须重新解析结构、BAND、DOS 和两份确定性证
 - [x] 前端导航只包含 Dashboard、新建计算、工作流、结果和 VASP 数据库。
 - [x] Agent、聊天、RAG、机器学习、QE/EPW、跨服务器迁移、服务器监控、报告和其他旁支不可访问。
 - [x] Viewer 无提交、取消、重试、修改和敏感日志权限。
-- [x] Operator 只能通过固定模板和固定 Slurm 适配器执行受限主线；全新 Operator 浏览器复跑仍是独立外部门禁。
+- [x] Operator 只能通过固定模板和固定 Slurm 适配器执行受限主线；全新 Operator 浏览器已完成只读复跑且未触发提交、取消、重试或其他写请求。
 
 仓库保留的旧源码不等于竞赛运行面。最终核对以 `main_107cup.py` 实际路由、前端生产 bundle、浏览器导航和网络请求为准。
 
@@ -90,14 +90,16 @@ Stage 10 Slurm 验收必须重新解析结构、BAND、DOS 和两份确定性证
 
 ```text
 Viewer fresh-session evidence directory: /home/scc/pb23030683/lmatelab-107cup/evidence/stage10/browser-4f81d727-20260822
-Operator fresh-session evidence directory: PENDING; headed login session opened on Windows tunnel
-Desktop viewport(s): Viewer 1440x900 passed; Operator PENDING
+Operator fresh-session evidence directory: /home/scc/pb23030683/lmatelab-107cup/evidence/stage10/browser-4f81d727-20260822/operator-desktop
+Desktop viewport(s): Viewer 1440x900 passed; Operator 1440x900 passed
 Mobile viewport(s): Viewer 390x844 passed
-Console error count: Viewer desktop 0; Viewer mobile 0; Operator PENDING
-Structure/BAND/DOS non-white pixel ratios: desktop 0.0116 / 0.0259 / 0.0838; mobile 0.0230 / 0.0897 / 0.1719
+Console error count: Viewer desktop 0; Viewer mobile 0; Operator desktop 0
+Structure/BAND/DOS non-white pixel ratios: Viewer desktop 0.0116 / 0.0259 / 0.0838; Viewer mobile 0.0230 / 0.0897 / 0.1719; Operator desktop 0.006547 / 0.027192 / 0.083188
 Viewer screenshot manifest SHA-256: fdd5b0c047be047e325675661001b3714bdbee976cfff7f14c86bdd899fb59c5
 Viewer summary SHA-256: d7525956e580acb9dde71cbdaeb1c57407156cb36bd2938555abb0b382967d8a
-Video material path and SHA-256: PENDING
+Operator evidence manifest SHA-256: 6edcebe75ebb995e5534234809acd8c402e47a4b7ce47d8f1f4e0a14205d1596
+Operator summary SHA-256: 40bf967125c6acd89f6cdd7267a4d0b1f63e38fe020352817b7c7dda5500249e
+Video material path and SHA-256: operator-desktop/operator-stage10-demo.webm / e752d36a311a1a31e56ce42da588db2e64e9a634ac51f1cb1c13fd8c39cec2ab
 ```
 
 截图必须来自本节固定发布，不能复用 Stage 5/8/9 旧截图充当最终素材。截图和视频不得包含密码、token、JWT、SSH 信息或未裁剪敏感日志。
@@ -105,6 +107,10 @@ Video material path and SHA-256: PENDING
 Viewer 新会话通过公网白名单入口复核了 Dashboard、工作流列表、成功结果、失败结果、新建计算、VASP 数据库和元素周期表。成功结果显示四步 Job `40212/40250/40251/40252`、带隙 `1.6919 eV`、结构、BAND 与 DOS；失败结果显示 SCF `electronic_not_converged`，BAND/DOS 为依赖失败且未启动。新建计算的来源、参数、保存和校验控件均禁用，取消和重试不可用。Mo+S 的“至少含有”和“只含所选元素”筛选均返回两条固定记录。
 
 Viewer 桌面与移动会话均为页面级零横向溢出；周期表和宽表只在自身有边界的区域内横向滚动。控制台错误与警告均为 0，已检查的认证、结果和数据库 GET 请求全部返回 `200`，没有观察到意外写请求。19 张 PNG 的 `viewer-manifest.sha256` 已在本地逐项复核并上传到上述 `0700` 私有目录，文件权限为 `0600`；目录不包含 Playwright storage state、密码、token、JWT 或 `.playwright-cli` 快照。
+
+Operator 由用户在 Windows 隧道入口现场登录，页面确认身份为“107杯管理员 / 操作员”。连续 `422.04` 秒录屏覆盖 Dashboard、工作流成功/失败证据、结果、结构、BAND、DOS、新建计算和 VASP 数据库 Mo+S 精确筛选；13 张 PNG 与 1 个 WebM 均由 `operator-manifest.sha256` 逐项复核并上传为 `0600`。控制台错误与警告均为 0，7 个业务请求全部为成功 GET，没有 POST/PUT/PATCH/DELETE，也没有提交、取消、重试、Slurm 或 VASP 操作。录屏从已登录工作台开始，经抽帧检查不含密码、token、JWT、Cookie 或 SSH 信息；临时认证会话和抽帧接触表已删除。
+
+已知 UX 问题：Operator 查看已验收或失败终态工作流时，“取消工作流”按钮仍显示为可用。源码核对确认后端在没有活动 attempt 时固定返回 `workflow_not_cancellable`，不会调用 `scancel`；本次验收没有点击该按钮，也没有发送取消 POST。该问题不突破后端归属和终态门禁，但后续前端版本应按工作流状态禁用终态取消按钮；在修复重新构建前，本节证据继续严格绑定固定发布 `4f81d727...`。
 
 ## 8. 三名成员独立复核
 

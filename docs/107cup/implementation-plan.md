@@ -146,7 +146,7 @@
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
-| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57 已合并；Job `41477` 前快照、`41478` 构建、`41479/anode19` 服务、`41481` 后快照和 `41482/anode16` 只读验收通过；全新 Viewer 桌面/移动浏览器及私有截图清单已完成 | 完成全新 Operator 登录复跑、连续视频素材和三名成员复核后才能改为 `DONE` |
+| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57 已合并；Job `41477` 前快照、`41478` 构建、`41479/anode19` 服务、`41481` 后快照和 `41482/anode16` 只读验收通过；全新 Viewer 桌面/移动、Operator 桌面、私有截图清单和连续视频均已完成 | 三名成员使用各自 Gitea 身份完成独立复核后才能改为 `DONE` |
 
 ## 6. 阶段 1：竞赛仓库初始化
 
@@ -898,3 +898,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Job `41482` 日志结尾为 `STAGE10_ACCEPTANCE_OK`。证据 manifest SHA-256 为 `0292213052f55fd72cf27c72c224ff914646dd3491435050de99c6b5ccccb48e`，摘要 SHA-256 为 `d1956ad5fc68cd830fe87f7c71b0fa1ba8c924dede1e2447bbc2789ae3fca52f`。两套 SQLite 前后哈希和完整性均未改变，固定成功/失败证据包哈希未变，没有提交新 VASP。
 - 全新 Viewer 会话完成 `1440x900` 和 `390x844` 的 Dashboard、工作流、成功/失败结果、新建计算只读门禁、VASP 数据库、Mo+S 周期表筛选、结构/BAND/DOS 像素和页面溢出检查。桌面与移动控制台错误均为 0；相关 GET API 均为 `200`，没有观察到意外写请求。19 张 PNG 位于私有目录 `evidence/stage10/browser-4f81d727-20260822`，截图清单 SHA-256 为 `fdd5b0c047be047e325675661001b3714bdbee976cfff7f14c86bdd899fb59c5`。
 - 全新 Operator headed 会话已经通过 Windows 隧道打开登录页，但密码必须由用户现场输入，不能读取、猜测或重置。连续视频素材和三名成员独立复核也未完成，因此 Stage 10 保持 `PARTIAL`。
+
+### 17.15 Stage 10 Operator 复跑与视频素材
+
+- 用户在 Windows 隧道入口现场登录后，页面确认身份为“107杯管理员 / 操作员”。全新 Operator 桌面会话以固定发布 `4f81d727...` 复跑 Dashboard、工作流成功/失败证据、结果、结构、BAND、DOS、新建计算和 VASP 数据库 Mo+S 精确筛选；控制台错误与警告均为 0，7 个业务请求全部为成功 GET，没有任何意外写请求。
+- 连续录屏时长 `422.04` 秒，13 张 PNG、1 个 WebM、`operator-manifest.sha256` 和 `operator-summary.json` 已上传到私有目录 `evidence/stage10/browser-4f81d727-20260822`，权限均为 `0600`。Operator 清单 SHA-256 为 `6edcebe75ebb995e5534234809acd8c402e47a4b7ce47d8f1f4e0a14205d1596`，摘要 SHA-256 为 `40bf967125c6acd89f6cdd7267a4d0b1f63e38fe020352817b7c7dda5500249e`，视频 SHA-256 为 `e752d36a311a1a31e56ce42da588db2e64e9a634ac51f1cb1c13fd8c39cec2ab`。
+- 结构/BAND/DOS 非白像素比例为 `0.006547/0.027192/0.083188`。录屏从已登录工作台开始，经抽帧检查没有密码、token、JWT、Cookie 或 SSH 信息；临时认证会话和抽帧接触表已删除。没有提交、取消、重试、Slurm 或 VASP 操作。
+- 发现终态工作流仍显示可用的“取消工作流”按钮。源码和后端测试确认没有活动 attempt 时协调器固定返回 `workflow_not_cancellable` 且不调用 `scancel`；本次没有点击或发送取消 POST。该项记录为不突破安全边界的前端 UX 后续项，不改写固定发布证据。
+- Viewer 与 Operator 浏览器门禁和连续视频至此完成。Stage 10 唯一剩余 DONE 门禁是三名成员使用各自 Gitea 身份独立核对同一 commit、交付清单、固定成功/失败工作流、Viewer 边界、107 数据位置和个人提交/PR 可追溯性。
