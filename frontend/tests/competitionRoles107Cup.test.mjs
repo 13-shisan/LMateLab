@@ -116,6 +116,7 @@ test('107 cup entry atomically exposes exactly seven protected preview routes', 
   const protectedPaths = protectedRoutes.map(routePath);
 
   assert.deepEqual(lazyPages, [
+    'CompetitionHome',
     'Login',
     'CompetitionDashboard',
     'CompetitionNewCalculation',

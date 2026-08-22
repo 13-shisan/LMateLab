@@ -2,10 +2,25 @@
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
 import loginBg from '../assets/bg/login-bg.png';
+import { activeEdition } from '../config/appNavigation';
 import BrandMark from './BrandMark';
+
+const DEFAULT_HOME_LINKS = Object.freeze([
+  { hash: '#features', label: '平台介绍' },
+  { hash: '#modules', label: '核心能力' },
+  { hash: '#cases', label: '应用案例' },
+  { hash: '#docs', label: '帮助文档' },
+]);
+
+const COMPETITION_HOME_LINKS = Object.freeze([
+  { hash: '#platform', label: '平台' },
+  { hash: '#workflow', label: '工作流' },
+  { hash: '#evidence', label: '证据' },
+]);
 
 export default function AuthShell({ children }) {
   const navigate = useNavigate();
+  const homeLinks = activeEdition === '107cup' ? COMPETITION_HOME_LINKS : DEFAULT_HOME_LINKS;
 
   const goHomeHash = (hash) => {
     navigate(`/${hash}`, { replace: true });
@@ -23,13 +38,22 @@ export default function AuthShell({ children }) {
         </button>
 
         <nav className="auth-nav" aria-label="认证页导航">
-          <button className="auth-nav-link" onClick={() => goHomeHash('#features')}>平台介绍</button>
-          <button className="auth-nav-link" onClick={() => goHomeHash('#modules')}>核心能力</button>
-          <button className="auth-nav-link" onClick={() => goHomeHash('#cases')}>应用案例</button>
-          <button className="auth-nav-link" onClick={() => goHomeHash('#docs')}>帮助文档</button>
+          {homeLinks.map((item) => (
+            <button
+              className="auth-nav-link"
+              key={item.hash}
+              onClick={() => goHomeHash(item.hash)}
+            >
+              {item.label}
+            </button>
+          ))}
 
-          <button className="auth-home-action" onClick={() => navigate('/')}>
-            <Home size={16} />
+          <button
+            className="auth-home-action"
+            onClick={() => navigate('/')}
+            aria-label="返回首页"
+          >
+            <Home size={16} aria-hidden="true" />
             <span>返回首页</span>
           </button>
         </nav>
