@@ -47,21 +47,30 @@ test('competition home uses the four supplied campus seasons without broadening 
   assert.match(source, /campus-summer\.webp/);
   assert.match(source, /campus-lake\.webp/);
   assert.match(source, /campus-winter\.webp/);
-  assert.match(source, /--competition-home-flow-image/);
-  assert.match(source, /--competition-home-evidence-image/);
   assert.match(source, /navigate\(['"]\/login['"]\)/);
   assert.match(source, /aria-label="进入平台"/);
+  assert.equal(
+    [...source.matchAll(/className="competition-home-season-media"/g)].length,
+    4,
+    'each season must render one complete image layer',
+  );
+  assert.doesNotMatch(source, /competition-home-entry|进入计算工作台|登录平台/);
   assert.doesNotMatch(source, /Agent|RAG|机器学习|QE|EPW|跨服务器|高通量|任意材料|任意命令/);
 });
 
-test('competition home keeps all four seasonal backgrounds responsive and overflow safe', () => {
+test('competition home shows four complete equal seasonal frames without a fifth CTA band', () => {
   if (!existsSync(stylesUrl)) return;
   const styles = readFileSync(stylesUrl, 'utf8');
 
-  assert.match(styles, /\.competition-home-hero\s*\{[^}]*background-image:\s*var\(--competition-home-hero-image\)/s);
-  assert.match(styles, /\.competition-home-campus\s*\{[^}]*background-image:\s*var\(--competition-home-campus-image\)/s);
-  assert.match(styles, /\.competition-home-flow\s*\{[^}]*background-image:\s*var\(--competition-home-flow-image\)/s);
-  assert.match(styles, /\.competition-home-evidence\s*\{[^}]*background-image:\s*var\(--competition-home-evidence-image\)/s);
+  assert.match(styles, /\.competition-home-season\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*2/s);
+  assert.match(styles, /\.competition-home-season-media\s+img\s*\{[^}]*object-fit:\s*contain/s);
+  assert.match(
+    styles,
+    /\.competition-home-flow\s*\{[^}]*flex-direction:\s*column[^}]*justify-content:\s*center[^}]*align-items:\s*stretch/s,
+  );
+  assert.match(styles, /@media\s*\(max-width:\s*820px\)[\s\S]*\.competition-home-season\s*\{[^}]*aspect-ratio:\s*auto/s);
+  assert.match(styles, /@media\s*\(max-width:\s*820px\)[\s\S]*\.competition-home-season-media\s*\{[^}]*height:\s*calc\(100vw\s*\*\s*2\s*\/\s*3\)/s);
+  assert.doesNotMatch(styles, /\.competition-home-entry/);
   assert.match(styles, /@media\s*\(max-width:\s*640px\)/);
   assert.match(styles, /overflow-x:\s*hidden/);
   assert.doesNotMatch(styles, /font-size:\s*[^;]*vw/);

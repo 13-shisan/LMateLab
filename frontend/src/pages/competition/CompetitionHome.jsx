@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, Database, LogIn, ShieldCheck, Workflow } from 'lucide-react';
+import { ArrowDown, Database, LogIn, ShieldCheck, Workflow } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import campusAutumn from '../../assets/107cup/campus-lake.webp';
@@ -47,10 +47,12 @@ export default function CompetitionHome() {
 
       <main>
         <section
-          className="competition-home-hero"
-          style={{ '--competition-home-hero-image': `url(${campusSpring})` }}
+          className="competition-home-season competition-home-hero"
           aria-labelledby="competition-home-title"
         >
+          <div className="competition-home-season-media" aria-hidden="true">
+            <img src={campusSpring} alt="" fetchPriority="high" />
+          </div>
           <div className="competition-home-hero-content">
             <p className="competition-home-kicker">中国科学技术大学 · 低维材料科学实验室</p>
             <h1 id="competition-home-title">LMateLab</h1>
@@ -75,10 +77,12 @@ export default function CompetitionHome() {
 
         <section
           id="platform"
-          className="competition-home-campus"
-          style={{ '--competition-home-campus-image': `url(${campusSummer})` }}
+          className="competition-home-season competition-home-campus"
           aria-labelledby="competition-home-platform-title"
         >
+          <div className="competition-home-season-media" aria-hidden="true">
+            <img src={campusSummer} alt="" loading="lazy" />
+          </div>
           <div className="competition-home-campus-inner">
             <div className="competition-home-campus-copy">
               <p className="competition-home-section-label">平台主线</p>
@@ -110,10 +114,12 @@ export default function CompetitionHome() {
 
         <section
           id="workflow"
-          className="competition-home-flow"
-          style={{ '--competition-home-flow-image': `url(${campusAutumn})` }}
+          className="competition-home-season competition-home-flow"
           aria-labelledby="competition-home-flow-title"
         >
+          <div className="competition-home-season-media" aria-hidden="true">
+            <img src={campusAutumn} alt="" loading="lazy" />
+          </div>
           <div className="competition-home-section-heading">
             <p className="competition-home-section-label">计算工作流</p>
             <h2 id="competition-home-flow-title">四步 VASP 闭环</h2>
@@ -133,10 +139,12 @@ export default function CompetitionHome() {
 
         <section
           id="evidence"
-          className="competition-home-evidence"
-          style={{ '--competition-home-evidence-image': `url(${campusWinter})` }}
+          className="competition-home-season competition-home-evidence"
           aria-labelledby="competition-home-evidence-title"
         >
+          <div className="competition-home-season-media" aria-hidden="true">
+            <img src={campusWinter} alt="" loading="lazy" />
+          </div>
           <div className="competition-home-evidence-inner">
             <div>
               <p className="competition-home-section-label">验收证据</p>
@@ -149,21 +157,13 @@ export default function CompetitionHome() {
           </div>
         </section>
 
-        <section className="competition-home-entry" aria-label="平台入口">
-          <div>
-            <p className="competition-home-section-label">LMateLab 107 Cup</p>
-            <h2>进入计算工作台</h2>
-          </div>
-          <button type="button" onClick={() => navigate('/login')}>
-            <span>登录平台</span>
-            <ArrowRight size={18} aria-hidden="true" />
-          </button>
-        </section>
       </main>
 
       <footer className="competition-home-footer">
-        <BrandMark />
-        <p>中国科学技术大学 · 低维材料科学实验室 · 107 杯竞赛平台</p>
+        <div className="competition-home-footer-inner">
+          <BrandMark />
+          <p>中国科学技术大学 · 低维材料科学实验室 · 107 杯竞赛平台</p>
+        </div>
       </footer>
     </div>
   );
