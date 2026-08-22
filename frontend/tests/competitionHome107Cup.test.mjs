@@ -23,7 +23,7 @@ test('107 cup exposes a public competition-specific home before login', () => {
   assert.match(authShell, /aria-label="返回首页"/);
 });
 
-test('competition home uses the four supplied campus seasons without broadening scope', () => {
+test('competition home uses the four supplied campus seasons without unsupported claims', () => {
   for (const url of [sourceUrl, stylesUrl, springUrl, summerUrl, lakeUrl, winterUrl]) {
     assert.equal(existsSync(url), true, `${url.pathname} must exist`);
   }
@@ -32,7 +32,7 @@ test('competition home uses the four supplied campus seasons without broadening 
   const source = readFileSync(sourceUrl, 'utf8');
   for (const expected of [
     'LMateLab',
-    '二维材料',
+    '材料计算',
     'VASP',
     'relax',
     'SCF',
@@ -55,7 +55,26 @@ test('competition home uses the four supplied campus seasons without broadening 
     'each season must render one complete image layer',
   );
   assert.doesNotMatch(source, /competition-home-entry|进入计算工作台|登录平台/);
+  assert.doesNotMatch(source, /MoS2/);
   assert.doesNotMatch(source, /Agent|RAG|机器学习|QE|EPW|跨服务器|高通量|任意材料|任意命令/);
+});
+
+test('competition home keeps every seasonal message large and legible over photography', () => {
+  if (!existsSync(stylesUrl)) return;
+  const styles = readFileSync(stylesUrl, 'utf8');
+
+  for (const contract of [
+    /\.competition-home-links\s*\{[^}]*font-size:\s*16px/s,
+    /\.competition-home-summary\s*\{[^}]*color:\s*#f4f8fb[^}]*font-size:\s*20px/s,
+    /\.competition-home-campus-copy\s*>\s*p:last-child\s*\{[^}]*font-size:\s*19px/s,
+    /\.competition-home-pillars\s+span\s*\{[^}]*font-size:\s*17px/s,
+    /\.competition-home-flow-list\s+p\s*\{[^}]*font-size:\s*16px/s,
+    /\.competition-home-evidence-inner\s*>\s*p\s*\{[^}]*font-size:\s*20px/s,
+    /\.competition-home-hero::before[\s\S]*?background:\s*rgba\(5,\s*18,\s*27,\s*0\.64\)/s,
+  ]) {
+    assert.match(styles, contract);
+  }
+  assert.match(styles, /text-shadow:\s*0 2px 4px rgba\(0, 0, 0, 0\.82\)/);
 });
 
 test('competition home shows four complete equal seasonal frames without a fifth CTA band', () => {

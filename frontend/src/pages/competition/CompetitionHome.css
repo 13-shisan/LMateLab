@@ -3,6 +3,8 @@
   overflow-x: hidden;
   color: #10202c;
   background: #0b1d24;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 .competition-home-nav {
@@ -12,7 +14,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  height: 72px;
+  height: 78px;
   padding: 0 clamp(18px, 4vw, 64px);
   color: #ffffff;
   background: rgba(8, 22, 31, 0.78);
@@ -35,15 +37,22 @@
   color: #ffffff;
 }
 
+.competition-home-brand .topbar-title-cn {
+  font-size: 18px;
+  font-weight: 700;
+}
+
 .competition-home-brand .topbar-title-en {
-  opacity: 0.72;
+  font-size: 13px;
+  opacity: 0.86;
 }
 
 .competition-home-links {
   display: flex;
   align-items: center;
-  gap: 28px;
-  font-size: 14px;
+  gap: 32px;
+  font-size: 16px;
+  font-weight: 650;
 }
 
 .competition-home-links a {
@@ -77,6 +86,7 @@
   color: #10202c;
   background: #ffffff;
   border: 1px solid #ffffff;
+  font-size: 16px;
 }
 
 .competition-home-season {
@@ -122,48 +132,58 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: rgba(5, 18, 27, 0.48);
+  background: rgba(5, 18, 27, 0.64);
+}
+
+.competition-home-hero-content,
+.competition-home-campus-inner,
+.competition-home-section-heading,
+.competition-home-flow-list,
+.competition-home-evidence-inner {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.82), 0 10px 28px rgba(0, 0, 0, 0.46);
 }
 
 .competition-home-hero-content {
   width: min(1180px, 100%);
   margin-inline: auto;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.3);
 }
 
 .competition-home-kicker,
 .competition-home-section-label,
 .competition-home-release {
   margin: 0;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 750;
 }
 
 .competition-home-kicker {
   margin-bottom: 18px;
-  color: rgba(255, 255, 255, 0.82);
+  color: #eaf6f4;
 }
 
 .competition-home-hero h1 {
   margin: 0;
-  font-size: 72px;
+  font-size: 80px;
   line-height: 1;
+  font-weight: 720;
   letter-spacing: 0;
 }
 
 .competition-home-lead {
   margin: 18px 0 0;
-  font-size: 24px;
-  line-height: 1.4;
-  font-weight: 650;
+  max-width: 760px;
+  font-size: 30px;
+  line-height: 1.35;
+  font-weight: 720;
 }
 
 .competition-home-summary {
-  max-width: 650px;
-  margin: 18px 0 0;
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 16px;
-  line-height: 1.8;
+  max-width: 720px;
+  margin: 20px 0 0;
+  color: #f4f8fb;
+  font-size: 20px;
+  line-height: 1.7;
+  font-weight: 520;
 }
 
 .competition-home-actions {
@@ -177,6 +197,7 @@
 .competition-home-actions a {
   min-width: 156px;
   padding: 0 18px;
+  font-size: 16px;
 }
 
 .competition-home-actions button {
@@ -193,7 +214,8 @@
 
 .competition-home-release {
   margin-top: 36px;
-  color: rgba(255, 255, 255, 0.72);
+  color: #dce8ec;
+  font-size: 14px;
 }
 
 .competition-home-campus {
@@ -201,15 +223,15 @@
 }
 
 .competition-home-campus::before {
-  background: rgba(8, 26, 36, 0.58);
+  background: rgba(8, 26, 36, 0.68);
 }
 
 .competition-home-flow::before {
-  background: rgba(7, 24, 29, 0.68);
+  background: rgba(7, 24, 29, 0.74);
 }
 
 .competition-home-evidence::before {
-  background: rgba(6, 21, 29, 0.62);
+  background: rgba(6, 21, 29, 0.7);
 }
 
 .competition-home-campus-inner {
@@ -218,7 +240,7 @@
 }
 
 .competition-home-campus-copy {
-  max-width: 680px;
+  max-width: 760px;
 }
 
 .competition-home-section-label {
@@ -228,23 +250,25 @@
 .competition-home-campus .competition-home-section-label,
 .competition-home-flow .competition-home-section-label,
 .competition-home-evidence .competition-home-section-label {
-  color: #91ddd0;
+  color: #a8f0e4;
 }
 
 .competition-home-campus h2,
 .competition-home-flow h2,
 .competition-home-evidence h2 {
   margin: 10px 0 0;
-  font-size: 38px;
-  line-height: 1.2;
+  font-size: 48px;
+  line-height: 1.18;
+  font-weight: 720;
   letter-spacing: 0;
 }
 
 .competition-home-campus-copy > p:last-child {
   margin: 20px 0 0;
-  color: rgba(255, 255, 255, 0.84);
-  font-size: 16px;
-  line-height: 1.8;
+  color: #f4f8fb;
+  font-size: 19px;
+  line-height: 1.75;
+  font-weight: 520;
 }
 
 .competition-home-pillars {
@@ -267,12 +291,14 @@
 }
 
 .competition-home-pillars strong {
-  font-size: 17px;
+  color: #ffffff;
+  font-size: 20px;
 }
 
 .competition-home-pillars span {
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 14px;
+  color: #e5eef1;
+  font-size: 17px;
+  line-height: 1.55;
 }
 
 .competition-home-flow {
@@ -291,7 +317,9 @@
 
 .competition-home-section-heading > p:last-child {
   margin: 14px 0 0;
-  color: rgba(255, 255, 255, 0.8);
+  color: #eef5f7;
+  font-size: 19px;
+  line-height: 1.65;
 }
 
 .competition-home-flow-list {
@@ -316,29 +344,29 @@
 
 .competition-home-flow-number {
   display: block;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 12px;
+  color: #d7e5e8;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .competition-home-flow-list strong {
   display: block;
   margin-top: 20px;
-  color: #91ddd0;
-  font-size: 24px;
+  color: #a8f0e4;
+  font-size: 28px;
 }
 
 .competition-home-flow-list h3 {
   margin: 8px 0 0;
   color: #ffffff;
-  font-size: 16px;
+  font-size: 20px;
 }
 
 .competition-home-flow-list p {
   margin: 8px 0 0;
-  color: rgba(255, 255, 255, 0.76);
-  font-size: 14px;
-  line-height: 1.65;
+  color: #e5eef1;
+  font-size: 16px;
+  line-height: 1.7;
 }
 
 .competition-home-evidence {
@@ -354,16 +382,18 @@
 
 .competition-home-evidence-inner > p {
   margin: 0;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 16px;
-  line-height: 1.85;
+  max-width: 660px;
+  color: #f4f8fb;
+  font-size: 20px;
+  line-height: 1.75;
+  font-weight: 520;
 }
 
 .competition-home-footer {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.82);
   background: #0b1d24;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .competition-home-footer-inner {
@@ -473,22 +503,22 @@
 
   .competition-home-kicker {
     max-width: 280px;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .competition-home-hero h1 {
-    font-size: 46px;
+    font-size: 50px;
   }
 
   .competition-home-lead {
-    max-width: 300px;
-    font-size: 19px;
+    max-width: 340px;
+    font-size: 22px;
   }
 
   .competition-home-summary {
-    max-width: 330px;
-    font-size: 14px;
-    line-height: 1.7;
+    max-width: 350px;
+    font-size: 16px;
+    line-height: 1.75;
   }
 
   .competition-home-actions {
@@ -500,19 +530,19 @@
   .competition-home-actions a {
     min-width: 0;
     padding-inline: 10px;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .competition-home-release {
     max-width: 320px;
     margin-top: 24px;
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .competition-home-campus h2,
   .competition-home-flow h2,
   .competition-home-evidence h2 {
-    font-size: 29px;
+    font-size: 34px;
   }
 
   .competition-home-section-heading,
