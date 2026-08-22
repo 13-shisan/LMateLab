@@ -81,7 +81,7 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-当前已验证稳定服务是 Job `41648`、`anode18:18731`、提交 `565edfda8d36018e4516e2d22e27be351d9f0a41`，release manifest SHA-256 为 `57e777bf8f3ac94ae6c6b0816b00afe5175016f4f5b66f6905d57948c22ea78b`。公网 `live/ready` 已返回该身份；下一次发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能沿用本组 Job 冒充新版本证据。
+当前已验证稳定服务是 Job `41673`、`anode16:18731`、提交 `4f652db91bdfb1dc28fea0daed4d12b0d9d57215`，release manifest SHA-256 为 `616b86b1460debd7570d6ba59ccfd19b68d103019fa99c5049ef7e021d55d9ca`。4090、Windows Operator 和公网 `live/ready` 均返回该身份；下一次发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能沿用本组 Job 冒充新版本证据。
 
 ## 5. Stage 10 只读验收
 

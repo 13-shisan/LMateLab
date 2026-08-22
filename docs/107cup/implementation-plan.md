@@ -146,7 +146,7 @@
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
-| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60/#61/#63 已合并；排版整改版由 Job `41646/anode01` 构建、`41648/anode18` 提供服务并经 `41649/anode16` 只读验收；公网三种视口四图复跑通过 | 当前发布仍需全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
+| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60/#61/#63/#66 已合并；可读性整改版由 Job `41672/anode01` 构建、`41673/anode16` 提供服务并经 `41676/anode16` 只读验收；公网桌面/移动四图复跑通过 | 当前发布仍需全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
 
 ## 6. 阶段 1：竞赛仓库初始化
 
@@ -944,3 +944,13 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 四个季节区段统一增强信息层级：桌面首屏主标题为 `80px`、平台标题为 `48px`、正文为 `16-20px`，导航为 `16px`；摄影背景使用更强的实色深色遮罩、白色高对比文字和受控阴影。`820px` 以下继续使用完整 `3:2` 图片带与独立深色正文区，避免文字压住校园照片。
 - 本地首页合同 `4/4`、前端全量 `143/143`、定向 ESLint 和 107 Cup Vite 构建（`1867` 个模块）已通过。Playwright 在 `2560x1440`、`1440x900` 和 `390x844` 完成视觉复核：四张图片均加载、公开正文不含 `MoS2`、页面横向溢出和控制台错误/警告均为 `0`；手机端四个区段 `scrollHeight` 与 `clientHeight` 一致，没有内容裁切。
 - 本节当前仅记录本地候选。PR 合并、107 Slurm 构建、服务切换和 Stage 10 只读验收完成前，线上发布仍为 `565edfda...`；本次改动不把 Stage 7 的固定 MoS2 真实验收外推为其他材料已经完成真实 VASP 验收，Stage 10 继续为 `PARTIAL`。
+
+### 17.20 四季首页可读性整改发布与验收
+
+- PR #66 已将功能提交 `7c282730e148d4b205deab6c65a8444491dd5680` 合并为 `4f652db91bdfb1dc28fea0daed4d12b0d9d57215`。发布前快照 Job `41670` 完成自校验，manifest SHA-256 为 `b484d9d7d99ab8f96db6fabb1b77ae1d84c65526572b4134f8c848279c5a95c0`。
+- 正式构建 Job `41672/anode01` 后端共运行 `494` 项并为 `OK`（其中 4 项环境跳过），前端 `143/143`，Vite 转换 `1867` 个模块；`current` 原子指向新 release，`640` 项 release manifest 自校验通过，SHA-256 为 `616b86b1460debd7570d6ba59ccfd19b68d103019fa99c5049ef7e021d55d9ca`。
+- 候选服务 Job `41673/anode16:18731` 在排除旧节点 `anode18` 后提交，本机 live/ready 和身份一致后由 4090 临时探测并切换正式 relay。Windows Operator、公网和 4090 内部入口均返回新 Job、node、commit 与 manifest；旧 Job `41648/anode18` 经用户、名称、账号、分区、命令和专属日志路径核对后停止，Uvicorn 完成正常 shutdown，旧节点端口不可达。
+- Stage 10 只读 Job `41676/anode16` 输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节；证据 manifest 和摘要 SHA-256 分别为 `488e809e2b43dee581c34c73182b1cbf2a4954e235a4dfbdd376936db34a96c7` 与 `ff92d05d388db5f9a992e0805ba45413a354ce5484daf14567bd8ec4477712b7`。数据库完整性为 `ok`，固定成功/失败工作流和证据包哈希未变，没有提交 VASP。
+- 公网 Playwright 在 `1440x900` 和 `390x844` 确认四图全部加载、公开正文不含 `MoS2`、页面无横向溢出或内容裁切、控制台错误/警告为 0；首页进入登录页和返回首页均实际点击通过。桌面首屏摘要和区段标题计算字号分别为 `20px` 与 `48px`。
+- 发布后 Job `41680` 误用了要求 `current` 和服务身份前后不变的预览快照合同，因此在比较旧、新 release 的 `current-target.txt` 时失败，且未生成后快照 manifest；本项保留为失败证据，不能写成成功。两套 SQLite 前后完整性均为 `ok`，`digests.db` 哈希不变；`eln.db` 因此前已合并 PR #65 的 Agent 表迁移从 `29cf1028...` 变为 `018bd0e1...`，不是首页写入。
+- 当前公开首页、Slurm 构建、服务切换和只读机器门禁均已完成。全新认证态 Viewer/Operator 全流程与连续视频仍需针对 `4f652db9...` 重做，三名成员独立复核也未完成，因此 Stage 10 继续为 `PARTIAL`。
