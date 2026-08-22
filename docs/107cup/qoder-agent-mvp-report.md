@@ -185,3 +185,23 @@ workflow coordinator. Reviewed meshes are hashed and materialized for relax,
 SCF, and DOS; BAND remains the fixed high-symmetry line path. The Agent retains
 no scheduler authority, and only the existing MoS2 four-step workflow can reach
 the queue boundary.
+
+## 12. Main Integration Verification
+
+Verified on `2026-08-22` after merging `origin/main` at
+`70ad7cb20b9e8ede751256f3b173f4e266f27a9a`:
+
+- the Stage 10 recovery, evidence, and acceptance changes remain present;
+- the public four-season competition homepage and protected Agent route coexist;
+- focused Agent/workflow contracts passed `70/70`;
+- Agent discovery tests, including migration, feature registration, security,
+  structures, and fake Slurm, passed `29/29`;
+- existing VASP scientific acceptance passed `100/100`;
+- the complete frontend suite passed `142/142`;
+- targeted Agent ESLint and the Agent-enabled 107cup production build passed
+  with `1867` transformed modules;
+- `git diff --check` passed and no real Qoder provider, remote scheduler, or
+  server was contacted.
+
+The real Qoder SDK, PAT injection, provider network access, and Linux Slurm
+submission remain explicit post-MVP gates. The feature flag still defaults off.
