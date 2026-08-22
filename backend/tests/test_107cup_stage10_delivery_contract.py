@@ -9,6 +9,7 @@ SLURM = ROOT / "deploy" / "107cup" / "slurm" / "stage10-acceptance.slurm"
 HARNESS = ROOT / "deploy" / "107cup" / "slurm" / "stage10-acceptance.py"
 SUBMIT = ROOT / "deploy" / "107cup" / "submit-stage10-acceptance.sh"
 GENERATOR = ROOT / "deploy" / "107cup" / "generate-stage10-manifest.py"
+RUNTIME_VERIFY = ROOT / "deploy" / "107cup" / "verify-runtime.sh"
 DELIVERY_DOCS = (
     ROOT / "docs" / "107cup" / "deployment.md",
     ROOT / "docs" / "107cup" / "data-and-provenance.md",
@@ -69,6 +70,15 @@ class Stage10DeliveryContractTests(unittest.TestCase):
             self.assertIn(required, source)
         self.assertNotIn("submit-build.sh", source)
         self.assertNotIn("submit-service.sh", source)
+
+    def test_runtime_checks_use_the_fixed_compute_network_not_login_node_dns(self):
+        harness = HARNESS.read_text(encoding="utf-8")
+        verifier = RUNTIME_VERIFY.read_text(encoding="utf-8")
+        self.assertIn("def _node_to_address", harness)
+        self.assertIn('return f"11.11.10.{number}"', harness)
+        self.assertIn("node_address=$(printf '11.11.10.%d'", verifier)
+        self.assertIn('http://$node_address:$port/api/health/live', verifier)
+        self.assertNotIn('http://$node:$port/api/health/live', verifier)
 
     def test_delivery_documents_exist_and_keep_external_review_open(self):
         for path in DELIVERY_DOCS:

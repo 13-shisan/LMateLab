@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -50,6 +51,49 @@ class ServiceRecoveryTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_compute_node_address_uses_the_fixed_107_internal_network(self):
+        self.assertEqual("11.11.10.1", self.module.node_to_address("anode01"))
+        self.assertEqual("11.11.10.26", self.module.node_to_address("anode26"))
+        for invalid in ("anode00", "anode27", "anode1", "11.11.10.18", "anode18.local"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(self.module.RecoveryError):
+                    self.module.node_to_address(invalid)
+
+    def test_health_probe_uses_internal_address_but_keeps_node_identity_separate(self):
+        requested = []
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _maximum):
+                return json.dumps(self.payload).encode("utf-8")
+
+        def urlopen(url, timeout):
+            requested.append((url, timeout))
+            if url.endswith("/live"):
+                return Response({"status": "ok", "node": "anode18"})
+            return Response({"status": "ready"})
+
+        with patch.object(self.module.urllib.request, "urlopen", side_effect=urlopen):
+            live, ready = self.module.probe_health("anode18", 18731)
+
+        self.assertEqual({"status": "ok", "node": "anode18"}, live)
+        self.assertEqual({"status": "ready"}, ready)
+        self.assertEqual(
+            [
+                ("http://11.11.10.18:18731/api/health/live", 5),
+                ("http://11.11.10.18:18731/api/health/ready", 5),
+            ],
+            requested,
+        )
 
     def record(self, job_id, *, state="RUNNING", node="anode18", owned=True):
         return self.module.JobRecord(

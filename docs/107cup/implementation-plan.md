@@ -146,7 +146,7 @@
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
-| 10. 比赛交付验收 | PARTIAL | 已进入 `codex/107cup-stage10-delivery` 开发：交付合同、Slurm 只读验收入口、部署/溯源/演示/最终验收文档和确定性清单已实现；尚未从合并后固定 `main` 重建，也没有 Stage 10 真实 Job、全新 Operator/Viewer 素材或三人独立复核 | 合并功能 PR；从新 `main` 在 107 Slurm 重建并部署；通过机器门禁和浏览器演示；三名成员复核后才能改为 `DONE` |
+| 10. 比赛交付验收 | PARTIAL | PR #55/#56 已合并；Job `41138` 快照、`41139` 构建和候选服务 `41142/anode18` 已完成，但登录节点 DNS 不能解析 `anode18`，正式入口按失败关闭原则仍保留 Job `41044/anode16`；地址修复尚未合并 | 合并并重建节点地址修复；验证候选后切换 4090；完成 Stage 10 只读 Job、全新 Operator/Viewer 素材和三名成员复核后才能改为 `DONE` |
 
 ## 6. 阶段 1：竞赛仓库初始化
 
@@ -887,3 +887,6 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 发布前快照 Job `41063` 完成两套正式 SQLite 完整性、服务 Job `41044` 健康状态和证据清单核对；证据位于 `evidence/previews/db03e360b450b41f483fa98e62157ec6c993f6ba/before-41063`。
 - 首次正式构建 Job `41064` 在 `P107-RTX5090/anode01` 运行后端 `489` 项，结果为 `1 failure + 4 skipped`。唯一失败是 Windows 工作树中的既有 `implementation-plan.md` 使用 CRLF，而 Git/107 检出使用 LF，导致仓库交付清单哈希跨平台不一致。构建在前端和 release 生成前失败，稳定 `current` 仍为 `e565851...`，服务仍为 Job `41044/anode16`，数据库和固定 VASP 工作流未修改。
 - 热修复范围仅为固定 UTF-8 文本在计算交付清单前规范化为 LF，并由同一合同测试复核；重新合并、在 107 Slurm 构建通过、部署新服务、执行 Stage 10 只读 Job 和浏览器验收前，Stage 10 保持 `PARTIAL`。
+- PR #56 已将清单换行规范化修复合并为 `4e79c07b198b34e54be332638868e82249357d1f`。发布前快照 Job `41138` 通过；正式构建 Job `41139` 通过后端 `489/489`（另有 4 项环境跳过）、前端 `129/129`、Vite `1857` 个模块和 `595` 项 release manifest，release manifest SHA-256 为 `33891563e9e69232b60661176cf132c9e9f4524a88515a61693f59e1d841cac3`。
+- 新候选服务 Job `41142` 正在 `P107-A100/anode18:18731` 运行，使用固定内部地址 `11.11.10.18` 探测时 live/ready 均返回该 Job、固定提交和 manifest；`service-state.json` 已原子发布相同身份。107 登录节点不能解析 `anode18`，旧恢复器因此报告 `service_not_ready`，4090 relay 正确拒绝切换，Windows 与公网入口继续返回旧 Job `41044/anode16`。两项服务都未停止。
+- 节点地址修复在 `codex/107cup-stage10-node-address` 按 RED/GREEN 开发：只接受 `anode01..anode26` 并映射为 `11.11.10.1..26`，连接探测使用内部 IP，健康身份仍核对原节点名；同一规则进入服务恢复器、`verify-runtime.sh` 和 Stage 10 Slurm harness，并纳入确定性交付清单。本地恢复/relay/运行时/Stage 10 聚焦测试 `40/40`、Python 编译、Bash/Slurm 语法和 `git diff --check` 通过。修复尚未合并或在 107 重建，Stage 10 继续为 `PARTIAL`。

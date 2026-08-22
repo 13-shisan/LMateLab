@@ -6,7 +6,7 @@
 
 Stage 10 状态：`PARTIAL`。
 
-交付合同、计算节点只读验收入口、部署说明、数据溯源说明、演示脚本和仓库 SHA-256 清单已进入开发分支。最终状态暂不能写成 `DONE`，因为新固定 `main` 发布尚未在 107 重新构建，Stage 10 Slurm 验收、全新 Operator/Viewer 浏览器复跑、桌面/移动素材和三名成员独立复核尚未形成证据。
+交付合同、计算节点只读验收入口、部署说明、数据溯源说明、演示脚本和仓库 SHA-256 清单已经合并并完成一次 107 正式构建。新候选 Job `41142` 已在 `anode18` 健康运行，但登录节点不能解析该主机名，导致服务恢复器和 4090 转发器按设计失败关闭，正式入口仍保留旧 Job `41044`。节点地址修复尚在开发分支，Stage 10 Slurm 验收、全新 Operator/Viewer 浏览器复跑、桌面/移动素材和三名成员独立复核也尚未形成最终证据，因此状态仍为 `PARTIAL`。
 
 Stage 10 验收期间不得提交新的 VASP 计算。固定成功/失败链通过只读方式复核；如确实需要新算例，必须由用户另行明确授权，且不能覆盖既有 attempt 或证据。
 
@@ -15,10 +15,10 @@ Stage 10 验收期间不得提交新的 VASP 计算。固定成功/失败链通�
 以下字段只能在 PR 合并并从新 `main` 构建后填写，不能引用 Stage 10 开始前的 Job `41044` 冒充最终发布：
 
 ```text
-Merged main commit: PENDING
-Build Job ID / node / final state: PENDING
-Release manifest SHA-256: PENDING
-Service Job ID / node / port: PENDING
+Merged main commit: 4e79c07b198b34e54be332638868e82249357d1f
+Build Job ID / node / final state: 41139 / PENDING (scheduler record expired) / COMPLETED by preserved gates and runtime markers
+Release manifest SHA-256: 33891563e9e69232b60661176cf132c9e9f4524a88515a61693f59e1d841cac3
+Service Job ID / node / port: candidate 41142 / anode18 / 18731; public active remains 41044 / anode16 / 18731
 Stage 10 acceptance Job ID / node / final state: PENDING
 Stage 10 evidence manifest SHA-256: PENDING
 ```
@@ -27,9 +27,9 @@ Stage 10 evidence manifest SHA-256: PENDING
 
 | 层级 | 当前状态 | 最终证据 |
 |---|---|---|
-| 1. 单元测试 | PENDING | 新固定提交后端全量，0 failure、0 error |
+| 1. 单元测试 | 当前发布通过，地址修复待最终重跑 | Job `41139` 后端 `489/489`，另有 4 项环境跳过；修复分支聚焦测试 `40/40` |
 | 2. 假 Slurm 集成 | PENDING | `test_competition_slurm` 全状态与归属通过 |
-| 3. 107 真实 Slurm | PENDING | 构建、服务、Stage 10 验收 Job 和原始日志 |
+| 3. 107 真实 Slurm | PARTIAL | 快照 `41138`、构建 `41139` 和候选服务 `41142` 已有；地址修复后的最终构建、正式服务和 Stage 10 验收待执行 |
 | 4. 真实 VASP | 已有固定基线，待新发布只读复核 | 成功 `40212/40250/40251/40252`，失败 `40264/40265/null/null` |
 | 5. 浏览器端到端 | PENDING | 全新 Operator/Viewer、桌面/移动、控制台和 Canvas 检查 |
 | 6. 最终演示复跑 | PENDING | 按 `demo-script.md` 完整执行和素材哈希 |
@@ -39,6 +39,12 @@ Stage 10 evidence manifest SHA-256: PENDING
 合并前本地预检（`2026-08-21`）：Stage 8/10 合同测试共 `6/6` 通过，前端 Node 测试 `129/129` 通过，107 Cup live Vite 构建完成 `1857` 个模块转换。额外运行的全仓库 ESLint 仍有既存 `36 errors / 22 warnings`，命中注册、Agent、QE/EPW、监控等未由本阶段修改且不进入 107 Cup 运行面的旧源码；不能把这次 lint 写成通过，也不在 Stage 10 中扩大范围修复。合并后的 107 Slurm 正式构建仍必须重新执行后端和前端门禁。
 
 PR #55 合并提交 `db03e360b450b41f483fa98e62157ec6c993f6ba` 的首次正式构建 Job `41064` 在 `P107-RTX5090/anode01` 失败关闭。后端运行 `489` 项，结果为 `1 failure + 4 skipped`；唯一失败是仓库交付清单在 Windows 生成时对既有 `implementation-plan.md` 的 CRLF 字节计算哈希，而 Git 和 107 检出为 LF。失败发生在前端和发布目录生成之前，旧 `current`、服务 Job `41044`、数据库和固定工作流均未改变。热修复只把固定 UTF-8 文本规范化为 LF 后计算清单，不能删除文件校验或改写旧证据。
+
+PR #56 将跨平台清单修复合并为 `4e79c07b198b34e54be332638868e82249357d1f`。发布前快照 Job `41138` 通过；正式构建 Job `41139` 通过后端 `489/489`（另有 4 项环境跳过）、前端 `129/129`、Vite `1857` 个模块和 `595` 项 release manifest，自检后的 release manifest SHA-256 为 `33891563e9e69232b60661176cf132c9e9f4524a88515a61693f59e1d841cac3`，`current` 已切换到该固定提交。
+
+候选服务 Job `41142` 正在 `P107-A100/anode18:18731` 运行，通过固定内部地址 `11.11.10.18` 访问时 live/ready 均正确返回新 Job、commit 和 manifest。107 登录节点当前不能解析 `anode18`，旧恢复器因此报告 `service_not_ready`，4090 relay 拒绝切换并继续把 Windows `127.0.0.1:21763` 和公网入口导向 Job `41044/anode16`。两项服务都继续保留，尚未执行 `scancel`。
+
+地址修复开发分支将严格的 `anode01..anode26` 映射为 `11.11.10.1..26`，网络探测使用内部 IP，健康身份仍要求原 `anodeNN`。本地恢复器、relay、运行时和 Stage 10 聚焦测试 `40/40`，Python 编译和 Bash/Slurm 语法检查通过；修复 PR 合并并在 107 重建前，这些只属于本地证据。
 
 ## 4. 固定成功与失败证据
 
