@@ -26,12 +26,14 @@ from models_workflow import (
     WorkflowTemplate,
     canonical_json,
 )
+from models_competition_agent import AgentRun
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 CURRENT_HEAD = "2f694f47e108"
 WORKFLOW_HEAD = "107c0ffee001"
+AGENT_HEAD = "107c0ffee002"
 WORKFLOW_TABLES = {
     "workflow_runs",
     "workflow_steps",
@@ -76,13 +78,19 @@ class CompetitionWorkflowMigrationTests(unittest.TestCase):
         config = Config(str(ALEMBIC_INI))
         script = ScriptDirectory.from_config(config)
 
-        self.assertEqual(script.get_heads(), [WORKFLOW_HEAD])
+        self.assertEqual(script.get_heads(), [AGENT_HEAD])
+        self.assertEqual(script.get_revision(AGENT_HEAD).down_revision, WORKFLOW_HEAD)
         self.assertEqual(script.get_revision(WORKFLOW_HEAD).down_revision, CURRENT_HEAD)
         self.assertIn(
             "import models_workflow",
             (BACKEND_ROOT / "alembic" / "env.py").read_text(encoding="utf-8"),
         )
+        self.assertIn(
+            "import models_competition_agent",
+            (BACKEND_ROOT / "alembic" / "env.py").read_text(encoding="utf-8"),
+        )
         self.assertTrue(WORKFLOW_TABLES.issubset(Base.metadata.tables))
+        self.assertIn(AgentRun.__tablename__, Base.metadata.tables)
 
     def test_fresh_database_upgrades_to_empty_workflow_schema(self):
         database_path = self.database_path("fresh.sqlite")

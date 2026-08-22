@@ -151,11 +151,10 @@ const fullNavigationGroups = [
   },
 ];
 
-const competitionNavigationGroups = Object.freeze([
-  Object.freeze({
-    key: 'competition',
-    label: 'VASP 计算闭环',
-    items: Object.freeze([
+const competitionAgentEnabled = import.meta.env?.VITE_COMPETITION_AGENT_ENABLED === '1';
+
+function competitionNavigationGroupsFor(agentEnabled = competitionAgentEnabled) {
+  const items = [
       Object.freeze({
         key: 'dashboard',
         label: '工作台',
@@ -196,12 +195,28 @@ const competitionNavigationGroups = Object.freeze([
         exact: true,
         description: '按元素检索竞赛结果',
       }),
-    ]),
+  ];
+  if (agentEnabled) {
+    items.push(Object.freeze({
+      key: 'competition-agent',
+      label: 'Qoder Agent',
+      path: '/dashboard/agent',
+      icon: 'Bot',
+      exact: true,
+      description: '模板建议与既有结果分析',
+    }));
+  }
+  return Object.freeze([
+  Object.freeze({
+    key: 'competition',
+    label: 'VASP 计算闭环',
+    items: Object.freeze(items),
   }),
-]);
+  ]);
+}
 
-export function navigationGroupsForEdition(edition = '') {
-  if (edition === '107cup') return competitionNavigationGroups;
+export function navigationGroupsForEdition(edition = '', agentEnabled = competitionAgentEnabled) {
+  if (edition === '107cup') return competitionNavigationGroupsFor(agentEnabled);
   return fullNavigationGroups;
 }
 

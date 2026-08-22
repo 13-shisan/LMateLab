@@ -149,6 +149,38 @@ export function createDemoCompetitionDataProvider() {
       return clone(row || null);
     },
 
+    async listAgentTemplates() {
+      return { items: [] };
+    },
+
+    async listAgentRuns() {
+      return { items: [] };
+    },
+
+    async getAgentRun() {
+      return null;
+    },
+
+    async createAgentRun() {
+      return rejectMutation('竞赛 Agent 请求');
+    },
+
+    async approveAgentRun() {
+      return rejectMutation('竞赛 Agent 审核');
+    },
+
+    async listCuratedStructures() {
+      return { items: [] };
+    },
+
+    async buildCuratedStructure() {
+      return rejectMutation('结构构建');
+    },
+
+    async downloadCuratedStructureBundle() {
+      return rejectMutation('VASP 输入包下载');
+    },
+
     async loadPlot(id, kind) {
       if (id !== SUCCESS_WORKFLOW_ID || !['band', 'dos'].includes(kind)) {
         return notFound(`Plot is unavailable: ${id}/${kind}`, 'parse-error');

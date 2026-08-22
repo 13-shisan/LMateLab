@@ -16,6 +16,16 @@ BUSINESS_ROUTER_IMPORTS = (
     ("routers.competition_workflows", "router"),
 )
 
+
+def optional_business_router_imports(environ: Mapping[str, str] | None = None):
+    values = os.environ if environ is None else environ
+    enabled = values.get("LMATELAB_COMPETITION_AGENT_ENABLED", "0")
+    if enabled not in {"0", "1"}:
+        raise ValueError("LMATELAB_COMPETITION_AGENT_ENABLED must be 0 or 1")
+    if enabled == "1":
+        return (("routers.competition_agent", "router"),)
+    return ()
+
 SQLITE_CONNECTION_PRAGMAS = (
     "PRAGMA foreign_keys=ON;",
     "PRAGMA journal_mode=DELETE;",

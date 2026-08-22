@@ -1,0 +1,203 @@
+.competition-agent-page {
+  min-height: calc(100vh - var(--lm-topbar-height));
+  padding: 24px 28px 36px;
+  color: #172033;
+  background: #f4f6f9;
+  letter-spacing: 0;
+}
+
+.competition-agent-header,
+.competition-agent-response-meta,
+.competition-agent-section-title > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.competition-agent-header {
+  align-items: flex-start;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #d7dee9;
+}
+
+.competition-agent-header h1,
+.competition-agent-header p,
+.competition-agent-section-title h2,
+.competition-agent-approved h3 {
+  margin: 0;
+}
+
+.competition-agent-header h1 { margin-top: 6px; font-size: 24px; }
+.competition-agent-header p { margin-top: 4px; color: #68758a; font-size: 14px; }
+
+.competition-agent-kicker,
+.competition-agent-policy,
+.competition-agent-submit,
+.competition-agent-approve,
+.competition-agent-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.competition-agent-kicker { color: #1f5fce; font-size: 12px; font-weight: 800; }
+.competition-agent-policy { padding: 8px 10px; border: 1px solid #bed8c8; border-radius: 6px; color: #22613c; background: #edf8f1; font-size: 12px; font-weight: 700; }
+
+.competition-agent-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 24px; padding-top: 22px; }
+.competition-agent-console,
+.competition-agent-catalog { min-width: 0; }
+.competition-agent-console { max-width: 880px; padding-top: 18px; }
+
+.competition-agent-links { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 16px; }
+.competition-agent-links a,
+.competition-agent-links button { min-height: 34px; display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; padding: 0 10px; border: 1px solid #cfd7e4; border-radius: 6px; color: #344054; background: #fff; font: inherit; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.competition-agent-links a:hover,
+.competition-agent-links button:hover { border-color: #8ba9d8; color: #1f5fce; }
+
+.competition-agent-runtime { max-width: 880px; display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 12px; padding: 10px 0; border-top: 1px solid #d7dee9; border-bottom: 1px solid #d7dee9; }
+.competition-agent-runtime > div,
+.competition-agent-runtime a { display: inline-flex; align-items: center; gap: 7px; }
+.competition-agent-runtime > div { min-width: 0; color: #566379; font-size: 12px; }
+.competition-agent-runtime > div span { display: flex; gap: 8px; flex-wrap: wrap; }
+.competition-agent-runtime strong { color: #172033; }
+.competition-agent-runtime a { flex: 0 0 auto; color: #1f5fce; font-size: 12px; font-weight: 800; text-decoration: none; }
+
+.competition-agent-segment { width: fit-content; display: flex; padding: 3px; border: 1px solid #cfd7e4; border-radius: 7px; background: #e9edf3; }
+.competition-agent-segment button { min-height: 34px; padding: 0 14px; border: 0; border-radius: 5px; color: #566379; background: transparent; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.competition-agent-segment button.is-active { color: #172033; background: #fff; box-shadow: 0 1px 2px rgb(16 24 40 / 10%); }
+
+.competition-agent-console form { display: grid; gap: 12px; margin-top: 14px; }
+.competition-agent-console label { display: grid; gap: 7px; color: #344054; font-size: 13px; font-weight: 700; }
+.competition-agent-console select,
+.competition-agent-console input,
+.competition-agent-console textarea { width: 100%; box-sizing: border-box; border: 1px solid #c8d1df; border-radius: 6px; color: #172033; background: #fff; font: inherit; font-size: 14px; }
+.competition-agent-console select,
+.competition-agent-console input { min-height: 40px; padding: 0 11px; }
+.competition-agent-console textarea { min-height: 88px; padding: 11px; resize: vertical; }
+.competition-agent-context-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.competition-agent-submit,
+.competition-agent-approve,
+.competition-agent-apply { width: fit-content; min-height: 38px; justify-content: center; padding: 0 14px; border: 1px solid #1f5fce; border-radius: 6px; color: #fff; background: #1f5fce; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; text-decoration: none; }
+.competition-agent-submit:disabled { border-color: #b9c2d0; color: #7d899a; background: #e7ebf0; cursor: not-allowed; }
+.competition-agent-approve { margin-top: 12px; border-color: #27784c; background: #27784c; }
+
+.competition-agent-viewer,
+.competition-agent-error { margin: 0; color: #68758a; font-size: 12px; }
+.competition-agent-error { color: #a33131; }
+.competition-agent-response { min-height: 150px; margin-top: 20px; padding: 18px 0; border-top: 1px solid #d7dee9; }
+.competition-agent-response > p { color: #4b5870; line-height: 1.65; }
+.competition-agent-response code { min-width: 0; overflow-wrap: anywhere; }
+.competition-agent-status { padding: 4px 7px; border-radius: 5px; color: #4b5870; background: #e7ebf0; font-size: 11px; font-weight: 800; }
+.competition-agent-status.is-succeeded { color: #22613c; background: #e3f4e9; }
+.competition-agent-status.is-failed { color: #9a2f2f; background: #fbe8e8; }
+.competition-agent-citation { padding: 5px 8px; border: 1px solid #b9c9e4; border-radius: 5px; color: #1f5fce; background: #edf3fd; cursor: pointer; }
+.competition-agent-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.competition-agent-tools span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid #bed8c8; border-radius: 5px; color: #22613c; background: #edf8f1; font-size: 11px; font-weight: 700; }
+.competition-agent-template-result { display: grid; gap: 4px; margin: 12px 0 0; padding-top: 12px; border-top: 1px solid #d7dee9; }
+.competition-agent-template-result span { color: #68758a; font-size: 12px; }
+
+.competition-agent-section-title { margin-bottom: 12px; }
+.competition-agent-section-title h2 { font-size: 17px; }
+.competition-agent-section-title span,
+.competition-agent-section-title small { color: #68758a; font-size: 12px; }
+.competition-agent-template { width: 100%; display: grid; gap: 8px; margin-bottom: 8px; padding: 13px; border: 1px solid #d6deea; border-radius: 7px; color: #344054; background: #fff; text-align: left; cursor: pointer; }
+.competition-agent-template.is-selected { border-color: #1f5fce; box-shadow: 0 0 0 2px rgb(31 95 206 / 12%); }
+.competition-agent-template > span { display: flex; justify-content: space-between; gap: 10px; }
+.competition-agent-template small { line-height: 1.5; }
+.competition-agent-template em { color: #28734b; font-size: 11px; font-style: normal; font-weight: 800; }
+.competition-agent-approved { margin-top: 20px; padding-top: 16px; border-top: 1px solid #d7dee9; }
+.competition-agent-approved p { color: #4b5870; font-size: 13px; line-height: 1.6; }
+
+.competition-structure-builder {
+  min-width: 0;
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid #d7dee9;
+}
+
+.competition-structure-builder-heading,
+.competition-structure-builder-heading > div > span,
+.competition-structure-builder-actions,
+.competition-structure-builder-actions button,
+.competition-structure-summary-line,
+.competition-structure-files {
+  display: flex;
+  align-items: center;
+}
+
+.competition-structure-builder-heading { justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.competition-structure-builder-heading h2,
+.competition-structure-builder-heading p { margin: 0; }
+.competition-structure-builder-heading h2 { margin-top: 4px; font-size: 18px; }
+.competition-structure-builder-heading > div > span { gap: 6px; color: #1f5fce; font-size: 12px; font-weight: 800; }
+.competition-structure-builder-heading p { color: #68758a; font-size: 12px; }
+
+.competition-structure-builder-grid { display: grid; grid-template-columns: minmax(300px, .72fr) minmax(0, 1.28fr); gap: 22px; }
+.competition-structure-builder form { display: grid; align-content: start; gap: 13px; min-width: 0; }
+.competition-structure-builder label { display: grid; gap: 6px; color: #344054; font-size: 12px; font-weight: 700; }
+.competition-structure-builder select,
+.competition-structure-builder input { width: 100%; min-height: 38px; box-sizing: border-box; padding: 0 10px; border: 1px solid #c8d1df; border-radius: 6px; color: #172033; background: #fff; font: inherit; }
+.competition-structure-builder fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; margin: 0; padding: 10px; border: 1px solid #d7dee9; border-radius: 7px; }
+.competition-structure-builder legend { padding: 0 5px; color: #68758a; font-size: 11px; font-weight: 800; }
+.competition-structure-builder-actions { gap: 9px; flex-wrap: wrap; }
+.competition-structure-builder-actions button { min-height: 38px; justify-content: center; gap: 7px; padding: 0 13px; border: 1px solid #1f5fce; border-radius: 6px; color: #fff; background: #1f5fce; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+.competition-structure-builder-actions button + button { color: #1f5fce; background: #fff; }
+.competition-structure-builder-actions button:disabled { border-color: #c3cad5; color: #7d899a; background: #e7ebf0; cursor: not-allowed; }
+.competition-structure-builder form > p { margin: 0; color: #68758a; font-size: 12px; }
+
+.competition-structure-preview { min-width: 0; overflow: hidden; }
+.competition-structure-preview .vasp-structure-viewer { height: 390px; }
+.competition-structure-empty { display: grid; height: 390px; place-items: center; border: 1px solid #d7dee9; border-radius: 7px; color: #68758a; background: #fff; font-size: 13px; }
+.competition-structure-summary-line { gap: 12px; min-width: 0; padding: 11px 0; overflow-x: auto; color: #4b5870; font-size: 12px; white-space: nowrap; }
+.competition-structure-summary-line strong { color: #172033; font-size: 14px; }
+.competition-structure-files { gap: 6px; flex-wrap: wrap; }
+.competition-structure-files code { padding: 4px 7px; border: 1px solid #d7dee9; border-radius: 4px; color: #344054; background: #fff; font-size: 11px; }
+.competition-structure-preview > p { margin: 10px 0 0; color: #7b4f13; font-size: 12px; }
+
+.competition-agent-modal-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(17 24 39 / 58%); }
+.competition-agent-review { width: min(920px, 100%); max-height: calc(100vh - 40px); overflow: hidden; border-radius: 7px; background: #fff; box-shadow: 0 20px 48px rgb(0 0 0 / 28%); }
+.competition-agent-review header,
+.competition-agent-review footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; border-bottom: 1px solid #d7dee9; }
+.competition-agent-review header h2,
+.competition-agent-review header p { margin: 0; }
+.competition-agent-review header h2 { font-size: 18px; }
+.competition-agent-review header p { margin-top: 3px; color: #68758a; font-size: 12px; }
+.competition-agent-review header button { width: 36px; height: 36px; display: grid; flex: 0 0 36px; place-items: center; border: 0; color: #4b5870; background: transparent; cursor: pointer; }
+.competition-agent-review-body { max-height: calc(100vh - 190px); display: grid; gap: 16px; padding: 18px; overflow-y: auto; }
+.competition-agent-review-body > label { display: grid; gap: 6px; color: #344054; font-size: 12px; font-weight: 800; }
+.competition-agent-review textarea { min-height: 170px; padding: 10px; border: 1px solid #c8d1df; border-radius: 6px; font: 12px/1.5 ui-monospace, monospace; resize: vertical; }
+.competition-agent-review-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.competition-agent-review-grid fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 8px; min-width: 0; margin: 0; padding: 10px; border: 1px solid #d7dee9; border-radius: 6px; }
+.competition-agent-review-grid label { display: grid; gap: 4px; min-width: 0; color: #4b5870; font-size: 11px; font-weight: 700; }
+.competition-agent-review-grid input { width: 100%; min-width: 0; min-height: 34px; box-sizing: border-box; padding: 0 8px; border: 1px solid #c8d1df; border-radius: 5px; }
+.competition-agent-band-lock { margin: 0; padding: 9px 11px; border-left: 3px solid #27784c; color: #24583b; background: #edf8f1; font-size: 12px; }
+.competition-agent-review footer { justify-content: flex-end; border-top: 1px solid #d7dee9; border-bottom: 0; }
+.competition-agent-review footer button { min-height: 38px; padding: 0 13px; border: 1px solid #c8d1df; border-radius: 6px; color: #344054; background: #fff; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+.competition-agent-review footer button:last-child { border-color: #1f5fce; color: #fff; background: #1f5fce; }
+.competition-agent-review footer button:disabled { opacity: .6; cursor: wait; }
+
+@media (max-width: 900px) {
+  .competition-agent-layout { grid-template-columns: 1fr; }
+  .competition-structure-builder-grid { grid-template-columns: 1fr; }
+  .competition-agent-review-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  .competition-agent-page { padding: 18px 16px 28px; }
+  .competition-agent-header { display: block; }
+  .competition-agent-policy { margin-top: 14px; }
+  .competition-agent-segment { width: 100%; }
+  .competition-agent-segment button { flex: 1; }
+  .competition-agent-runtime { align-items: flex-start; flex-direction: column; }
+  .competition-agent-context-fields { grid-template-columns: 1fr; }
+  .competition-structure-builder-heading { align-items: flex-start; flex-direction: column; }
+  .competition-structure-builder fieldset { grid-template-columns: 1fr; }
+  .competition-structure-preview .vasp-structure-viewer,
+  .competition-structure-empty { height: 320px; }
+  .competition-agent-modal-backdrop { padding: 0; }
+  .competition-agent-review { width: 100%; max-height: 100vh; border-radius: 0; }
+  .competition-agent-review-body { max-height: calc(100vh - 150px); }
+  .competition-agent-review-grid { grid-template-columns: 1fr; }
+}

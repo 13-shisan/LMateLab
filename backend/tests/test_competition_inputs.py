@@ -336,6 +336,25 @@ class TemplateValidationTests(unittest.TestCase):
             '"relax","scf","band","dos"],"template_version":"mos2_v1"}',
         )
 
+    def test_accepts_controlled_kpoint_meshes_and_rejects_band_override(self):
+        kpoints = {
+            "source": "mock_qoder",
+            "meshes": {"relax": [10, 10, 2], "scf": [16, 16, 3], "dos": [22, 22, 4]},
+        }
+        validated = validate_draft_payload(valid_payload(kpoints=kpoints))
+
+        self.assertEqual(kpoints, validated["kpoints"])
+        self.assertEqual(kpoints, json.loads(validated["canonical_json"])["kpoints"])
+        for invalid in (
+            {"source": "qoder", "meshes": kpoints["meshes"]},
+            {"source": "manual", "meshes": {**kpoints["meshes"], "band": [8, 8, 1]}},
+            {"source": "manual", "meshes": {"relax": [0, 8, 1]}},
+            {"source": "manual", "meshes": {"relax": [8, 8, 0]}},
+        ):
+            with self.subTest(kpoints=invalid):
+                with self.assertRaises(InputValidationError):
+                    validate_draft_payload(valid_payload(kpoints=invalid))
+
 
 class MaterializationTests(unittest.TestCase):
     def setUp(self):
@@ -403,6 +422,21 @@ class MaterializationTests(unittest.TestCase):
         self.assertIn("NEDOS = 4000", (directory / "dos" / "INCAR").read_text())
         parsed = parse_structure_bytes((directory / "scf" / "POSCAR").read_bytes(), "POSCAR")
         self.assertEqual(parsed.summary["formula"], "MoS2")
+
+    def test_materializes_reviewed_kpoints_but_keeps_band_path_fixed(self):
+        payload = validate_draft_payload(valid_payload(kpoints={
+            "source": "manual",
+            "meshes": {"relax": [9, 9, 2], "scf": [15, 15, 3], "dos": [21, 21, 4]},
+        }))
+        result = materialize_inputs(self.workflow_root, None, payload)
+        directory = Path(result["directory"])
+
+        self.assertIn("9 9 2", (directory / "relax" / "KPOINTS").read_text())
+        self.assertIn("15 15 3", (directory / "scf" / "KPOINTS").read_text())
+        self.assertIn("21 21 4", (directory / "dos" / "KPOINTS").read_text())
+        band = (directory / "band" / "KPOINTS").read_text()
+        self.assertIn("Line-mode", band)
+        self.assertIn("! G", band)
 
     def test_rejects_structure_source_mismatch_and_root_that_is_a_file(self):
         upload_payload = validate_draft_payload(

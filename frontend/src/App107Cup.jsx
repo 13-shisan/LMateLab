@@ -15,6 +15,10 @@ const CompetitionWorkflowDetail = lazy(() => import('./pages/competition/Competi
 const CompetitionResults = lazy(() => import('./pages/competition/CompetitionResults'));
 const CompetitionResultDetail = lazy(() => import('./pages/competition/CompetitionResultDetail'));
 const CompetitionVaspDatabase = lazy(() => import('./pages/competition/CompetitionVaspDatabase'));
+const competitionAgentEnabled = import.meta.env.VITE_COMPETITION_AGENT_ENABLED === '1';
+const CompetitionAgent = competitionAgentEnabled
+  ? lazy(() => import('./features/competition/agent/CompetitionAgent'))
+  : null;
 
 
 function RouteFallback() {
@@ -52,6 +56,9 @@ export default function App107Cup() {
             <Route path="/dashboard/results" element={<CompetitionResults />} />
             <Route path="/dashboard/results/:workflowId" element={<CompetitionResultDetail />} />
             <Route path="/dashboard/database/vasp" element={<CompetitionVaspDatabase />} />
+            {competitionAgentEnabled ? (
+              <Route path="/dashboard/agent" element={<CompetitionAgent />} />
+            ) : null}
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
