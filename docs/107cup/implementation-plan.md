@@ -146,7 +146,7 @@
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
-| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60 已合并；公开首页基线由 Job `41560` 构建、`41561/anode18` 提供服务并经 `41563/anode16` 只读验收；四季首页增量正在独立分支本地验收 | 当前发布仍需全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
+| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60/#61 已合并；四季首页由 Job `41569/anode01` 构建、`41570/anode16` 提供服务并经 `41571/anode16` 只读验收；公网桌面/移动四图复跑通过 | 当前发布仍需全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
 
 ## 6. 阶段 1：竞赛仓库初始化
 
@@ -919,4 +919,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 分支 `codex/107cup-four-seasons-home` 按用户提供顺序把四张校园图映射为春、夏、秋、冬：春季樱花用于首屏，夏季主楼用于平台主线，秋季湖景用于四步工作流，冬季雪景用于验收证据。四段均为全宽背景和受控深色遮罩，底部登录入口保持独立简洁区段。
 - 改动不增加业务能力或路由，不修改 MoS2、VASP、Slurm 和证据链文案。新增夏、冬 WebP 分别为 `191618` 与 `213358` 字节，避免直接发布原始 PNG。
 - 本地 TDD 先由缺失资产和样式得到 `2` 项预期失败，随后聚焦合同 `8/8`、前端全量 `132/132`、定向 ESLint 和 107 Cup live Vite 构建（`1863` 个模块）通过。Playwright 在 `1440x900` 与 `390x844` 确认四张背景全部加载、页面零横向溢出、控制台错误为 0；截图位于未跟踪目录 `output/playwright/four-seasons-home/`。
-- 以上仅是本地分支证据。PR 合并、107 Slurm 重建、新服务健康切换、Stage 10 只读作业和公网桌面/移动复跑完成前，正式入口仍以 `4422dbc/41561` 为准。
+- PR #61 已合并为 `2bf0a0bb98246d1f627e3f131102f033cf3c54df`。Slurm Job `41569/anode01` 通过后端 `492/492`（另有 4 项环境跳过）、前端 `132/132`、Vite `1863` 个模块和 `610` 项 release manifest，`current` 原子指向新 release，manifest SHA-256 为 `619ba7f25c07faa0a7add43c6d5a87706468eab9ea1554e18f60c15c39dd98c5`。
+- 服务 Job `41570/anode16` 在排除旧节点 `anode18` 后提交，通过本机 live/ready 才发布状态；4090 通过临时端口核对身份后切换 relay，旧 Job `41561` 在完整归属核对后停止，旧端口不可达。
+- Stage 10 只读 Job `41571/anode16` 为 `COMPLETED/0:0` 且输出 `STAGE10_ACCEPTANCE_OK`；证据 manifest 和摘要 SHA-256 分别为 `46a9c139a63918edfd5b73539a7447eed1e6642e3cbccdb3d017189d2a4cd29f` 与 `acb9c834f45e6886ee289e87b533c43a1dca560027289463f59021f46c2fd2dd`。数据库完整性、固定成功/失败工作流和证据包哈希未变，没有提交 VASP。
+- 公网入口在 `1440x900` 与 `390x844` 确认四张独立 WebP 全部返回 `200`、页面零横向溢出、控制台零错误/警告，首页与登录页双向跳转通过。当前认证态 Viewer/Operator 全流程与视频仍待重做，三名成员门禁也仍保留，Stage 10 继续为 `PARTIAL`。

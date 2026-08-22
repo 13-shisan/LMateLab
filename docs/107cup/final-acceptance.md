@@ -6,36 +6,36 @@
 
 Stage 10 状态：`PARTIAL`。
 
-公开首页已通过 PR #60 合并并部署为固定提交 `4422dbcf87d813360102a8ee49b986b3a2754078`。正式构建 Job `41560`、服务 Job `41561/anode18` 和只读验收 Job `41563/anode16` 已完成；4090 内部入口和公网入口均指向新服务。公开首页桌面/移动浏览器复跑已通过，但全新认证态 Viewer/Operator 全流程复跑及三名成员独立复核仍未完成，因此状态继续为 `PARTIAL`。
+四季首页已通过 PR #61 合并并部署为固定提交 `2bf0a0bb98246d1f627e3f131102f033cf3c54df`。正式构建 Job `41569/anode01`、服务 Job `41570/anode16` 和只读验收 Job `41571/anode16` 已完成；4090 relay 与公网入口均返回该新身份，旧服务 `41561/anode18` 在完整归属核对后停止且旧端口不可达。四季首页桌面/移动浏览器复跑已通过，但全新认证态 Viewer/Operator 全流程复跑及三名成员独立复核仍未完成，因此状态继续为 `PARTIAL`。
 
 Stage 10 验收期间不得提交新的 VASP 计算。固定成功/失败链通过只读方式复核；如确实需要新算例，必须由用户另行明确授权，且不能覆盖既有 attempt 或证据。
 
-四季首页增量正在分支 `codex/107cup-four-seasons-home` 开发。当前 `4422dbc...` 的机器和公开首页浏览器证据有效；既有认证态 Viewer/Operator 截图与视频继续只绑定 `4f81d727...`。四季版完成合并、107 Slurm 构建、部署和浏览器复跑前，不得把下述固定发布身份替换为本地分支。
+既有认证态 Viewer/Operator 截图与 `422.04` 秒视频继续只绑定 `4f81d727...`，不能证明当前 `2bf0a0bb...` 发布的认证态页面。本次只读机器验收和公开首页验收均不改写这一外部门禁。
 
 ## 2. 固定发布身份
 
 以下字段只能在 PR 合并并从新 `main` 构建后填写，不能引用 Stage 10 开始前的 Job `41044` 冒充最终发布：
 
 ```text
-Merged main commit: 4422dbcf87d813360102a8ee49b986b3a2754078
-Build Job ID / node / final state: 41560 / anode01 / scheduler record expired; successful logs, release directory and manifest self-check preserved
-Release manifest SHA-256: 3877590fbd6f3b58eb3c8c61824d82522119175d5cc3884123ee1b76b6ed8ae5
-Service Job ID / node / port: 41561 / anode18 / 18731
-Stage 10 acceptance Job ID / node / final state: 41563 / anode16 / scheduler record expired; preserved log ends with STAGE10_ACCEPTANCE_OK
-Stage 10 evidence manifest SHA-256: f91d59027954b1b3d000a21041c000f0681fcf6a1ae0f5b54823805968a441d5
-Stage 10 summary SHA-256: 9c465154d70224ae44fbd293efe79de0e30b3d6da8ad1c71d0c35b5800fa4094
+Merged main commit: 2bf0a0bb98246d1f627e3f131102f033cf3c54df
+Build Job ID / node / final state: 41569 / anode01 / scheduler record expired; successful logs, release directory and manifest self-check preserved
+Release manifest SHA-256: 619ba7f25c07faa0a7add43c6d5a87706468eab9ea1554e18f60c15c39dd98c5
+Service Job ID / node / port: 41570 / anode16 / 18731
+Stage 10 acceptance Job ID / node / final state: 41571 / anode16 / COMPLETED/0:0; preserved log ends with STAGE10_ACCEPTANCE_OK
+Stage 10 evidence manifest SHA-256: 46a9c139a63918edfd5b73539a7447eed1e6642e3cbccdb3d017189d2a4cd29f
+Stage 10 summary SHA-256: acb9c834f45e6886ee289e87b533c43a1dca560027289463f59021f46c2fd2dd
 ```
 
 ## 3. 六层测试门禁
 
 | 层级 | 当前状态 | 最终证据 |
 |---|---|---|
-| 1. 单元测试 | 通过 | Job `41560` 后端 `492/492`，另有 4 项环境跳过；前端 `132/132` |
-| 2. 假 Slurm 集成 | 通过 | Job `41478` 的后端回归包含 `test_competition_slurm` 全状态、取消和归属门禁 |
-| 3. 107 真实 Slurm | 通过 | 构建 `41560`、服务 `41561` 和只读验收 `41563`；验收日志为 `STAGE10_ACCEPTANCE_OK` |
+| 1. 单元测试 | 通过 | Job `41569` 后端 `492/492`，另有 4 项环境跳过；前端 `132/132` |
+| 2. 假 Slurm 集成 | 通过 | Job `41569` 的后端回归包含 `test_competition_slurm` 全状态、取消和归属门禁 |
+| 3. 107 真实 Slurm | 通过 | 构建 `41569`、服务 `41570` 和只读验收 `41571`；验收日志为 `STAGE10_ACCEPTANCE_OK` |
 | 4. 真实 VASP | 通过只读复核 | 成功 `40212/40250/40251/40252`，失败 `40264/40265/null/null`；两份确定性证据包哈希未变，没有提交新 VASP |
-| 5. 浏览器端到端 | PARTIAL | 当前发布的公开首页桌面/移动、资源请求和登录往返通过；全新认证态 Viewer/Operator 全流程复跑仍绑定旧发布，需针对当前发布重做 |
-| 6. 最终演示复跑 | PARTIAL | Viewer 与 Operator 演示路径及连续视频素材已完成；三名成员独立复核待完成 |
+| 5. 浏览器端到端 | PARTIAL | 当前四季首页桌面/移动、四张资源请求和登录往返通过；全新认证态 Viewer/Operator 全流程仍需针对当前发布重做 |
+| 6. 最终演示复跑 | PARTIAL | 既有 Viewer/Operator 截图和连续视频只绑定旧发布；当前发布演示素材和三名成员独立复核待完成 |
 
 任何一层失败都不能被下一层成功替代。机器门禁输出 `STAGE10_ACCEPTANCE_OK` 只表示发布、服务、数据库、路由和固定科学数据的只读核对通过，不代表浏览器和三人复核自动通过。
 
@@ -104,7 +104,7 @@ Operator summary SHA-256: 40bf967125c6acd89f6cdd7267a4d0b1f63e38fe020352817b7c7d
 Video material path and SHA-256: operator-desktop/operator-stage10-demo.webm / e752d36a311a1a31e56ce42da588db2e64e9a634ac51f1cb1c13fd8c39cec2ab
 ```
 
-截图必须来自本节固定发布，不能复用 Stage 5/8/9 旧截图充当最终素材。截图和视频不得包含密码、token、JWT、SSH 信息或未裁剪敏感日志。
+上述 Viewer/Operator 记录为 `4f81d727...` 的历史证据，不能作为本节当前固定发布 `2bf0a0bb...` 的最终素材。当前发布的全新截图和视频仍需重做，且不得包含密码、token、JWT、SSH 信息或未裁剪敏感日志。
 
 Viewer 新会话通过公网白名单入口复核了 Dashboard、工作流列表、成功结果、失败结果、新建计算、VASP 数据库和元素周期表。成功结果显示四步 Job `40212/40250/40251/40252`、带隙 `1.6919 eV`、结构、BAND 与 DOS；失败结果显示 SCF `electronic_not_converged`，BAND/DOS 为依赖失败且未启动。新建计算的来源、参数、保存和校验控件均禁用，取消和重试不可用。Mo+S 的“至少含有”和“只含所选元素”筛选均返回两条固定记录。
 
@@ -112,7 +112,7 @@ Viewer 桌面与移动会话均为页面级零横向溢出；周期表和宽表�
 
 Operator 由用户在 Windows 隧道入口现场登录，页面确认身份为“107杯管理员 / 操作员”。连续 `422.04` 秒录屏覆盖 Dashboard、工作流成功/失败证据、结果、结构、BAND、DOS、新建计算和 VASP 数据库 Mo+S 精确筛选；13 张 PNG 与 1 个 WebM 均由 `operator-manifest.sha256` 逐项复核并上传为 `0600`。控制台错误与警告均为 0，7 个业务请求全部为成功 GET，没有 POST/PUT/PATCH/DELETE，也没有提交、取消、重试、Slurm 或 VASP 操作。录屏从已登录工作台开始，经抽帧检查不含密码、token、JWT、Cookie 或 SSH 信息；临时认证会话和抽帧接触表已删除。
 
-公开首页固定发布 `4422dbc...` 以公网入口在 `1440x900` 和 `390x844` 复核：页面可在未认证状态打开，樱花图与湖景图请求均为 `200` 且非空，两种视口页面横向溢出均为 0，控制台错误为 0，首页到 `/login` 再返回首页的往返通过。本地截图位于未跟踪目录 `output/playwright/public-home-4422dbc/`。四季版截图仅属于待合并分支 `codex/107cup-four-seasons-home`，不能充当生产证据。
+四季首页固定发布 `2bf0a0bb...` 以公网入口在 `1440x900` 和 `390x844` 复核：页面可在未认证状态打开，春、夏、秋、冬四张独立 WebP 均返回 `200` 且字节数为 `667552/191618/128550/213358`，两种视口页面横向溢出均为 0，控制台错误与警告均为 0，首页到 `/login` 再返回首页的往返通过。桌面和移动全页截图位于未跟踪目录 `output/playwright/four-seasons-home-production/`，仅作为公开首页生产复核证据，不替代认证态复跑。
 
 已知 UX 问题：Operator 查看已验收或失败终态工作流时，“取消工作流”按钮仍显示为可用。源码核对确认后端在没有活动 attempt 时固定返回 `workflow_not_cancellable`，不会调用 `scancel`；本次验收没有点击该按钮，也没有发送取消 POST。该问题不突破后端归属和终态门禁，但后续前端版本应按工作流状态禁用终态取消按钮；在修复重新构建前，本节证据继续严格绑定固定发布 `4f81d727...`。
 
