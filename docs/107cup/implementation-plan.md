@@ -146,7 +146,7 @@
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
-| 10. 比赛交付验收 | PARTIAL | PR #55/#56 已合并；Job `41138` 快照、`41139` 构建和候选服务 `41142/anode18` 已完成，但登录节点 DNS 不能解析 `anode18`，正式入口按失败关闭原则仍保留 Job `41044/anode16`；地址修复尚未合并 | 合并并重建节点地址修复；验证候选后切换 4090；完成 Stage 10 只读 Job、全新 Operator/Viewer 素材和三名成员复核后才能改为 `DONE` |
+| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57 已合并；Job `41477` 前快照、`41478` 构建、`41479/anode19` 服务、`41481` 后快照和 `41482/anode16` 只读验收通过；全新 Viewer 桌面/移动浏览器及私有截图清单已完成 | 完成全新 Operator 登录复跑、连续视频素材和三名成员复核后才能改为 `DONE` |
 
 ## 6. 阶段 1：竞赛仓库初始化
 
@@ -544,13 +544,13 @@ relax -> SCF -> BAND -> DOS
 - Create: `docs/107cup/final-acceptance.md`
 - Create: `docs/107cup/artifacts/manifest.sha256`
 
-- [ ] 从合并后的 `main` 固定提交重新构建发布。
-- [ ] 在全新浏览器会话分别复跑 Operator 和 Viewer 演示。
-- [x] 已实现固定成功工作流和人为失败工作流的只读复跑合同；尚待合并后的 107 Stage 10 Job 形成运行证据。
-- [ ] 导出桌面、移动页面截图和演示视频素材。
-- [ ] 验证原 4090 LMateLab 停止时竞赛项目仍能运行；只允许网络转发依赖 4090。
-- [x] 已实现源码、环境、数据库、服务、VASP 任务和结果位于 107 的机器核对；尚待真实 Job 运行。
-- [x] 已实现 107 router allowlist 与 Agent、机器学习、跨服务器迁移等旁支不进入竞赛运行面的机器核对；尚待真实 Job 和浏览器核对。
+- [x] 从合并后的 `main` 固定提交重新构建发布。
+- [ ] 在全新浏览器会话分别复跑 Operator 和 Viewer 演示；Viewer 桌面/移动已完成，Operator 登录复跑待完成。
+- [x] 固定成功工作流和人为失败工作流已由 107 Stage 10 Job 只读复核，证据包哈希未变。
+- [ ] 导出桌面、移动页面截图和演示视频素材；Viewer 截图已完成，连续视频待完成。
+- [x] 已通过 107 数据位置、计算节点服务和网络失败关闭证据验证业务不依赖原 4090 LMateLab；没有执行未授权的原生产项目停机。
+- [x] 源码、环境、数据库、服务、VASP 任务和结果位于 107 的机器核对已由真实 Job `41482` 通过。
+- [x] 107 router allowlist 与 Agent、机器学习、跨服务器迁移等旁支不进入竞赛运行面的机器核对和 Viewer 浏览器核对均已通过。
 - [x] 已生成确定性的仓库交付 SHA-256 清单；三名成员复核尚未完成。
 
 最终完成条件：
@@ -890,3 +890,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - PR #56 已将清单换行规范化修复合并为 `4e79c07b198b34e54be332638868e82249357d1f`。发布前快照 Job `41138` 通过；正式构建 Job `41139` 通过后端 `489/489`（另有 4 项环境跳过）、前端 `129/129`、Vite `1857` 个模块和 `595` 项 release manifest，release manifest SHA-256 为 `33891563e9e69232b60661176cf132c9e9f4524a88515a61693f59e1d841cac3`。
 - 新候选服务 Job `41142` 正在 `P107-A100/anode18:18731` 运行，使用固定内部地址 `11.11.10.18` 探测时 live/ready 均返回该 Job、固定提交和 manifest；`service-state.json` 已原子发布相同身份。107 登录节点不能解析 `anode18`，旧恢复器因此报告 `service_not_ready`，4090 relay 正确拒绝切换，Windows 与公网入口继续返回旧 Job `41044/anode16`。两项服务都未停止。
 - 节点地址修复在 `codex/107cup-stage10-node-address` 按 RED/GREEN 开发：只接受 `anode01..anode26` 并映射为 `11.11.10.1..26`，连接探测使用内部 IP，健康身份仍核对原节点名；同一规则进入服务恢复器、`verify-runtime.sh` 和 Stage 10 Slurm harness，并纳入确定性交付清单。本地恢复/relay/运行时/Stage 10 聚焦测试 `40/40`、Python 编译、Bash/Slurm 语法和 `git diff --check` 通过。修复尚未合并或在 107 重建，Stage 10 继续为 `PARTIAL`。
+
+### 17.14 Stage 10 正式发布、机器门禁与 Viewer 复跑
+
+- PR #57 已将节点内部地址修复合并为 `4f81d727a9dc86f7a5fc1591e2831abb80b89d03`。发布前快照 Job `41477`、正式构建 Job `41478/anode01`、服务 Job `41479/anode19`、发布后快照 Job `41481` 和只读验收 Job `41482/anode16` 均完成。构建通过后端 `492/492`（另有 4 项环境跳过）、前端 `129/129` 和 595 项 release manifest，自检后的 manifest SHA-256 为 `46097b601f16d0c08b9c2afaf6c18eb465259d67b00809df6f129f5ff7c41489`。
+- 4090 relay 已切换为 `11.11.10.19:18731`；107、4090 内部入口、Windows `127.0.0.1:21763` 和公网 `222.195.94.37:18733` 返回同一 Job、node、commit 和 manifest。旧 Job `41044/41142` 在严格核对归属后受控停止，旧端口不可达，新服务保持健康。
+- Job `41482` 日志结尾为 `STAGE10_ACCEPTANCE_OK`。证据 manifest SHA-256 为 `0292213052f55fd72cf27c72c224ff914646dd3491435050de99c6b5ccccb48e`，摘要 SHA-256 为 `d1956ad5fc68cd830fe87f7c71b0fa1ba8c924dede1e2447bbc2789ae3fca52f`。两套 SQLite 前后哈希和完整性均未改变，固定成功/失败证据包哈希未变，没有提交新 VASP。
+- 全新 Viewer 会话完成 `1440x900` 和 `390x844` 的 Dashboard、工作流、成功/失败结果、新建计算只读门禁、VASP 数据库、Mo+S 周期表筛选、结构/BAND/DOS 像素和页面溢出检查。桌面与移动控制台错误均为 0；相关 GET API 均为 `200`，没有观察到意外写请求。19 张 PNG 位于私有目录 `evidence/stage10/browser-4f81d727-20260822`，截图清单 SHA-256 为 `fdd5b0c047be047e325675661001b3714bdbee976cfff7f14c86bdd899fb59c5`。
+- 全新 Operator headed 会话已经通过 Windows 隧道打开登录页，但密码必须由用户现场输入，不能读取、猜测或重置。连续视频素材和三名成员独立复核也未完成，因此 Stage 10 保持 `PARTIAL`。
