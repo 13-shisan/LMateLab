@@ -544,3 +544,376 @@
     font-size: 9px;
   }
 }
+
+/* 107 Cup workbench: quiet technical surfaces for every protected route. */
+.lm-app-shell.is-competition-edition {
+  --lm-workbench-canvas: #edf1f2;
+  --lm-workbench-surface: #ffffff;
+  --lm-workbench-surface-muted: #f6f9f8;
+  --lm-workbench-line: #d5dddf;
+  --lm-workbench-line-strong: #bcc8ca;
+  --lm-workbench-ink: #16272c;
+  --lm-workbench-muted: #607277;
+  --lm-workbench-accent: #176b68;
+  --lm-workbench-accent-dark: #105654;
+  --lm-workbench-accent-soft: #e1efed;
+  --lm-workbench-blue: #315f88;
+  --lm-workbench-amber: #9a6519;
+  --lm-workbench-red: #a6403b;
+  --lm-shell-border: var(--lm-workbench-line);
+  --lm-shell-ink: var(--lm-workbench-ink);
+  --lm-shell-muted: var(--lm-workbench-muted);
+  --lm-shell-blue: var(--lm-workbench-accent);
+  --lm-shell-blue-soft: var(--lm-workbench-accent-soft);
+  --lm-shell-navy: #274f59;
+  background: var(--lm-workbench-canvas);
+}
+
+.lm-app-shell.is-competition-edition .lm-app-content {
+  background-color: var(--lm-workbench-canvas);
+  background-image: linear-gradient(rgb(94 116 120 / 6%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(94 116 120 / 6%) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.lm-app-shell.is-competition-edition .lm-sidebar {
+  background: #f8faf9;
+  box-shadow: 5px 0 18px rgb(28 53 58 / 5%);
+}
+
+.lm-app-shell.is-competition-edition .lm-sidebar-brand {
+  background: #ffffff;
+  border-bottom-color: var(--lm-workbench-line-strong);
+}
+
+.lm-app-shell.is-competition-edition .lm-brand-copy strong {
+  color: #173037;
+}
+
+.lm-app-shell.is-competition-edition .lm-nav-group-label {
+  color: #728388;
+  font-size: 11px;
+}
+
+.lm-app-shell.is-competition-edition .lm-nav-item {
+  color: #405359;
+}
+
+.lm-app-shell.is-competition-edition .lm-nav-item:hover {
+  color: var(--lm-workbench-accent-dark);
+  background: #edf4f2;
+}
+
+.lm-app-shell.is-competition-edition .lm-nav-item.is-active {
+  color: var(--lm-workbench-accent-dark);
+  background: var(--lm-workbench-accent-soft);
+  box-shadow: inset 3px 0 0 var(--lm-workbench-accent);
+}
+
+.lm-app-shell.is-competition-edition .lm-platform-state {
+  color: #365f50;
+  background: #edf6f1;
+}
+
+.lm-app-shell.is-competition-edition .lm-app-topbar {
+  background: rgb(255 255 255 / 96%);
+  border-bottom-color: var(--lm-workbench-line-strong);
+  box-shadow: 0 4px 16px rgb(28 53 58 / 6%);
+}
+
+.lm-app-shell.is-competition-edition .lm-page-heading h1 {
+  color: var(--lm-workbench-ink);
+}
+
+.lm-app-shell.is-competition-edition .lm-page-heading p {
+  color: var(--lm-workbench-muted);
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .competition-page,
+  .competition-calculation-page,
+  .competition-workflows-page,
+  .competition-workflow-detail-page,
+  .competition-results-page,
+  .competition-result-detail-page,
+  .competition-database-page,
+  .competition-agent-page
+) {
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  color: var(--lm-workbench-ink);
+  background: transparent;
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .lm-dashboard-welcome,
+  .competition-calculation-header,
+  .competition-workflows-header,
+  .competition-workflow-detail-header,
+  .competition-results-header,
+  .competition-result-detail-header,
+  .competition-database-header,
+  .competition-agent-header
+) {
+  position: relative;
+  padding: 18px 20px;
+  border: 1px solid var(--lm-workbench-line);
+  border-left: 4px solid var(--lm-workbench-accent);
+  border-radius: 7px;
+  background: rgb(250 252 251 / 94%);
+  box-shadow: 0 5px 16px rgb(28 53 58 / 6%);
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .lm-dashboard-welcome,
+  .competition-calculation-header,
+  .competition-workflows-header,
+  .competition-workflow-detail-header,
+  .competition-results-header,
+  .competition-result-detail-header,
+  .competition-database-header
+) :is(h1, h2) {
+  color: var(--lm-workbench-ink);
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .competition-calculation-header,
+  .competition-workflows-header,
+  .competition-workflow-detail-header,
+  .competition-results-header,
+  .competition-result-detail-header,
+  .competition-database-header,
+  .competition-agent-header
+) :is(h1) {
+  font-size: 25px;
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .competition-work-section,
+  .competition-workflows-surface,
+  .competition-workflow-evidence,
+  .competition-results-surface,
+  .competition-result-evidence,
+  .competition-result-science,
+  .competition-result-failure,
+  .competition-database-filters
+) {
+  margin-top: 14px;
+  padding: 20px;
+  border: 1px solid var(--lm-workbench-line);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 92%);
+  box-shadow: 0 4px 14px rgb(28 53 58 / 4%);
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .competition-section-heading,
+  .competition-workflows-heading,
+  .competition-workflow-section-heading,
+  .competition-results-heading,
+  .competition-result-section-heading,
+  .competition-database-section-heading,
+  .competition-database-inspector-heading,
+  .competition-agent-section-title
+) {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e0e6e6;
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .competition-section-heading,
+  .competition-workflows-heading,
+  .competition-workflow-section-heading,
+  .competition-results-heading,
+  .competition-result-section-heading,
+  .competition-database-section-heading,
+  .competition-database-inspector-heading,
+  .competition-agent-section-title
+) :is(h2, h3) {
+  color: #20363b;
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item {
+  border-color: var(--lm-workbench-line);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 4px 12px rgb(28 53 58 / 5%);
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(1) {
+  border-top: 3px solid var(--lm-workbench-blue);
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(2) {
+  border-top: 3px solid var(--lm-workbench-accent);
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(3) {
+  border-top: 3px solid #3f7a55;
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(4) {
+  border-top: 3px solid var(--lm-workbench-amber);
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(1) .lm-overview-icon {
+  color: var(--lm-workbench-blue);
+  background: #e6edf4;
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(2) .lm-overview-icon {
+  color: var(--lm-workbench-accent);
+  background: var(--lm-workbench-accent-soft);
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(3) .lm-overview-icon {
+  color: #3f7a55;
+  background: #e9f2eb;
+}
+
+.lm-app-shell.is-competition-edition .lm-overview-item:nth-child(4) .lm-overview-icon {
+  color: var(--lm-workbench-amber);
+  background: #f5eee2;
+}
+
+.lm-app-shell.is-competition-edition .competition-dashboard-band {
+  padding: 17px;
+  border: 1px solid var(--lm-workbench-line);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 4px 14px rgb(28 53 58 / 5%);
+}
+
+.lm-app-shell.is-competition-edition .competition-slurm-summary {
+  padding: 17px 18px;
+  border: 1px solid var(--lm-workbench-line);
+  border-left: 4px solid #6e7f83;
+  border-radius: 7px;
+  background: #f7f9f9;
+}
+
+.lm-app-shell.is-competition-edition .competition-table-scroll {
+  border-color: var(--lm-workbench-line-strong);
+  box-shadow: 0 2px 8px rgb(28 53 58 / 4%);
+}
+
+.lm-app-shell.is-competition-edition .competition-table th {
+  color: #40565b;
+  background: #eef3f2;
+}
+
+.lm-app-shell.is-competition-edition .competition-table tbody tr:hover {
+  background: #f1f7f5;
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .competition-source-segment button.is-active,
+  .competition-agent-segment button.is-active
+) {
+  color: var(--lm-workbench-accent-dark);
+  box-shadow: inset 0 -2px 0 var(--lm-workbench-accent);
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .lm-primary-action,
+  .competition-command-button.is-primary,
+  .competition-workflow-command-button.is-retry,
+  .competition-agent-submit,
+  .competition-agent-apply
+) {
+  border-color: var(--lm-workbench-accent);
+  background: var(--lm-workbench-accent);
+}
+
+.lm-app-shell.is-competition-edition :is(
+  .lm-primary-action,
+  .competition-command-button.is-primary,
+  .competition-workflow-command-button.is-retry,
+  .competition-agent-submit,
+  .competition-agent-apply
+):hover:not(:disabled) {
+  border-color: var(--lm-workbench-accent-dark);
+  background: var(--lm-workbench-accent-dark);
+}
+
+.lm-app-shell.is-competition-edition .competition-database-workspace {
+  gap: 18px;
+}
+
+.lm-app-shell.is-competition-edition .competition-database-records,
+.lm-app-shell.is-competition-edition .competition-database-inspector {
+  padding: 18px;
+  border: 1px solid var(--lm-workbench-line);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 4px 14px rgb(28 53 58 / 4%);
+}
+
+.lm-app-shell.is-competition-edition .competition-database-inspector {
+  border-left: 1px solid var(--lm-workbench-line);
+}
+
+.lm-app-shell.is-competition-edition .competition-agent-links,
+.lm-app-shell.is-competition-edition .competition-agent-runtime,
+.lm-app-shell.is-competition-edition .competition-agent-console,
+.lm-app-shell.is-competition-edition .competition-structure-builder {
+  max-width: none;
+}
+
+.lm-app-shell.is-competition-edition .competition-agent-console,
+.lm-app-shell.is-competition-edition .competition-structure-builder {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--lm-workbench-line);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 4px 14px rgb(28 53 58 / 4%);
+}
+
+@media (max-width: 700px) {
+  .lm-app-shell.is-competition-edition .lm-app-content {
+    background-size: 20px 20px;
+  }
+
+  .lm-app-shell.is-competition-edition :is(
+    .lm-dashboard-welcome,
+    .competition-calculation-header,
+    .competition-workflows-header,
+    .competition-workflow-detail-header,
+    .competition-results-header,
+    .competition-result-detail-header,
+    .competition-database-header,
+    .competition-agent-header
+  ) {
+    padding: 15px 16px;
+  }
+
+  .lm-app-shell.is-competition-edition :is(
+    .competition-work-section,
+    .competition-workflows-surface,
+    .competition-workflow-evidence,
+    .competition-results-surface,
+    .competition-result-evidence,
+    .competition-result-science,
+    .competition-result-failure,
+    .competition-database-filters,
+    .competition-database-records,
+    .competition-database-inspector,
+    .competition-agent-console,
+    .competition-structure-builder
+  ) {
+    padding: 15px;
+  }
+
+  .lm-app-shell.is-competition-edition :is(
+    .competition-calculation-header,
+    .competition-workflows-header,
+    .competition-workflow-detail-header,
+    .competition-results-header,
+    .competition-result-detail-header,
+    .competition-database-header,
+    .competition-agent-header
+  ) :is(h1) {
+    font-size: 22px;
+  }
+}
