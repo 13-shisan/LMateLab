@@ -9,7 +9,7 @@ import BrandMark from '../../components/BrandMark';
 import './CompetitionHome.css';
 
 const FLOW_STEPS = Object.freeze([
-  { number: '01', key: 'relax', title: '结构优化', detail: '固定晶体结构与计算模板' },
+  { number: '01', key: 'relax', title: '结构优化', detail: '优化晶格参数与原子位置' },
   { number: '02', key: 'SCF', title: '自洽计算', detail: '形成可信电子基态' },
   { number: '03', key: 'BAND', title: '能带计算', detail: '解析能带路径与带隙' },
   { number: '04', key: 'DOS', title: '态密度计算', detail: '输出总态密度与投影数据' },
@@ -56,10 +56,10 @@ export default function CompetitionHome() {
           <div className="competition-home-hero-content">
             <p className="competition-home-kicker">中国科学技术大学 · 低维材料科学实验室</p>
             <h1 id="competition-home-title">LMateLab</h1>
-            <p className="competition-home-lead">面向二维材料的可追溯 VASP 计算平台</p>
+            <p className="competition-home-lead">面向材料计算的可追溯 VASP 工作流平台</p>
             <p className="competition-home-summary">
-              围绕固定 MoS2 主线，把计算输入、Slurm 作业、科学验收与结构、BAND、DOS
-              结果组织成一条可以复核的证据链。
+              贯通结构输入、Slurm 调度、科学验收与结构、能带、态密度结果，
+              让每一次计算都形成可复核的完整证据链。
             </p>
             <div className="competition-home-actions">
               <button type="button" onClick={() => navigate('/login')}>
@@ -88,23 +88,23 @@ export default function CompetitionHome() {
               <p className="competition-home-section-label">平台主线</p>
               <h2 id="competition-home-platform-title">从结构到证据</h2>
               <p>
-                以固定输入和固定命令封装控制计算范围，让每一步结果都能追溯到发布提交、
+                以受控输入和标准化命令封装计算边界，让每一步结果都能追溯到发布提交、
                 Slurm Job ID、原始文件与验收结论。
               </p>
             </div>
             <div className="competition-home-pillars" aria-label="平台能力">
               <div>
-                <Workflow size={22} aria-hidden="true" />
-                <strong>固定流程</strong>
-                <span>MoS2 四步 VASP 闭环</span>
+                <Workflow size={26} aria-hidden="true" />
+                <strong>标准流程</strong>
+                <span>从结构优化到电子结构分析</span>
               </div>
               <div>
-                <ShieldCheck size={22} aria-hidden="true" />
+                <ShieldCheck size={26} aria-hidden="true" />
                 <strong>调度可信</strong>
                 <span>Slurm 归属核验与失败关闭</span>
               </div>
               <div>
-                <Database size={22} aria-hidden="true" />
+                <Database size={26} aria-hidden="true" />
                 <strong>结果可查</strong>
                 <span>结构、能带、态密度与证据包</span>
               </div>
