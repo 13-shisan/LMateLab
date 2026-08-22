@@ -1,8 +1,10 @@
 import { ArrowDown, ArrowRight, Database, LogIn, ShieldCheck, Workflow } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-import campusLake from '../../assets/107cup/campus-lake.webp';
+import campusAutumn from '../../assets/107cup/campus-lake.webp';
 import campusSpring from '../../assets/107cup/campus-spring.webp';
+import campusSummer from '../../assets/107cup/campus-summer.webp';
+import campusWinter from '../../assets/107cup/campus-winter.webp';
 import BrandMark from '../../components/BrandMark';
 import './CompetitionHome.css';
 
@@ -74,7 +76,7 @@ export default function CompetitionHome() {
         <section
           id="platform"
           className="competition-home-campus"
-          style={{ '--competition-home-campus-image': `url(${campusLake})` }}
+          style={{ '--competition-home-campus-image': `url(${campusSummer})` }}
           aria-labelledby="competition-home-platform-title"
         >
           <div className="competition-home-campus-inner">
@@ -106,7 +108,12 @@ export default function CompetitionHome() {
           </div>
         </section>
 
-        <section id="workflow" className="competition-home-flow" aria-labelledby="competition-home-flow-title">
+        <section
+          id="workflow"
+          className="competition-home-flow"
+          style={{ '--competition-home-flow-image': `url(${campusAutumn})` }}
+          aria-labelledby="competition-home-flow-title"
+        >
           <div className="competition-home-section-heading">
             <p className="competition-home-section-label">计算工作流</p>
             <h2 id="competition-home-flow-title">四步 VASP 闭环</h2>
@@ -124,15 +131,22 @@ export default function CompetitionHome() {
           </ol>
         </section>
 
-        <section id="evidence" className="competition-home-evidence" aria-labelledby="competition-home-evidence-title">
-          <div>
-            <p className="competition-home-section-label">验收证据</p>
-            <h2 id="competition-home-evidence-title">结果不是一张孤立的图</h2>
+        <section
+          id="evidence"
+          className="competition-home-evidence"
+          style={{ '--competition-home-evidence-image': `url(${campusWinter})` }}
+          aria-labelledby="competition-home-evidence-title"
+        >
+          <div className="competition-home-evidence-inner">
+            <div>
+              <p className="competition-home-section-label">验收证据</p>
+              <h2 id="competition-home-evidence-title">结果不是一张孤立的图</h2>
+            </div>
+            <p>
+              工作流状态、attempt 目录、资源记录、输出 SHA-256、结构视图、BAND 与 DOS
+              共同构成最终结果。失败算例同样保留原因和阻断链，不把未收敛结果显示为成功。
+            </p>
           </div>
-          <p>
-            工作流状态、attempt 目录、资源记录、输出 SHA-256、结构视图、BAND 与 DOS
-            共同构成最终结果。失败算例同样保留原因和阻断链，不把未收敛结果显示为成功。
-          </p>
         </section>
 
         <section className="competition-home-entry" aria-label="平台入口">

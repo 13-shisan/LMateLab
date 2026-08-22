@@ -5,7 +5,9 @@ import { existsSync, readFileSync } from 'node:fs';
 const sourceUrl = new URL('../src/pages/competition/CompetitionHome.jsx', import.meta.url);
 const stylesUrl = new URL('../src/pages/competition/CompetitionHome.css', import.meta.url);
 const springUrl = new URL('../src/assets/107cup/campus-spring.webp', import.meta.url);
+const summerUrl = new URL('../src/assets/107cup/campus-summer.webp', import.meta.url);
 const lakeUrl = new URL('../src/assets/107cup/campus-lake.webp', import.meta.url);
+const winterUrl = new URL('../src/assets/107cup/campus-winter.webp', import.meta.url);
 
 test('107 cup exposes a public competition-specific home before login', () => {
   const app = readFileSync(new URL('../src/App107Cup.jsx', import.meta.url), 'utf8');
@@ -21,8 +23,8 @@ test('107 cup exposes a public competition-specific home before login', () => {
   assert.match(authShell, /aria-label="返回首页"/);
 });
 
-test('competition home uses both supplied campus photographs without broadening scope', () => {
-  for (const url of [sourceUrl, stylesUrl, springUrl, lakeUrl]) {
+test('competition home uses the four supplied campus seasons without broadening scope', () => {
+  for (const url of [sourceUrl, stylesUrl, springUrl, summerUrl, lakeUrl, winterUrl]) {
     assert.equal(existsSync(url), true, `${url.pathname} must exist`);
   }
   if (!existsSync(sourceUrl) || !existsSync(stylesUrl)) return;
@@ -42,18 +44,24 @@ test('competition home uses both supplied campus photographs without broadening 
     assert.match(source, new RegExp(expected));
   }
   assert.match(source, /campus-spring\.webp/);
+  assert.match(source, /campus-summer\.webp/);
   assert.match(source, /campus-lake\.webp/);
+  assert.match(source, /campus-winter\.webp/);
+  assert.match(source, /--competition-home-flow-image/);
+  assert.match(source, /--competition-home-evidence-image/);
   assert.match(source, /navigate\(['"]\/login['"]\)/);
   assert.match(source, /aria-label="进入平台"/);
   assert.doesNotMatch(source, /Agent|RAG|机器学习|QE|EPW|跨服务器|高通量|任意材料|任意命令/);
 });
 
-test('competition home keeps full-bleed imagery responsive and overflow safe', () => {
+test('competition home keeps all four seasonal backgrounds responsive and overflow safe', () => {
   if (!existsSync(stylesUrl)) return;
   const styles = readFileSync(stylesUrl, 'utf8');
 
   assert.match(styles, /\.competition-home-hero\s*\{[^}]*background-image:\s*var\(--competition-home-hero-image\)/s);
   assert.match(styles, /\.competition-home-campus\s*\{[^}]*background-image:\s*var\(--competition-home-campus-image\)/s);
+  assert.match(styles, /\.competition-home-flow\s*\{[^}]*background-image:\s*var\(--competition-home-flow-image\)/s);
+  assert.match(styles, /\.competition-home-evidence\s*\{[^}]*background-image:\s*var\(--competition-home-evidence-image\)/s);
   assert.match(styles, /@media\s*\(max-width:\s*640px\)/);
   assert.match(styles, /overflow-x:\s*hidden/);
   assert.doesNotMatch(styles, /font-size:\s*[^;]*vw/);
