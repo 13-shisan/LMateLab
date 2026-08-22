@@ -94,7 +94,9 @@
 }
 
 .competition-home-hero::before,
-.competition-home-campus::before {
+.competition-home-campus::before,
+.competition-home-flow::before,
+.competition-home-evidence::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -189,6 +191,14 @@
   background: rgba(8, 26, 36, 0.58);
 }
 
+.competition-home-flow::before {
+  background: rgba(7, 24, 29, 0.68);
+}
+
+.competition-home-evidence::before {
+  background: rgba(6, 21, 29, 0.62);
+}
+
 .competition-home-campus-inner {
   width: min(1180px, 100%);
   margin: 0 auto;
@@ -203,6 +213,8 @@
 }
 
 .competition-home-campus .competition-home-section-label,
+.competition-home-flow .competition-home-section-label,
+.competition-home-evidence .competition-home-section-label,
 .competition-home-entry .competition-home-section-label {
   color: #91ddd0;
 }
@@ -253,13 +265,19 @@
 }
 
 .competition-home-flow {
+  position: relative;
   padding: 82px clamp(20px, 7vw, 112px) 92px;
-  background: #f5f7f6;
+  color: #ffffff;
+  background-color: #263e3c;
+  background-image: var(--competition-home-flow-image);
+  background-position: center;
+  background-size: cover;
+  isolation: isolate;
 }
 
 .competition-home-section-heading,
 .competition-home-flow-list,
-.competition-home-evidence,
+.competition-home-evidence-inner,
 .competition-home-entry,
 .competition-home-footer {
   width: min(1180px, calc(100% - 40px));
@@ -268,7 +286,7 @@
 
 .competition-home-section-heading > p:last-child {
   margin: 14px 0 0;
-  color: #5d6b73;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .competition-home-flow-list {
@@ -278,7 +296,7 @@
   padding: 0;
   margin-top: 48px;
   list-style: none;
-  border-top: 1px solid #aeb9b6;
+  border-top: 1px solid rgba(255, 255, 255, 0.38);
 }
 
 .competition-home-flow-list li {
@@ -288,12 +306,12 @@
 
 .competition-home-flow-list li + li {
   padding-left: 24px;
-  border-left: 1px solid #d4dcda;
+  border-left: 1px solid rgba(255, 255, 255, 0.26);
 }
 
 .competition-home-flow-number {
   display: block;
-  color: #7b898f;
+  color: rgba(255, 255, 255, 0.68);
   font-size: 12px;
   font-weight: 700;
 }
@@ -301,34 +319,47 @@
 .competition-home-flow-list strong {
   display: block;
   margin-top: 20px;
-  color: #147267;
+  color: #91ddd0;
   font-size: 24px;
 }
 
 .competition-home-flow-list h3 {
   margin: 8px 0 0;
+  color: #ffffff;
   font-size: 16px;
 }
 
 .competition-home-flow-list p {
   margin: 8px 0 0;
-  color: #68767d;
+  color: rgba(255, 255, 255, 0.76);
   font-size: 14px;
   line-height: 1.65;
 }
 
 .competition-home-evidence {
+  position: relative;
+  min-height: 390px;
+  display: flex;
+  align-items: center;
+  padding: 82px clamp(20px, 7vw, 112px);
+  color: #ffffff;
+  background-color: #33434c;
+  background-image: var(--competition-home-evidence-image);
+  background-position: center;
+  background-size: cover;
+  isolation: isolate;
+}
+
+.competition-home-evidence-inner {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 72px;
-  padding-block: 82px;
-  border-top: 1px solid #d4dcda;
+  align-items: end;
 }
 
-.competition-home-evidence > p {
-  align-self: end;
+.competition-home-evidence-inner > p {
   margin: 0;
-  color: #526168;
+  color: rgba(255, 255, 255, 0.82);
   font-size: 16px;
   line-height: 1.85;
 }
@@ -342,6 +373,7 @@
   color: #ffffff;
   background: #102d37;
   border-radius: 8px;
+  margin-top: 72px;
 }
 
 .competition-home-entry button {
@@ -382,7 +414,7 @@
 
   .competition-home-pillars,
   .competition-home-flow-list,
-  .competition-home-evidence {
+  .competition-home-evidence-inner {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -399,11 +431,7 @@
     border-top: 1px solid rgba(255, 255, 255, 0.25);
   }
 
-  .competition-home-flow-list li + li {
-    border-top-color: #d4dcda;
-  }
-
-  .competition-home-evidence {
+  .competition-home-evidence-inner {
     gap: 24px;
   }
 }
@@ -491,18 +519,21 @@
 
   .competition-home-flow {
     padding: 64px 20px 72px;
+    background-position: 46% center;
   }
 
   .competition-home-section-heading,
   .competition-home-flow-list,
-  .competition-home-evidence,
+  .competition-home-evidence-inner,
   .competition-home-entry,
   .competition-home-footer {
     width: 100%;
   }
 
   .competition-home-evidence {
+    min-height: 460px;
     padding: 64px 20px;
+    background-position: 55% center;
   }
 
   .competition-home-entry {
@@ -510,6 +541,7 @@
     flex-direction: column;
     width: calc(100% - 32px);
     padding: 30px 24px;
+    margin-top: 48px;
   }
 
   .competition-home-entry button {
