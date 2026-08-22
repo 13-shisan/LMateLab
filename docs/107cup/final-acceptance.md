@@ -6,35 +6,35 @@
 
 Stage 10 状态：`PARTIAL`。
 
-四季首页可读性整改已通过 PR #66 合并并部署为固定提交 `4f652db91bdfb1dc28fea0daed4d12b0d9d57215`。正式构建 Job `41672/anode01`、服务 Job `41673/anode16` 和只读验收 Job `41676/anode16` 已完成；4090 relay、Windows Operator 和公网入口均返回该新身份，旧服务 `41648/anode18` 在完整归属核对后停止且旧端口不可达。公开首页桌面和移动浏览器复跑已通过，但全新认证态 Viewer/Operator 全流程复跑及三名成员独立复核仍未完成，因此状态继续为 `PARTIAL`。
+认证态科研工作台视觉统一已通过 PR #68 合并并部署为固定提交 `217cf255e0c1ad0090e2215b9c0a5928a0da19ca`。正式构建 Job `41712/anode01`、服务 Job `41721/anode18` 和只读验收 Job `41724/anode16` 已完成；4090 relay、Windows Operator 和公网入口均返回该新身份，旧服务 `41673/anode16` 在完整归属核对后停止为 `CANCELLED`。公开首页生产浏览器复核和认证态六入口本地三视口只读验收已通过，但当前发布的全新认证态 Viewer/Operator 全流程复跑及三名成员独立复核仍未完成，因此状态继续为 `PARTIAL`。
 
 Stage 10 验收期间不得提交新的 VASP 计算。固定成功/失败链通过只读方式复核；如确实需要新算例，必须由用户另行明确授权，且不能覆盖既有 attempt 或证据。
 
-既有认证态 Viewer/Operator 截图与 `422.04` 秒视频继续只绑定 `4f81d727...`，不能证明当前 `4f652db9...` 发布的认证态页面。本次只读机器验收和公开首页验收均不改写这一外部门禁。
+既有认证态 Viewer/Operator 截图与 `422.04` 秒视频继续只绑定 `4f81d727...`，不能证明当前 `217cf255...` 发布的完整认证态流程。本次本地只读视觉验收、生产机器验收和公开首页验收均不改写这一外部门禁。
 
 ## 2. 固定发布身份
 
 以下字段只能在 PR 合并并从新 `main` 构建后填写，不能引用 Stage 10 开始前的 Job `41044` 冒充最终发布：
 
 ```text
-Merged main commit: 4f652db91bdfb1dc28fea0daed4d12b0d9d57215
-Build Job ID / node / final state: 41672 / anode01 / scheduler record unavailable; successful logs, release directory and manifest self-check preserved
-Release manifest SHA-256: 616b86b1460debd7570d6ba59ccfd19b68d103019fa99c5049ef7e021d55d9ca
-Service Job ID / node / port: 41673 / anode16 / 18731
-Stage 10 acceptance Job ID / node / final state: 41676 / anode16 / scheduler record unavailable; preserved log ends with STAGE10_ACCEPTANCE_OK and stderr is empty
-Stage 10 evidence manifest SHA-256: 488e809e2b43dee581c34c73182b1cbf2a4954e235a4dfbdd376936db34a96c7
-Stage 10 summary SHA-256: ff92d05d388db5f9a992e0805ba45413a354ce5484daf14567bd8ec4477712b7
+Merged main commit: 217cf255e0c1ad0090e2215b9c0a5928a0da19ca
+Build Job ID / node / final state: 41712 / anode01 / scheduler record expired; successful logs, release directory and manifest self-check preserved
+Release manifest SHA-256: d2eccbbb19f9be4cc556da4816d1c24adfd4271160b9373959cb49398faf2509
+Service Job ID / node / port: 41721 / anode18 / 18731
+Stage 10 acceptance Job ID / node / final state: 41724 / anode16 / COMPLETED, ExitCode=0:0
+Stage 10 evidence manifest SHA-256: 628e1fba86b1def08a5c50378b95a1fd8b2085e07c2410e15691b338bfa5aba0
+Stage 10 summary SHA-256: 722ab701c0720fdc684730a5d94fbbcaa0464c86e3bb4536a77e29a405897dbd
 ```
 
 ## 3. 六层测试门禁
 
 | 层级 | 当前状态 | 最终证据 |
 |---|---|---|
-| 1. 单元测试 | 通过 | Job `41672` 后端共运行 `494` 项并为 `OK`，其中 4 项环境跳过；前端 `143/143` |
-| 2. 假 Slurm 集成 | 通过 | Job `41672` 的后端回归包含 `test_competition_slurm` 全状态、取消和归属门禁 |
-| 3. 107 真实 Slurm | 通过（后快照范围不匹配已留证） | 发布前快照 `41670`、构建 `41672`、服务 `41673` 和只读验收 `41676` 均完成；`41676` 日志为 `STAGE10_ACCEPTANCE_OK`。发布后误用预览不变性快照的 Job `41680` 因 `current` 按设计切换而失败，未伪报成功 |
+| 1. 单元测试 | 通过 | Job `41712` 后端共运行 `494` 项并为 `OK`，其中 4 项环境跳过；前端 `144/144` |
+| 2. 假 Slurm 集成 | 通过 | Job `41712` 的后端回归包含 `test_competition_slurm` 全状态、取消和归属门禁 |
+| 3. 107 真实 Slurm | 通过（历史后快照范围不匹配已留证） | 构建 `41712`、服务 `41721` 和只读验收 `41724` 均完成；`41724` 为 `COMPLETED/0:0` 且日志为 `STAGE10_ACCEPTANCE_OK`。历史 Job `41680` 的失败证据继续保留，未伪报成功 |
 | 4. 真实 VASP | 通过只读复核 | 成功 `40212/40250/40251/40252`，失败 `40264/40265/null/null`；两份确定性证据包哈希未变，没有提交新 VASP |
-| 5. 浏览器端到端 | PARTIAL | 当前四季首页桌面/移动、四张资源请求和登录往返通过；全新认证态 Viewer/Operator 全流程仍需针对当前发布重做 |
+| 5. 浏览器端到端 | PARTIAL | 公网公开首页生产复核通过且控制台零错误；认证态 6 个入口已完成本地 `1440x900`、`1024x768`、`390x844` 只读验收，但全新 Viewer/Operator 生产会话仍需针对当前发布重做 |
 | 6. 最终演示复跑 | PARTIAL | 既有 Viewer/Operator 截图和连续视频只绑定旧发布；当前发布演示素材和三名成员独立复核待完成 |
 
 任何一层失败都不能被下一层成功替代。机器门禁输出 `STAGE10_ACCEPTANCE_OK` 只表示发布、服务、数据库、路由和固定科学数据的只读核对通过，不代表浏览器和三人复核自动通过。
