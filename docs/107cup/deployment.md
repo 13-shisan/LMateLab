@@ -60,7 +60,7 @@ tail -n 80 "$root/logs/build-$job_id.err"
 
 ## 4. 启动和验证服务
 
-服务通过 `service.slurm` 运行在 `P107-A100` 计算节点。发布后使用恢复入口，它会先核对已有 Job、状态文件和目标端口，并只在必要时提交一个候选：
+服务通过 `service.slurm` 运行在 `P107-A100` 计算节点。同一 release 的服务丢失或异常时使用恢复入口；它会先核对已有 Job、状态文件和目标端口，并只在必要时提交一个候选：
 
 ```bash
 cd /home/scc/pb23030683/projects/LMateLab-107Cup
@@ -68,9 +68,20 @@ bash deploy/107cup/submit-service.sh
 bash deploy/107cup/verify-runtime.sh
 ```
 
+`submit-service.sh` 是同版本恢复入口，不是版本升级入口。新构建已经把 `current` 切到新 commit、但旧服务仍健康运行时，恢复器会以 `release_identity_mismatch` 失败关闭；此时不得循环重试或删除状态文件。版本升级应保留旧服务，排除旧节点并直接提交新 release 的候选：
+
+```bash
+cd /home/scc/pb23030683/projects/LMateLab-107Cup
+old_node=$(</home/scc/pb23030683/lmatelab-107cup/runtime/service-node)
+candidate_job=$(sbatch --parsable --exclude="$old_node" deploy/107cup/service.slurm)
+printf '%s\n' "$candidate_job"
+```
+
+等待候选自身的 live/ready、commit 和 manifest 全部一致，由 4090 临时探测端口确认后再切换正式 relay。只有新入口验证成功，才允许按 Job 归属清单核对并停止旧服务；候选失败时必须保留旧服务和旧 relay。
+
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-当前 Stage 10 开始前的已验证基线是 Job `41044`、`anode16:18731`、提交 `e565851ff3ac67d8c143331b4dee175d82b6d04c`。Stage 10 最终证据必须用新合并的固定 `main` 发布替换这组基线，不能直接沿用旧 Job 作为最终发布证据。
+当前已验证稳定服务是 Job `41648`、`anode18:18731`、提交 `565edfda8d36018e4516e2d22e27be351d9f0a41`，release manifest SHA-256 为 `57e777bf8f3ac94ae6c6b0816b00afe5175016f4f5b66f6905d57948c22ea78b`。公网 `live/ready` 已返回该身份；下一次发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能沿用本组 Job 冒充新版本证据。
 
 ## 5. Stage 10 只读验收
 
