@@ -7,6 +7,7 @@ import { CompetitionDataProvider } from './features/competition/CompetitionDataC
 import RequireAuth from './routes/RequireAuth';
 
 
+const CompetitionHome = lazy(() => import('./pages/competition/CompetitionHome'));
 const Login = lazy(() => import('./pages/Login'));
 const CompetitionDashboard = lazy(() => import('./pages/CompetitionDashboard'));
 const CompetitionNewCalculation = lazy(() => import('./pages/competition/CompetitionNewCalculation'));
@@ -46,7 +47,7 @@ export default function App107Cup() {
     <BrowserRouter>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<CompetitionHome />} />
           <Route path="/login" element={<Login />} />
           <Route element={<ProtectedCompetitionShell />}>
             <Route path="/dashboard" element={<CompetitionDashboard />} />

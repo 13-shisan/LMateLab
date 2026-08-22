@@ -1,44 +1,55 @@
 # 107 杯最终验收记录
 
-更新时间：`2026-08-21`
+更新时间：`2026-08-22`
 
 ## 1. 当前结论
 
 Stage 10 状态：`PARTIAL`。
 
-交付合同、计算节点只读验收入口、部署说明、数据溯源说明、演示脚本和仓库 SHA-256 清单已进入开发分支。最终状态暂不能写成 `DONE`，因为新固定 `main` 发布尚未在 107 重新构建，Stage 10 Slurm 验收、全新 Operator/Viewer 浏览器复跑、桌面/移动素材和三名成员独立复核尚未形成证据。
+四季首页排版整改已通过 PR #63 合并并部署为固定提交 `565edfda8d36018e4516e2d22e27be351d9f0a41`。正式构建 Job `41646/anode01`、服务 Job `41648/anode18` 和只读验收 Job `41649/anode16` 已完成；4090 relay 与公网入口均返回该新身份，旧服务 `41570/anode16` 在完整归属核对后停止且旧端口不可达。公开首页三种视口浏览器复跑已通过，但全新认证态 Viewer/Operator 全流程复跑及三名成员独立复核仍未完成，因此状态继续为 `PARTIAL`。
 
 Stage 10 验收期间不得提交新的 VASP 计算。固定成功/失败链通过只读方式复核；如确实需要新算例，必须由用户另行明确授权，且不能覆盖既有 attempt 或证据。
+
+既有认证态 Viewer/Operator 截图与 `422.04` 秒视频继续只绑定 `4f81d727...`，不能证明当前 `565edfda...` 发布的认证态页面。本次只读机器验收和公开首页验收均不改写这一外部门禁。
 
 ## 2. 固定发布身份
 
 以下字段只能在 PR 合并并从新 `main` 构建后填写，不能引用 Stage 10 开始前的 Job `41044` 冒充最终发布：
 
 ```text
-Merged main commit: PENDING
-Build Job ID / node / final state: PENDING
-Release manifest SHA-256: PENDING
-Service Job ID / node / port: PENDING
-Stage 10 acceptance Job ID / node / final state: PENDING
-Stage 10 evidence manifest SHA-256: PENDING
+Merged main commit: 565edfda8d36018e4516e2d22e27be351d9f0a41
+Build Job ID / node / final state: 41646 / anode01 / scheduler record expired; successful logs, release directory and manifest self-check preserved
+Release manifest SHA-256: 57e777bf8f3ac94ae6c6b0816b00afe5175016f4f5b66f6905d57948c22ea78b
+Service Job ID / node / port: 41648 / anode18 / 18731
+Stage 10 acceptance Job ID / node / final state: 41649 / anode16 / scheduler record expired; preserved log ends with STAGE10_ACCEPTANCE_OK and stderr is empty
+Stage 10 evidence manifest SHA-256: 5109b681cef330c2e0fc26ccb6db2e50495739c9c346815ff14257117b734b52
+Stage 10 summary SHA-256: d6dd822b37420695ae108c5a35689b54bc21206e5ea1de9f71d96f0417e8b768
 ```
 
 ## 3. 六层测试门禁
 
 | 层级 | 当前状态 | 最终证据 |
 |---|---|---|
-| 1. 单元测试 | PENDING | 新固定提交后端全量，0 failure、0 error |
-| 2. 假 Slurm 集成 | PENDING | `test_competition_slurm` 全状态与归属通过 |
-| 3. 107 真实 Slurm | PENDING | 构建、服务、Stage 10 验收 Job 和原始日志 |
-| 4. 真实 VASP | 已有固定基线，待新发布只读复核 | 成功 `40212/40250/40251/40252`，失败 `40264/40265/null/null` |
-| 5. 浏览器端到端 | PENDING | 全新 Operator/Viewer、桌面/移动、控制台和 Canvas 检查 |
-| 6. 最终演示复跑 | PENDING | 按 `demo-script.md` 完整执行和素材哈希 |
+| 1. 单元测试 | 通过 | Job `41646` 后端 `492/492`，另有 4 项环境跳过；前端 `132/132` |
+| 2. 假 Slurm 集成 | 通过 | Job `41646` 的后端回归包含 `test_competition_slurm` 全状态、取消和归属门禁 |
+| 3. 107 真实 Slurm | 通过 | 快照 `41645/41650`、构建 `41646`、服务 `41648` 和只读验收 `41649`；验收日志为 `STAGE10_ACCEPTANCE_OK` |
+| 4. 真实 VASP | 通过只读复核 | 成功 `40212/40250/40251/40252`，失败 `40264/40265/null/null`；两份确定性证据包哈希未变，没有提交新 VASP |
+| 5. 浏览器端到端 | PARTIAL | 当前四季首页桌面/移动、四张资源请求和登录往返通过；全新认证态 Viewer/Operator 全流程仍需针对当前发布重做 |
+| 6. 最终演示复跑 | PARTIAL | 既有 Viewer/Operator 截图和连续视频只绑定旧发布；当前发布演示素材和三名成员独立复核待完成 |
 
 任何一层失败都不能被下一层成功替代。机器门禁输出 `STAGE10_ACCEPTANCE_OK` 只表示发布、服务、数据库、路由和固定科学数据的只读核对通过，不代表浏览器和三人复核自动通过。
 
 合并前本地预检（`2026-08-21`）：Stage 8/10 合同测试共 `6/6` 通过，前端 Node 测试 `129/129` 通过，107 Cup live Vite 构建完成 `1857` 个模块转换。额外运行的全仓库 ESLint 仍有既存 `36 errors / 22 warnings`，命中注册、Agent、QE/EPW、监控等未由本阶段修改且不进入 107 Cup 运行面的旧源码；不能把这次 lint 写成通过，也不在 Stage 10 中扩大范围修复。合并后的 107 Slurm 正式构建仍必须重新执行后端和前端门禁。
 
 PR #55 合并提交 `db03e360b450b41f483fa98e62157ec6c993f6ba` 的首次正式构建 Job `41064` 在 `P107-RTX5090/anode01` 失败关闭。后端运行 `489` 项，结果为 `1 failure + 4 skipped`；唯一失败是仓库交付清单在 Windows 生成时对既有 `implementation-plan.md` 的 CRLF 字节计算哈希，而 Git 和 107 检出为 LF。失败发生在前端和发布目录生成之前，旧 `current`、服务 Job `41044`、数据库和固定工作流均未改变。热修复只把固定 UTF-8 文本规范化为 LF 后计算清单，不能删除文件校验或改写旧证据。
+
+PR #56 将跨平台清单修复合并为 `4e79c07b198b34e54be332638868e82249357d1f`。发布前快照 Job `41138` 通过；正式构建 Job `41139` 通过后端 `489/489`（另有 4 项环境跳过）、前端 `129/129`、Vite `1857` 个模块和 `595` 项 release manifest，自检后的 release manifest SHA-256 为 `33891563e9e69232b60661176cf132c9e9f4524a88515a61693f59e1d841cac3`，`current` 已切换到该固定提交。
+
+候选服务 Job `41142` 曾在 `P107-A100/anode18:18731` 运行，通过固定内部地址 `11.11.10.18` 访问时 live/ready 均正确返回新 Job、commit 和 manifest。旧恢复器因登录节点不能解析 `anode18` 而报告 `service_not_ready`，4090 relay 正确拒绝切换并继续保留旧入口；这段失败关闭证据未被删除。
+
+地址修复通过 PR #57 合并。发布前快照 Job `41477` 为 `COMPLETED/0:0`；正式构建 Job `41478/anode01` 通过后端 `492/492`（另有 4 项环境跳过）、前端 `129/129` 和 release manifest 自检。服务 Job `41479` 在 `P107-A100/anode19:18731` 运行，4090 relay 使用内部地址 `11.11.10.19` 完成受控切换。旧服务 Job `41044/41142` 在核对项目归属后受控停止，旧端口随后不可达。
+
+发布后快照 Job `41481` 确认两套 SQLite 的 SHA-256 与发布前完全一致，完整性均为 `ok`。只读验收 Job `41482/anode16` 重新核对发布、路由、数据库、结构、BAND、DOS 和固定成功/失败证据包，日志结尾为 `STAGE10_ACCEPTANCE_OK`。其证据目录为 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage10/acceptance-41482`，文件权限为 `0600`；当前 `scontrol`/`sacct` 记录已过期，最终状态以当时保存的 Job 结果、空 stderr、成功日志和证据清单共同固定。
 
 ## 4. 固定成功与失败证据
 
@@ -58,38 +69,54 @@ Stage 10 Slurm 验收必须重新解析结构、BAND、DOS 和两份确定性证
 
 ## 5. 部署与数据位置门禁
 
-- [ ] 源码固定为合并后 `main`，发布目录、`commit.txt` 与服务 commit 相同。
-- [ ] Python/Node 环境、SQLite、服务、工作流、attempt、VASP 输出和证据均位于 `/home/scc/pb23030683/lmatelab-107cup`。
-- [ ] 服务运行在 Slurm 计算节点，107 登录节点无 LMateLab 常驻进程。
-- [ ] 4090 只保存网络转发状态，不保存竞赛业务数据库或运行 FastAPI/VASP。
-- [ ] Windows Operator 隧道与公网 Viewer 返回同一 Job、node、commit 和 manifest。
-- [ ] 原 4090 LMateLab 未被本阶段停止或修改；其存在不能成为竞赛服务运行条件。
+- [x] 源码固定为合并后 `main`，发布目录、`commit.txt` 与服务 commit 相同。
+- [x] Python/Node 环境、SQLite、服务、工作流、attempt、VASP 输出和证据均位于 `/home/scc/pb23030683/lmatelab-107cup`。
+- [x] 服务运行在 Slurm 计算节点，107 登录节点无 LMateLab 常驻进程。
+- [x] 4090 只保存网络转发状态，不保存竞赛业务数据库或运行 FastAPI/VASP。
+- [x] Windows Operator 隧道与公网 Viewer 返回同一 Job、node、commit 和 manifest。
+- [x] 原 4090 LMateLab 未被本阶段停止或修改；其存在不能成为竞赛服务运行条件。
 
 “原 4090 LMateLab 停止时仍运行”属于生产影响操作，没有用户明确停机授权时不得主动执行。最终可用现有架构证据、107 直连和转发失败关闭测试证明业务独立，并把未做真实生产停机演练的边界写清楚。
 
 ## 6. 功能范围门禁
 
-- [ ] 竞赛 API 仅挂载认证、健康检查和竞赛工作流固定 allowlist。
-- [ ] 前端导航只包含 Dashboard、新建计算、工作流、结果和 VASP 数据库。
-- [ ] Agent、聊天、RAG、机器学习、QE/EPW、跨服务器迁移、服务器监控、报告和其他旁支不可访问。
-- [ ] Viewer 无提交、取消、重试、修改和敏感日志权限。
-- [ ] Operator 只能通过固定模板和固定 Slurm 适配器执行受限主线。
+- [x] 竞赛 API 仅挂载认证、健康检查和竞赛工作流固定 allowlist。
+- [x] 前端导航只包含 Dashboard、新建计算、工作流、结果和 VASP 数据库。
+- [x] Agent、聊天、RAG、机器学习、QE/EPW、跨服务器迁移、服务器监控、报告和其他旁支不可访问。
+- [x] Viewer 无提交、取消、重试、修改和敏感日志权限。
+- [x] Operator 只能通过固定模板和固定 Slurm 适配器执行受限主线；全新 Operator 浏览器已完成只读复跑且未触发提交、取消、重试或其他写请求。
 
 仓库保留的旧源码不等于竞赛运行面。最终核对以 `main_107cup.py` 实际路由、前端生产 bundle、浏览器导航和网络请求为准。
 
 ## 7. 浏览器与素材记录
 
 ```text
-Viewer fresh-session evidence directory: PENDING
-Operator fresh-session evidence directory: PENDING
-Desktop viewport(s): PENDING
-Mobile viewport(s): PENDING
-Console error count: PENDING
-Structure/BAND/DOS canvas pixel checks: PENDING
-Video material path and SHA-256: PENDING
+Viewer fresh-session evidence directory: /home/scc/pb23030683/lmatelab-107cup/evidence/stage10/browser-4f81d727-20260822
+Operator fresh-session evidence directory: /home/scc/pb23030683/lmatelab-107cup/evidence/stage10/browser-4f81d727-20260822/operator-desktop
+Desktop viewport(s): Viewer 1440x900 passed; Operator 1440x900 passed
+Mobile viewport(s): Viewer 390x844 passed
+Console error count: Viewer desktop 0; Viewer mobile 0; Operator desktop 0
+Structure/BAND/DOS non-white pixel ratios: Viewer desktop 0.0116 / 0.0259 / 0.0838; Viewer mobile 0.0230 / 0.0897 / 0.1719; Operator desktop 0.006547 / 0.027192 / 0.083188
+Viewer screenshot manifest SHA-256: fdd5b0c047be047e325675661001b3714bdbee976cfff7f14c86bdd899fb59c5
+Viewer summary SHA-256: d7525956e580acb9dde71cbdaeb1c57407156cb36bd2938555abb0b382967d8a
+Operator evidence manifest SHA-256: 6edcebe75ebb995e5534234809acd8c402e47a4b7ce47d8f1f4e0a14205d1596
+Operator summary SHA-256: 40bf967125c6acd89f6cdd7267a4d0b1f63e38fe020352817b7c7dda5500249e
+Video material path and SHA-256: operator-desktop/operator-stage10-demo.webm / e752d36a311a1a31e56ce42da588db2e64e9a634ac51f1cb1c13fd8c39cec2ab
 ```
 
-截图必须来自本节固定发布，不能复用 Stage 5/8/9 旧截图充当最终素材。截图和视频不得包含密码、token、JWT、SSH 信息或未裁剪敏感日志。
+上述 Viewer/Operator 记录为 `4f81d727...` 的历史证据，不能作为本节当前固定发布 `565edfda...` 的最终素材。当前发布的全新截图和视频仍需重做，且不得包含密码、token、JWT、SSH 信息或未裁剪敏感日志。
+
+Viewer 新会话通过公网白名单入口复核了 Dashboard、工作流列表、成功结果、失败结果、新建计算、VASP 数据库和元素周期表。成功结果显示四步 Job `40212/40250/40251/40252`、带隙 `1.6919 eV`、结构、BAND 与 DOS；失败结果显示 SCF `electronic_not_converged`，BAND/DOS 为依赖失败且未启动。新建计算的来源、参数、保存和校验控件均禁用，取消和重试不可用。Mo+S 的“至少含有”和“只含所选元素”筛选均返回两条固定记录。
+
+Viewer 桌面与移动会话均为页面级零横向溢出；周期表和宽表只在自身有边界的区域内横向滚动。控制台错误与警告均为 0，已检查的认证、结果和数据库 GET 请求全部返回 `200`，没有观察到意外写请求。19 张 PNG 的 `viewer-manifest.sha256` 已在本地逐项复核并上传到上述 `0700` 私有目录，文件权限为 `0600`；目录不包含 Playwright storage state、密码、token、JWT 或 `.playwright-cli` 快照。
+
+Operator 由用户在 Windows 隧道入口现场登录，页面确认身份为“107杯管理员 / 操作员”。连续 `422.04` 秒录屏覆盖 Dashboard、工作流成功/失败证据、结果、结构、BAND、DOS、新建计算和 VASP 数据库 Mo+S 精确筛选；13 张 PNG 与 1 个 WebM 均由 `operator-manifest.sha256` 逐项复核并上传为 `0600`。控制台错误与警告均为 0，7 个业务请求全部为成功 GET，没有 POST/PUT/PATCH/DELETE，也没有提交、取消、重试、Slurm 或 VASP 操作。录屏从已登录工作台开始，经抽帧检查不含密码、token、JWT、Cookie 或 SSH 信息；临时认证会话和抽帧接触表已删除。
+
+四季首页固定发布 `565edfda...` 以公网入口在 `2560x1440`、`1440x900` 和 `390x844` 复核：页面可在未认证状态打开，春、夏、秋、冬四张独立 WebP 均返回 `200`，固有尺寸均非零且 `object-fit: contain` 生效。两种桌面视口的四段高度分别统一为 `1706.65625px` 与 `960px`，五个内容块左边缘分别统一为 `690px` 与 `130px`；移动端四个图片带均为 `260px`。三种视口页面横向溢出、控制台错误/警告和底部重复 CTA 数量均为 0；底部以紧凑页脚收尾。该公开首页证据不替代认证态复跑。
+
+发布前后快照分别由 Job `41645/41650` 固定，manifest SHA-256 为 `55aeec7bf48b963a0c491c91f16b21467317aa09b373fcc9fbd9f2d3cf48b47e` 与 `39da9dc85b04811af05c792f4e92329cd0e4be35d9159efdfd028fdcc91c0da1`。两套正式 SQLite 完整性均为 `ok`，前后 SHA-256 保持 `29cf102884c1b36f6cef8c251bb569aa6cebd837b4d3957989a6efaa8a96ddbc` 与 `2c1069bb4768fa81707623fa80e72f616e313b809d7b1a1b7da4d203ef56b969`；没有提交 VASP。
+
+已知 UX 问题：Operator 查看已验收或失败终态工作流时，“取消工作流”按钮仍显示为可用。源码核对确认后端在没有活动 attempt 时固定返回 `workflow_not_cancellable`，不会调用 `scancel`；本次验收没有点击该按钮，也没有发送取消 POST。该问题不突破后端归属和终态门禁，但后续前端版本应按工作流状态禁用终态取消按钮；在修复重新构建前，本节证据继续严格绑定固定发布 `4f81d727...`。
 
 ## 8. 三名成员独立复核
 
