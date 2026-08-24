@@ -160,6 +160,17 @@ a {
   font-size: 12px;
   margin-top: 3px;
 }
+
+.form-success {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid #2f7d67;
+  border-radius: 4px;
+  color: #245f50;
+  background: #edf8f4;
+  font-size: 13px;
+  line-height: 1.55;
+}
 .form-footer {
   display: flex;
   justify-content: space-between;

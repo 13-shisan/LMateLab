@@ -1,7 +1,7 @@
 // src/pages/Login.jsx
 import { useState } from 'react';
 import api from '../api/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import logo from '../assets/logo/Logo.png';
 import { activeEdition } from '../config/appNavigation';
@@ -17,6 +17,8 @@ export default function Login() {
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const passwordChanged = searchParams.get('passwordChanged') === '1';
   const passwordResetEnabled = passwordResetEnabledForEdition(activeEdition);
   const registrationEnabled = registrationEnabledForEdition(activeEdition);
 
@@ -98,6 +100,9 @@ export default function Login() {
             />
           </div>
 
+          {passwordChanged && !msg ? (
+            <div className="form-success" role="status">密码已修改，请使用新密码登录</div>
+          ) : null}
           {msg && <div className="form-error">{msg}</div>}
 
           <button

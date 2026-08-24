@@ -72,6 +72,8 @@ test('107 cup UI removes registration and unrelated dashboard surfaces', () => {
   assert.match(requireAuth, /isCompetitionRole/);
   assert.match(appShell, /roleLabel/);
   assert.match(appShell, /activeEdition/);
+  assert.match(appShell, /ChangePasswordDialog/);
+  assert.match(appShell, /修改密码/);
 });
 
 test('107 cup build uses a dedicated route entry without unrelated pages', () => {

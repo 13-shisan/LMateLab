@@ -8,10 +8,16 @@ from pathlib import Path, PurePosixPath
 
 STAGE10_MANIFEST_PATHS = (
     ".gitattributes",
+    "backend/auth.py",
+    "backend/auth_identity.py",
+    "backend/schemas.py",
+    "backend/tests/test_107cup_authz.py",
+    "backend/tests/test_107cup_deploy_contract.py",
     "backend/tests/test_107cup_service_recovery.py",
     "backend/tests/test_107cup_stage10_delivery_contract.py",
     "deploy/107cup/build.slurm",
     "deploy/107cup/generate-stage10-manifest.py",
+    "deploy/107cup/relay/nginx.conf.example",
     "deploy/107cup/service_recovery.py",
     "deploy/107cup/service.slurm",
     "deploy/107cup/slurm/stage8-acceptance.py",
@@ -30,6 +36,14 @@ STAGE10_MANIFEST_PATHS = (
     "docs/107cup/stage7-vasp-evidence.md",
     "docs/107cup/stage8-results-evidence.md",
     "docs/107cup/stage9-recovery-security-evidence.md",
+    "frontend/src/components/AppShell.jsx",
+    "frontend/src/features/auth/ChangePasswordDialog.css",
+    "frontend/src/features/auth/ChangePasswordDialog.jsx",
+    "frontend/src/features/auth/changePassword.js",
+    "frontend/src/pages/Login.jsx",
+    "frontend/src/styles.css",
+    "frontend/tests/changePassword107Cup.test.mjs",
+    "frontend/tests/competitionRoles107Cup.test.mjs",
 )
 
 

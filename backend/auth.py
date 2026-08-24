@@ -1,5 +1,6 @@
 # backend/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 import jwt
@@ -8,7 +9,7 @@ from pathlib import Path
 import json
 from database import get_db
 from models import User
-from schemas import RegisterRequest, LoginRequest, UserOut, TokenOut
+from schemas import ChangePasswordRequest, RegisterRequest, LoginRequest, UserOut, TokenOut
 import os, secrets, hashlib
 from models import PasswordResetCode
 from schemas import ForgotPasswordRequest, ForgotPasswordVerify, ForgotPasswordReset
@@ -18,6 +19,7 @@ from auth_identity import (
     JWT_ALGORITHM,
     JWT_SECRET,
     get_current_user,
+    password_token_version,
 )
 from competition_authz import (
     require_account_changes_enabled,
@@ -189,7 +191,8 @@ def login(login_req: LoginRequest, db: Session = Depends(get_db)):
         "email": user.email,
         "name": user.name,
         "alias": user.alias,
-        "role": user.role
+        "role": user.role,
+        "pwdv": password_token_version(user.password_hash),
     })
 
     return TokenOut(
@@ -207,6 +210,25 @@ def me(current_user: User = Depends(require_current_edition_user)):
     - token 无效/过期：get_current_user 会抛 401
     """
     return UserOut.model_validate(current_user)
+
+
+@competition_router.post("/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(require_current_edition_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+
+    try:
+        current_user.password_hash = hash_password(payload.new_password)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="密码修改失败，请稍后重试") from exc
+
+    return {"ok": True}
 
 
 RESET_CODE_TTL_MIN = 10

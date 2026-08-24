@@ -965,3 +965,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 候选服务 Job `41721/anode18:18731` 的 live/ready 与提交、manifest 一致后，4090 relay 完成受控切换；Windows `127.0.0.1:21763` 和公网 `222.195.94.37:18733` 均返回该身份。旧服务 Job `41673/anode16` 经用户、JobName、Command、WorkDir 和日志路径核对后受控停止为 `CANCELLED`，未触及共享账号下其他作业。
 - Stage 10 只读 Job `41724/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节；证据 manifest 和摘要 SHA-256 分别为 `628e1fba86b1def08a5c50378b95a1fd8b2085e07c2410e15691b338bfa5aba0` 与 `722ab701c0720fdc684730a5d94fbbcaa0464c86e3bb4536a77e29a405897dbd`。数据库完整性为 `ok`，固定成功/失败工作流和证据包哈希未变，没有提交 VASP。
 - 公网公开首页在 `1440x900` 通过生产 Playwright 复核，控制台错误和警告均为 `0`。Chrome 登录态控制未能建立，因此当前发布的全新认证态 Viewer/Operator 全流程和连续视频仍待人工复跑；三名成员独立复核也未完成，Stage 10 保持 `PARTIAL`。
+
+### 17.22 登录后修改本人密码候选
+
+- 分支 `codex/107cup-change-password` 只增加已登录用户修改本人密码，不恢复注册、邮箱验证码或忘记密码，不增加管理员查看密码、替他人重置密码或业务写权限。Operator 与 Viewer 使用相同入口，均必须提供当前密码、新密码和确认密码，并复用 `deploy/107cup/security_policy.json` 的服务器策略。
+- 登录 JWT 新增与当前 `password_hash` 绑定的 HMAC-SHA256 版本指纹；认证时用常量时间比较。密码提交成功后数据库哈希变化，所有旧 JWT（包括本次发布前不含版本指纹的 JWT）立即返回 `401`，用户必须以新密码重新登录。实现不修改数据库结构，也不在响应、日志或浏览器存储中保留密码。
+- 107 杯专用后端新增精确 `POST /api/auth/change-password`，当前密码错误不写库，提交异常必须回滚且不向客户端泄露数据库细节；旧版认证 router 不挂载该路由。4090 Nginx 模板只为该路径增加精确 POST 例外，通用 `/api/` 继续仅允许 GET，Viewer 的提交、取消、重试等业务写请求仍被拒绝。
+- 登录后的右上角用户菜单新增“修改密码”对话框，桌面与移动端均显示密码规则和三项密码输入。成功后清除本地全部认证状态并跳转 `/login?passwordChanged=1`，登录页显示“密码已修改，请使用新密码登录”。对话框关闭即卸载，不使用 `localStorage`、`sessionStorage` 或控制台保存表单值。
+- 本地 TDD 已先得到缺少后端指纹/路由/代理和前端组件的预期失败；实现后后端认证与部署定向测试 `58` 项通过（其中 `12` 项按 Windows 非 POSIX 条件跳过），前端全量 `146/146`、新增行为测试、定向 ESLint、107 Cup live Vite 构建（`1870` 个模块）和 `git diff --check` 通过。
+- 本节当前仍是候选。必须经 PR 合并、107 Slurm 正式构建、候选服务健康验证、4090 活动 Nginx 配置 `nginx -t` 与原子替换、旧服务受控停止、Stage 10 只读 Job 和真实浏览器改密复核后，才能写为已上线。浏览器验收密码只能由用户现场输入，不能交给 AI 或写入证据。
