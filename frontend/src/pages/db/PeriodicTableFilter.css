@@ -74,6 +74,7 @@
 }
 
 .vasp-periodic-filter .vasp-periodic-scroll {
+  display: flex;
   max-width: 100%;
   overflow-x: auto;
   justify-content: safe center;
@@ -132,6 +133,10 @@
 }
 
 @media (max-width: 700px) {
+  .vasp-periodic-filter .vasp-periodic-scroll {
+    justify-content: flex-start;
+  }
+
   .vasp-periodic-toolbar {
     align-items: stretch;
     flex-direction: column;
