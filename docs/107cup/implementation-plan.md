@@ -978,3 +978,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 旧服务 Job `41721/anode18` 在用户、JobName、节点、Command 和实际 WorkDir 全部匹配后受控停止为 `CANCELLED`，旧节点端口不可达，新服务保持运行；未触及共享账号下其他作业。
 - Stage 10 只读 Job `43711/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为空。数据库完整性为 `ok`，三条既有工作流与固定成功/失败证据包未变，没有提交 VASP；证据 manifest 和摘要 SHA-256 分别为 `66b04773ca4ce5fcaa8f3ae78b1482eb4b51a1eb0f5b5bd8eaacf0aa87784ca4` 与 `1f9f699c8095c67d2ed0bda868df208a8d1508e4d0124631a2ee2d3d169dcb5d`。
 - 生产 Playwright 通过 Windows Operator 隧道复核公开首页和 `/login?passwordChanged=1`：`390x844` 页面无横向溢出，控制台错误/警告为 0，登录页正确显示“密码已修改，请使用新密码登录”。未使用、读取或记录真实密码；用户仍需现场完成一次真实改密、旧 JWT 拒绝和新密码重新登录验收，当前发布的全新认证态 Viewer/Operator 全流程与三名成员独立复核也仍待完成，因此 Stage 10 保持 `PARTIAL`。
+
+### 17.23 VASP 数据库周期表居中候选
+
+- 分支 `codex/107cup-periodic-table-center` 只修复共享元素周期表在竞赛 VASP 数据库宽屏页面左贴边的问题，不修改元素数据、筛选语义、查询、数据库 API、角色权限或 Slurm/VASP 工作流。查询框继续按表单惯例左对齐，避免与周期表的几何中心耦合。
+- 根因是共享 `.vasp-periodic-scroll` 声明了 `justify-content: safe center`，却没有建立 flex 格式化上下文；个人数据库因额外样式偶然生效，竞赛数据库没有导入该样式，因此同一组件表现不一致。共享组件现在显式使用 `display: flex`，并在 `700px` 以下恢复 `justify-content: flex-start`，保证窄屏横向滚动从 H 开始。
+- TDD 先确认现有 7 项周期表测试中只有新增布局合同失败，修复后 `7/7` 通过。演示数据浏览器在 `2100px` 宽度测得周期表左右留白均为 `368.5px`，页面无横向溢出；`390x844` 下内部 `scrollWidth/clientWidth=845/330`、初始 `scrollLeft=0`、页面无横向溢出，控制台错误和警告均为 0。
+- 本节当前仍是本地候选。PR 合并、107 Slurm 正式构建、候选服务健康验证、relay 切换、Stage 10 只读验收和生产 VASP 数据库复核完成前，线上发布仍保持 `79e7f773.../Job 43710`。

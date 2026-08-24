@@ -109,6 +109,11 @@ test('filter owns safe horizontal overflow alignment', () => {
   const css = readFileSync(new URL('../src/pages/db/PeriodicTableFilter.css', import.meta.url), 'utf8');
   const block = css.match(/\.vasp-periodic-filter \.vasp-periodic-scroll\s*\{([^}]*)\}/s)?.[1] || '';
 
+  assert.match(block, /display:\s*flex/);
   assert.match(block, /overflow-x:\s*auto/);
   assert.match(block, /justify-content:\s*safe center/);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*700px\)\s*\{[\s\S]*?\.vasp-periodic-filter \.vasp-periodic-scroll\s*\{[^}]*justify-content:\s*flex-start/s,
+  );
 });
