@@ -989,10 +989,13 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Stage 10 只读 Job `43728/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。数据库完整性为 `ok`，三条既有工作流与固定成功/失败证据包哈希未变，没有提交 VASP；证据 manifest 和摘要 SHA-256 分别为 `08b5f0d037768fb59b489b2fdc1777ecf2f94b1cb228d1824d3b91760e1f7144` 与 `42c013108cc7a9049cb271a36874b804d544696b8b7241d987ac0369ae2497db`。
 - 生产已运行与本地布局验收相同的固定前端 release。本次未读取或记录真实密码，因此不把本地演示数据截图写成全新生产认证会话；用户刷新后的生产 VASP 数据库页面、全新 Viewer/Operator 全流程和三名成员独立复核仍属人工门禁，Stage 10 保持 `PARTIAL`。
 
-### 17.24 VASP 数据库筛选工具栏整改候选
+### 17.24 VASP 数据库筛选工具栏发布与机器验收
 
 - 分支 `codex/107cup-periodic-filter-toolbar` 只调整 VASP 数据库的查询与元素筛选布局，不修改元素周期表数据、筛选语义、数据库 API、角色权限、Slurm/VASP 工作流或既有证据。共享个人数据库仍保留原“清空选择”行为。
 - 竞赛 VASP 数据库在桌面端把“至少含有所选元素 / 只含所选元素”、搜索框和“重置筛选”放在周期表上方同一行；`700px` 以下改为模式与重置同处第一行、搜索框独占第二行。周期表继续在宽屏独立居中，在窄屏只于自身边界内横向滚动。
 - “重置筛选”一次清空查询与所选元素，把模式恢复为 `at_least`、页码恢复为 `1`，并清除已选记录。真实浏览器交互已依次验证 `q=MoS2`、`elements=S`、`element_mode=only` 写入 URL；重置后 URL 为 `?element_mode=at_least&page=1`，搜索为空、没有已选元素、默认模式按下且重置按钮禁用。
 - 本地聚焦测试 `73/73`、前端全量 `148/148`、定向 ESLint、`git diff --check` 和 107 Cup Vite 构建（`1870` 个模块）通过。Playwright 在 `2100x1200`、`1024x768` 和 `390x844` 完成布局复核，三种视口均无页面横向溢出；移动端周期表内部 `scrollWidth/clientWidth=845/331`，控制台错误和警告均为 `0`。
-- 本节当前仅记录本地候选。PR 合并、107 Slurm 正式构建、候选服务、4090 relay 切换和 Stage 10 只读验收完成前，线上发布仍为 `8ccbc0fa9a073f29965e4ab339923658638d1750`、Job `43726/anode18`；Stage 10 继续为 `PARTIAL`。
+- PR #74 已把功能提交 `116f0222e3e8066b957b48bfdbb3af4b933ccc1b` 合并为 `b58cfe40be19fbd7543ca970a728aba89e69386b`。正式构建 Job `43736/anode01` 为 `COMPLETED/0:0`，通过后端 `501` 项（另有 4 项平台跳过）、前端 `148/148` 和 Vite `1870` 个模块构建；`current` 原子指向该 release，`645` 项 manifest 自检通过，SHA-256 为 `cd99bd2090d57974526061b34ecd06534ef1266e1ae617aab0f2c3249441bc7f`。
+- 候选服务 Job `43737/anode16:18731` 在排除旧节点 `anode18` 后提交，内部 live/ready、commit/manifest 和服务状态一致后，4090 恢复器完成临时探测与正式 relay 切换。Windows `127.0.0.1:21763`、4090 内部入口和公网 `222.195.94.37:18733` 均返回新身份；旧 Job `43726/anode18` 经完整归属核验后受控停止为 `CANCELLED`，旧端口不可达，未触及共享账号下其他作业。
+- Stage 10 只读 Job `43738/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。数据库 `integrity_check=ok`，三条既有工作流与固定成功/失败证据包哈希未变，没有提交 VASP；证据 manifest 和摘要 SHA-256 分别为 `b316bdc39ee29dc62c754d5cd06836e2e7a8b34fb2f99dd700c3ddf059cb81d6` 与 `6633e7aa0b282487c4c7e6dc62112255b704fc274374ddf9566317f79b3199ae`。
+- 生产运行的是已通过本地三视口布局与交互验收的同一固定前端 release。本次 Chrome 登录态控制未能建立，且未读取浏览器存储或真实密码，因此不把本地截图冒充全新生产认证会话；用户刷新后的生产 VASP 数据库页面、全新 Viewer/Operator 全流程和三名成员独立复核仍属人工门禁，Stage 10 保持 `PARTIAL`。
