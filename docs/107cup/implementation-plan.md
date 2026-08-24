@@ -139,14 +139,14 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | DONE | PR #52/#53 已部署；当前 Job `41721/anode18` 运行发布 `217cf255...`，4090 每分钟短守护、maintenance、单候选恢复和先验切换已通过真实停服/恢复验收 | 按运行手册维护；SSH 主连接真实失效时由 Operator 完成一次二次验证 |
+| 3. 最小 107 网页服务 | DONE | PR #52/#53/#70 已部署；当前 Job `43710/anode16` 运行发布 `79e7f773...`，4090 每分钟短守护、maintenance、单候选恢复和先验切换已通过真实停服/恢复验收 | 按运行手册维护；SSH 主连接真实失效时由 Operator 完成一次二次验证 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
 | 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
 | 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
-| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60/#61/#63/#66/#68 已合并；工作台视觉统一版由 Job `41712/anode01` 构建、`41721/anode18` 提供服务并经 `41724/anode16` 只读验收；公网入口和发布身份一致 | 当前发布仍需全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
+| 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60/#61/#63/#66/#68/#70 已合并；修改密码版由 Job `43709/anode01` 构建、`43710/anode16` 提供服务并经 `43711/anode16` 只读验收；公网入口和发布身份一致 | 当前发布仍需由用户现场完成一次真实改密与全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
 
 ## 6. 阶段 1：竞赛仓库初始化
 
@@ -966,11 +966,15 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Stage 10 只读 Job `41724/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节；证据 manifest 和摘要 SHA-256 分别为 `628e1fba86b1def08a5c50378b95a1fd8b2085e07c2410e15691b338bfa5aba0` 与 `722ab701c0720fdc684730a5d94fbbcaa0464c86e3bb4536a77e29a405897dbd`。数据库完整性为 `ok`，固定成功/失败工作流和证据包哈希未变，没有提交 VASP。
 - 公网公开首页在 `1440x900` 通过生产 Playwright 复核，控制台错误和警告均为 `0`。Chrome 登录态控制未能建立，因此当前发布的全新认证态 Viewer/Operator 全流程和连续视频仍待人工复跑；三名成员独立复核也未完成，Stage 10 保持 `PARTIAL`。
 
-### 17.22 登录后修改本人密码候选
+### 17.22 登录后修改本人密码发布与验收
 
 - 分支 `codex/107cup-change-password` 只增加已登录用户修改本人密码，不恢复注册、邮箱验证码或忘记密码，不增加管理员查看密码、替他人重置密码或业务写权限。Operator 与 Viewer 使用相同入口，均必须提供当前密码、新密码和确认密码，并复用 `deploy/107cup/security_policy.json` 的服务器策略。
 - 登录 JWT 新增与当前 `password_hash` 绑定的 HMAC-SHA256 版本指纹；认证时用常量时间比较。密码提交成功后数据库哈希变化，所有旧 JWT（包括本次发布前不含版本指纹的 JWT）立即返回 `401`，用户必须以新密码重新登录。实现不修改数据库结构，也不在响应、日志或浏览器存储中保留密码。
 - 107 杯专用后端新增精确 `POST /api/auth/change-password`，当前密码错误不写库，提交异常必须回滚且不向客户端泄露数据库细节；旧版认证 router 不挂载该路由。4090 Nginx 模板只为该路径增加精确 POST 例外，通用 `/api/` 继续仅允许 GET，Viewer 的提交、取消、重试等业务写请求仍被拒绝。
 - 登录后的右上角用户菜单新增“修改密码”对话框，桌面与移动端均显示密码规则和三项密码输入。成功后清除本地全部认证状态并跳转 `/login?passwordChanged=1`，登录页显示“密码已修改，请使用新密码登录”。对话框关闭即卸载，不使用 `localStorage`、`sessionStorage` 或控制台保存表单值。
 - 本地 TDD 已先得到缺少后端指纹/路由/代理和前端组件的预期失败；实现后后端认证与部署定向测试 `58` 项通过（其中 `12` 项按 Windows 非 POSIX 条件跳过），前端全量 `146/146`、新增行为测试、定向 ESLint、107 Cup live Vite 构建（`1870` 个模块）和 `git diff --check` 通过。
-- 本节当前仍是候选。必须经 PR 合并、107 Slurm 正式构建、候选服务健康验证、4090 活动 Nginx 配置 `nginx -t` 与原子替换、旧服务受控停止、Stage 10 只读 Job 和真实浏览器改密复核后，才能写为已上线。浏览器验收密码只能由用户现场输入，不能交给 AI 或写入证据。
+- PR #70 已合并为 `79e7f77312e3ceb20bce901d0be3d85d212afa2c`。正式构建 Job `43709/anode01` 为 `COMPLETED/0:0`，通过后端 `501` 项（另有 4 项环境跳过）、前端 `146/146` 和 Vite 构建；release manifest 含 `645` 项，SHA-256 为 `a83ffc9d362d2f217d66312c56cf5d7053ed670ff98e3dfa723875aa13105069`。
+- 候选服务 Job `43710/anode16:18731` 通过内部 live/ready、提交/manifest 一致性和数据库完整性检查后，4090 恢复器完成临时探测与正式 relay 切换。活动 Nginx 配置保留原 IP 白名单和 `0600` 权限，新增唯一精确 `POST /api/auth/change-password` 例外并通过 `nginx -t`；未认证改密 POST 到达后端返回 `401`，同路径 GET 和其他业务 POST 均返回 `403`。Windows `127.0.0.1:21763`、4090 内部入口和公网 `222.195.94.37:18733` 返回同一新身份。
+- 旧服务 Job `41721/anode18` 在用户、JobName、节点、Command 和实际 WorkDir 全部匹配后受控停止为 `CANCELLED`，旧节点端口不可达，新服务保持运行；未触及共享账号下其他作业。
+- Stage 10 只读 Job `43711/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为空。数据库完整性为 `ok`，三条既有工作流与固定成功/失败证据包未变，没有提交 VASP；证据 manifest 和摘要 SHA-256 分别为 `66b04773ca4ce5fcaa8f3ae78b1482eb4b51a1eb0f5b5bd8eaacf0aa87784ca4` 与 `1f9f699c8095c67d2ed0bda868df208a8d1508e4d0124631a2ee2d3d169dcb5d`。
+- 生产 Playwright 通过 Windows Operator 隧道复核公开首页和 `/login?passwordChanged=1`：`390x844` 页面无横向溢出，控制台错误/警告为 0，登录页正确显示“密码已修改，请使用新密码登录”。未使用、读取或记录真实密码；用户仍需现场完成一次真实改密、旧 JWT 拒绝和新密码重新登录验收，当前发布的全新认证态 Viewer/Operator 全流程与三名成员独立复核也仍待完成，因此 Stage 10 保持 `PARTIAL`。
