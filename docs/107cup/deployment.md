@@ -81,7 +81,7 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-当前已验证稳定服务是 Job `43710`、`anode16:18731`、提交 `79e7f77312e3ceb20bce901d0be3d85d212afa2c`，release manifest SHA-256 为 `a83ffc9d362d2f217d66312c56cf5d7053ed670ff98e3dfa723875aa13105069`。4090、Windows Operator 和公网 `live/ready` 均返回该身份；Stage 10 只读 Job `43711/anode16` 已以 `COMPLETED/0:0` 输出 `STAGE10_ACCEPTANCE_OK`。4090 活动 Nginx 配置保留原 IP 白名单和 `0600` 权限，只新增精确 `POST /api/auth/change-password` 例外；旧 Job `41721/anode18` 经完整归属核验后已停止，旧端口不可达。下一次发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能沿用本组 Job 冒充新版本证据。
+当前已验证稳定服务是 Job `43726`、`anode18:18731`、提交 `8ccbc0fa9a073f29965e4ab339923658638d1750`，release manifest SHA-256 为 `3ab2c2f00997bf8016883c6dad06fb86d8235a6a078291eef7ac49a8842747dd`。正式构建 Job `43725/anode01` 为 `COMPLETED/0:0`；4090、Windows Operator 和公网 `live/ready` 均返回新身份；Stage 10 只读 Job `43728/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。旧 Job `43710/anode16` 经完整归属核验后已受控停止，旧端口不可达，未触及共享账号下其他作业。4090 活动 Nginx 配置的 IP 白名单、`0600` 权限和精确 `POST /api/auth/change-password` 例外均未修改。下一次发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能沿用本组 Job 冒充新版本证据。
 
 ## 5. Stage 10 只读验收
 
