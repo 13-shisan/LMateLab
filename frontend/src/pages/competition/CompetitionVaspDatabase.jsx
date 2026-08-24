@@ -598,6 +598,12 @@ export default function CompetitionVaspDatabase() {
       { resetPage: true, clearRecord: true },
     );
   }, [updateUrlState]);
+  const resetDatabaseFilters = useCallback(() => {
+    updateUrlState(
+      { query: '', selectedElements: [], elementMode: 'at_least' },
+      { resetPage: true, clearRecord: true },
+    );
+  }, [updateUrlState]);
   const changePage = useCallback((nextPage) => {
     updateUrlState(
       { page: Math.min(pageNormalization.totalPages, Math.max(1, nextPage)) },
@@ -653,20 +659,25 @@ export default function CompetitionVaspDatabase() {
           mode={elementMode}
           onSelectionChange={changeElements}
           onModeChange={changeElementMode}
+          toolbarContent={(
+            <label className="competition-database-search" htmlFor="competition-database-query">
+              <span className="competition-visually-hidden">查询</span>
+              <div>
+                <Search size={16} aria-hidden="true" />
+                <input
+                  id="competition-database-query"
+                  type="search"
+                  value={query}
+                  placeholder="化学式、来源或工作流 ID"
+                  onChange={changeQuery}
+                />
+              </div>
+            </label>
+          )}
+          onReset={resetDatabaseFilters}
+          resetDisabled={!query && selectedElements.length === 0 && elementMode === 'at_least'}
+          resetLabel="重置筛选"
         />
-        <label className="competition-database-search" htmlFor="competition-database-query">
-          <span>查询</span>
-          <div>
-            <Search size={16} aria-hidden="true" />
-            <input
-              id="competition-database-query"
-              type="search"
-              value={query}
-              placeholder="化学式、来源或工作流 ID"
-              onChange={changeQuery}
-            />
-          </div>
-        </label>
       </section>
 
       <div className="competition-database-workspace">

@@ -721,11 +721,11 @@
 }
 
 .competition-database-search {
+  width: 100%;
   min-width: 0;
-  max-width: 620px;
-  display: grid;
-  gap: 6px;
-  margin-top: 15px;
+  max-width: none;
+  display: block;
+  margin: 0;
   color: #566379;
   font-size: 11px;
   font-weight: 800;
