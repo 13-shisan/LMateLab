@@ -93,6 +93,21 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
+    new_password2: str
+
+    @model_validator(mode="after")
+    def validate_change(self):
+        if self.new_password != self.new_password2:
+            raise ValueError("两次输入的新密码不一致")
+        if self.current_password == self.new_password:
+            raise ValueError("新密码不能与当前密码相同")
+        validate_password_by_policy(self.new_password)
+        return self
+
+
 # ---------- 项目 ----------
 
 class ProjectBase(BaseModel):

@@ -12,12 +12,20 @@ from types import SimpleNamespace
 from unittest import mock
 
 from fastapi import HTTPException
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
+
+os.environ.setdefault("JWT_SECRET", "test-only-107cup-auth-secret")
+os.environ.setdefault(
+    "SECURITY_POLICY_PATH",
+    str(REPO_ROOT / "deploy" / "107cup" / "security_policy.json"),
+)
 
 
 class CompetitionAuthorizationTests(unittest.TestCase):
@@ -98,6 +106,180 @@ class CompetitionAuthorizationTests(unittest.TestCase):
 
         viewer = SimpleNamespace(role="viewer")
         self.assertIs(viewer, authz.require_competition_role(viewer, competition_env))
+
+
+class CompetitionPasswordChangeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import auth
+        import auth_identity
+        import schemas
+
+        cls.auth = auth
+        cls.auth_identity = auth_identity
+        cls.schemas = schemas
+        cls.secret = os.environ["JWT_SECRET"]
+
+    @staticmethod
+    def user(password_hash="hash:CurrentPassword1!"):
+        return SimpleNamespace(
+            id=7,
+            email="operator@example.com",
+            name="Operator",
+            alias="operator",
+            role="operator",
+            password_hash=password_hash,
+        )
+
+    @staticmethod
+    def database_for(user):
+        query = mock.Mock()
+        query.filter.return_value = query
+        query.first.return_value = user
+        database = mock.Mock()
+        database.query.return_value = query
+        return database
+
+    def encode_token(self, user, *, include_password_version=True):
+        payload = {"sub": user.id}
+        if include_password_version:
+            payload["pwdv"] = self.auth_identity.password_token_version(user.password_hash)
+        return self.auth.jwt.encode(payload, self.secret, algorithm=self.auth_identity.JWT_ALGORITHM)
+
+    def test_login_token_is_bound_to_current_password_hash(self):
+        user = self.user()
+        database = self.database_for(user)
+        request = self.schemas.LoginRequest(
+            email=user.email,
+            password="CurrentPassword1!",
+        )
+
+        with mock.patch.object(self.auth, "verify_password", return_value=True):
+            result = self.auth.login(request, database)
+
+        payload = self.auth.jwt.decode(
+            result.token,
+            self.secret,
+            algorithms=[self.auth_identity.JWT_ALGORITHM],
+        )
+        self.assertEqual(
+            self.auth_identity.password_token_version(user.password_hash),
+            payload.get("pwdv"),
+        )
+
+    def test_password_bound_token_succeeds_and_old_or_unbound_tokens_fail(self):
+        user = self.user()
+        database = self.database_for(user)
+        valid = SimpleNamespace(credentials=self.encode_token(user))
+
+        self.assertIs(user, self.auth_identity.get_current_user(valid, database))
+
+        missing_version = SimpleNamespace(
+            credentials=self.encode_token(user, include_password_version=False)
+        )
+        with self.assertRaises(HTTPException) as raised:
+            self.auth_identity.get_current_user(missing_version, database)
+        self.assertEqual(401, raised.exception.status_code)
+
+        old_token = valid
+        user.password_hash = "hash:ChangedPassword2!"
+        with self.assertRaises(HTTPException) as raised:
+            self.auth_identity.get_current_user(old_token, database)
+        self.assertEqual(401, raised.exception.status_code)
+
+    def test_wrong_current_password_does_not_update_or_commit(self):
+        user = self.user()
+        database = mock.Mock()
+        payload = self.schemas.ChangePasswordRequest(
+            current_password="WrongPassword1!",
+            new_password="ChangedPassword2!",
+            new_password2="ChangedPassword2!",
+        )
+
+        with mock.patch.object(self.auth, "verify_password", return_value=False):
+            with self.assertRaises(HTTPException) as raised:
+                self.auth.change_password(payload, user, database)
+
+        self.assertEqual(400, raised.exception.status_code)
+        self.assertEqual("hash:CurrentPassword1!", user.password_hash)
+        database.commit.assert_not_called()
+        database.rollback.assert_not_called()
+
+    def test_change_password_updates_only_authenticated_user(self):
+        user = self.user()
+        other = self.user(password_hash="hash:OtherPassword1!")
+        other.id = 8
+        database = mock.Mock()
+        payload = self.schemas.ChangePasswordRequest(
+            current_password="CurrentPassword1!",
+            new_password="ChangedPassword2!",
+            new_password2="ChangedPassword2!",
+        )
+
+        with mock.patch.object(self.auth, "verify_password", return_value=True), mock.patch.object(
+            self.auth,
+            "hash_password",
+            return_value="hash:ChangedPassword2!",
+        ):
+            result = self.auth.change_password(payload, user, database)
+
+        self.assertEqual({"ok": True}, result)
+        self.assertEqual("hash:ChangedPassword2!", user.password_hash)
+        self.assertEqual("hash:OtherPassword1!", other.password_hash)
+        database.query.assert_not_called()
+        database.commit.assert_called_once_with()
+        database.rollback.assert_not_called()
+
+    def test_password_confirmation_policy_and_unchanged_value_are_enforced(self):
+        invalid_payloads = (
+            {
+                "current_password": "CurrentPassword1!",
+                "new_password": "ChangedPassword2!",
+                "new_password2": "DifferentPassword3!",
+            },
+            {
+                "current_password": "CurrentPassword1!",
+                "new_password": "CurrentPassword1!",
+                "new_password2": "CurrentPassword1!",
+            },
+            {
+                "current_password": "CurrentPassword1!",
+                "new_password": "short",
+                "new_password2": "short",
+            },
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValidationError):
+                    self.schemas.ChangePasswordRequest(**payload)
+
+    def test_database_failure_rolls_back_without_leaking_details(self):
+        user = self.user()
+        database = mock.Mock()
+        database.commit.side_effect = SQLAlchemyError("private database detail")
+        payload = self.schemas.ChangePasswordRequest(
+            current_password="CurrentPassword1!",
+            new_password="ChangedPassword2!",
+            new_password2="ChangedPassword2!",
+        )
+
+        with mock.patch.object(self.auth, "verify_password", return_value=True), mock.patch.object(
+            self.auth,
+            "hash_password",
+            return_value="hash:ChangedPassword2!",
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                self.auth.change_password(payload, user, database)
+
+        self.assertEqual(500, raised.exception.status_code)
+        self.assertNotIn("private database detail", str(raised.exception.detail))
+        database.rollback.assert_called_once_with()
+
+    def test_change_password_route_is_competition_only(self):
+        competition_paths = {route.path for route in self.auth.competition_router.routes}
+        legacy_paths = {route.path for route in self.auth.router.routes}
+        self.assertIn("/auth/change-password", competition_paths)
+        self.assertNotIn("/auth/change-password", legacy_paths)
 
 
 class CompetitionRoleMigrationTests(unittest.TestCase):

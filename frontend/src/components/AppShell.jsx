@@ -10,6 +10,7 @@ import {
   Database,
   Languages,
   LayoutDashboard,
+  KeyRound,
   Library,
   ListChecks,
   LogOut,
@@ -32,6 +33,7 @@ import {
 
 import { clearAuthState } from '../api/auth';
 import logo from '../assets/logo/Logo.png';
+import ChangePasswordDialog from '../features/auth/ChangePasswordDialog';
 import {
   activeEdition,
   getPageMeta,
@@ -82,6 +84,7 @@ export default function AppShell() {
   const menuRef = useRef(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem('lmatelab-sidebar-collapsed') === 'true';
   });
@@ -284,6 +287,19 @@ export default function AppShell() {
                   </>
                 ) : null}
                 <div className="lm-user-menu-separator" />
+                {competitionEdition ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      setChangePasswordOpen(true);
+                    }}
+                  >
+                    <KeyRound size={16} />
+                    <span>修改密码</span>
+                  </button>
+                ) : null}
                 <button className="is-danger" type="button" role="menuitem" onClick={logout}>
                   <LogOut size={16} />
                   <span>退出登录</span>
@@ -297,6 +313,11 @@ export default function AppShell() {
       <div className="lm-app-content">
         <Outlet />
       </div>
+      {competitionEdition && changePasswordOpen ? (
+        <ChangePasswordDialog
+          onClose={() => setChangePasswordOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

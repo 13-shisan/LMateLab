@@ -1536,6 +1536,13 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn("proxy_http_version 1.1", relay)
         self.assertIn("proxy_buffering off", relay)
         self.assertIn("location = /api/auth/login", relay)
+        self.assertIn("location = /api/auth/change-password", relay)
+        change_password = relay.split("location = /api/auth/change-password", 1)[1].split(
+            "location /api/", 1
+        )[0]
+        self.assertIn("limit_except POST", change_password)
+        self.assertIn("deny all", change_password)
+        self.assertIn("proxy_pass http://127.0.0.1:18734", change_password)
         self.assertIn("limit_except POST", relay)
         self.assertIn("location /api/", relay)
         self.assertIn("limit_except GET", relay)
