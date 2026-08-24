@@ -11,16 +11,31 @@ export default function PeriodicTableFilter({
   mode,
   onSelectionChange,
   onModeChange,
+  toolbarContent = null,
+  onReset,
+  resetDisabled,
+  resetLabel = '清空选择',
 }) {
   const available = new Set(availableElements);
+  const isResetDisabled = resetDisabled ?? selectedElements.length === 0;
   return (
     <section className="vasp-periodic-filter" aria-label="元素周期表筛选">
-      <div className="vasp-periodic-toolbar">
+      <div className={`vasp-periodic-toolbar${toolbarContent ? ' has-content' : ''}`}>
         <div className="vasp-segmented-control" role="group" aria-label="元素匹配模式">
           <button type="button" className={mode === 'at_least' ? 'is-active' : ''} aria-pressed={mode === 'at_least'} onClick={() => onModeChange('at_least')}>至少含有所选元素</button>
           <button type="button" className={mode === 'only' ? 'is-active' : ''} aria-pressed={mode === 'only'} onClick={() => onModeChange('only')}>只含所选元素</button>
         </div>
-        <button type="button" onClick={() => onSelectionChange([])} disabled={selectedElements.length === 0}>清空选择</button>
+        {toolbarContent ? (
+          <div className="vasp-periodic-toolbar-content">{toolbarContent}</div>
+        ) : null}
+        <button
+          type="button"
+          className="vasp-periodic-reset"
+          onClick={onReset || (() => onSelectionChange([]))}
+          disabled={isResetDisabled}
+        >
+          {resetLabel}
+        </button>
       </div>
       <div className="vasp-selected-elements" aria-live="polite">
         {selectedElements.length === 0 ? <span>未选择元素</span> : selectedElements.map((symbol) => (

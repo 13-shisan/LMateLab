@@ -105,6 +105,33 @@ test('rendered filter delegates every controlled action', () => {
   assert.deepEqual(selections, [[], [], ['Mo', 'S']]);
 });
 
+test('rendered filter composes optional toolbar content and delegates a full reset', () => {
+  const resets = [];
+  const tree = renderFilter({
+    toolbarContent: 'SEARCH_CONTROL',
+    onReset: () => resets.push('reset'),
+    resetDisabled: false,
+    resetLabel: '重置筛选',
+  });
+  const toolbar = collectElements(
+    tree,
+    (node) => typeof node.props.className === 'string'
+      && node.props.className.includes('vasp-periodic-toolbar'),
+  )[0];
+  const resetButton = collectElements(
+    toolbar,
+    (node) => node.type === 'button' && elementText(node) === '重置筛选',
+  )[0];
+  const toolbarText = elementText(toolbar);
+
+  assert.match(toolbar.props.className, /has-content/);
+  assert.ok(toolbarText.indexOf('至少含有所选元素') < toolbarText.indexOf('SEARCH_CONTROL'));
+  assert.ok(toolbarText.indexOf('SEARCH_CONTROL') < toolbarText.indexOf('重置筛选'));
+  assert.equal(resetButton.props.disabled, false);
+  resetButton.props.onClick();
+  assert.deepEqual(resets, ['reset']);
+});
+
 test('filter owns safe horizontal overflow alignment', () => {
   const css = readFileSync(new URL('../src/pages/db/PeriodicTableFilter.css', import.meta.url), 'utf8');
   const block = css.match(/\.vasp-periodic-filter \.vasp-periodic-scroll\s*\{([^}]*)\}/s)?.[1] || '';
@@ -115,5 +142,10 @@ test('filter owns safe horizontal overflow alignment', () => {
   assert.match(
     css,
     /@media\s*\(max-width:\s*700px\)\s*\{[\s\S]*?\.vasp-periodic-filter \.vasp-periodic-scroll\s*\{[^}]*justify-content:\s*flex-start/s,
+  );
+  assert.match(css, /\.vasp-periodic-toolbar-content\s*\{[^}]*flex:\s*0\s+1\s+480px/s);
+  assert.match(
+    css,
+    /@media\s*\(max-width:\s*700px\)\s*\{[\s\S]*?\.vasp-periodic-toolbar\.has-content\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
   );
 });

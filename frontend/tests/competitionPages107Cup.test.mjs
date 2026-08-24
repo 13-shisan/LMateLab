@@ -159,6 +159,26 @@ test('competition VASP database composes the extracted read-only units', () => {
   assert.doesNotMatch(source, /fetch\s*\(|axios|mutateDatabase|uploadStructure/);
 });
 
+test('competition database keeps query controls above the table and resets every URL filter', () => {
+  const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
+
+  assert.match(
+    source,
+    /const\s+resetDatabaseFilters\s*=\s*useCallback\(\(\)\s*=>\s*\{[\s\S]*?updateUrlState\(\s*\{\s*query:\s*['"]['"],\s*selectedElements:\s*\[\],\s*elementMode:\s*['"]at_least['"]\s*\}[\s\S]*?resetPage:\s*true[\s\S]*?clearRecord:\s*true/s,
+  );
+  assert.match(
+    source,
+    /<PeriodicTableFilter[\s\S]*?toolbarContent=\{[\s\S]*?className="competition-database-search"[\s\S]*?id="competition-database-query"[\s\S]*?onReset=\{resetDatabaseFilters\}[\s\S]*?resetLabel="重置筛选"/s,
+  );
+  assert.match(source, /resetDisabled=\{!query\s*&&\s*selectedElements\.length\s*===\s*0\s*&&\s*elementMode\s*===\s*['"]at_least['"]\}/);
+  assert.doesNotMatch(source, /<\/PeriodicTableFilter>\s*<label\s+className="competition-database-search"/s);
+
+  const css = read('../src/pages/competition/CompetitionPages.css');
+  const searchBlock = css.match(/\.competition-database-search\s*\{([^}]*)\}/s)?.[1] || '';
+  assert.match(searchBlock, /width:\s*100%/);
+  assert.match(searchBlock, /margin:\s*0/);
+});
+
 test('competition database URL state normalizes invalid page mode and elements', () => {
   const source = read('../src/pages/competition/CompetitionVaspDatabase.jsx');
   const validElements = new Set(['H', 'Mo', 'S']);

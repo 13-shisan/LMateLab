@@ -13,6 +13,22 @@
   flex-wrap: wrap;
 }
 
+.vasp-periodic-toolbar.has-content {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+
+.vasp-periodic-toolbar-content {
+  min-width: 240px;
+  max-width: 480px;
+  flex: 0 1 480px;
+}
+
+.vasp-periodic-toolbar.has-content .vasp-periodic-reset {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 .vasp-segmented-control {
   display: flex;
   max-width: 100%;
@@ -140,6 +156,31 @@
   .vasp-periodic-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .vasp-periodic-toolbar.has-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+  }
+
+  .vasp-periodic-toolbar.has-content .vasp-segmented-control {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .vasp-periodic-toolbar-content {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .vasp-periodic-toolbar.has-content .vasp-periodic-reset {
+    grid-column: 2;
+    grid-row: 1;
+    margin-left: 0;
   }
 
   .vasp-segmented-control {
