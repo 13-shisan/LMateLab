@@ -96,6 +96,14 @@ class PotcarPolicyTests(unittest.TestCase):
         self.assertEqual("1.5.1", result["vaspkit_version"])
         self.assertEqual(len(self.potcar), result["size_bytes"])
 
+    def test_legacy_attempt_without_resolution_evidence_remains_valid(self):
+        self.write_valid_inputs()
+
+        result = validate_potcar(self.root)
+
+        self.assertEqual(["Mo_sv", "S"], result["spec_symbols"])
+        self.assertEqual(["Mo_sv", "S"], result["symbols"])
+
     def test_potcar_accepts_title_records_with_leading_ascii_whitespace(self):
         self.potcar = (
             b"   TITEL  = PAW_PBE Mo_sv 02Feb2006\n"
@@ -1076,6 +1084,30 @@ class ScientificAcceptanceTests(unittest.TestCase):
         if stage == "dos":
             self.write("KPOINTS", self.dos_kpoints)
             self.write("INCAR", b"SYSTEM = MoS2 DOS\nNEDOS = 3000\n")
+
+    def write_ws2_potcar_outputs(
+        self,
+        *,
+        resolved: bytes | None = b"W_sv\nS\n",
+        source_symbols: tuple[str, str] = ("W_sv", "S"),
+    ) -> bytes:
+        self.write_complete_outputs("scf")
+        potcar = (
+            b"TITEL  = PAW_PBE W_sv 06Sep2000\n"
+            b"TITEL  = PAW_PBE S 06Sep2000\n"
+        )
+        self.write("POTCAR.spec", b"W\nS\n")
+        if resolved is not None:
+            self.write("POTCAR.resolved", resolved)
+        self.write("POTCAR", potcar)
+        self.write(
+            "potcar-source-sha256.txt",
+            (
+                f"{'c' * 64}  {source_symbols[0]}\n"
+                f"{'b' * 64}  {source_symbols[1]}\n"
+            ).encode("ascii"),
+        )
+        return potcar
 
     @staticmethod
     def fake_vasprun(*, electronic=True, ionic=True, efermi=1.25, parameters=None):
@@ -2112,17 +2144,7 @@ class ScientificAcceptanceTests(unittest.TestCase):
         self.assertEqual("electronic_not_converged", report.reason_code)
 
     def test_accepts_runtime_derived_ws2_potcar_contract(self):
-        self.write_complete_outputs("scf")
-        ws_potcar = (
-            b"TITEL  = PAW_PBE W 08Apr2002\n"
-            b"TITEL  = PAW_PBE S 06Sep2000\n"
-        )
-        self.write("POTCAR.spec", b"W\nS\n")
-        self.write("POTCAR", ws_potcar)
-        self.write(
-            "potcar-source-sha256.txt",
-            f"{'c' * 64}  W\n{'b' * 64}  S\n".encode("ascii"),
-        )
+        ws_potcar = self.write_ws2_potcar_outputs()
 
         report = accept_vasp_attempt(
             self.root,
@@ -2134,10 +2156,58 @@ class ScientificAcceptanceTests(unittest.TestCase):
         )
 
         self.assertTrue(report.accepted, report.as_dict())
+        self.assertIn(
+            "POTCAR.resolved", {item["name"] for item in report.artifacts}
+        )
         self.assertEqual(
             hashlib.sha256(ws_potcar).hexdigest(),
             next(item for item in report.artifacts if item["name"] == "POTCAR")["sha256"],
         )
+
+    def test_runtime_derived_potcar_requires_resolution_evidence(self):
+        self.write_ws2_potcar_outputs(resolved=None)
+
+        report = accept_vasp_attempt(
+            self.root,
+            "scf",
+            scheduler_state="COMPLETED",
+            scheduler_exit_code="0:0",
+            vasprun_loader=lambda _path: self.fake_vasprun(),
+            structure_loader=lambda _path: object(),
+        )
+
+        self.assertFalse(report.accepted)
+        self.assertEqual("potcar_resolution_invalid", report.reason_code)
+
+    def test_runtime_derived_potcar_rejects_resolved_element_mismatch(self):
+        for resolved in (b"P\nS\n", b"S\nW_sv\n"):
+            with self.subTest(resolved=resolved):
+                self.write_ws2_potcar_outputs(resolved=resolved)
+                report = accept_vasp_attempt(
+                    self.root,
+                    "scf",
+                    scheduler_state="COMPLETED",
+                    scheduler_exit_code="0:0",
+                    vasprun_loader=lambda _path: self.fake_vasprun(),
+                    structure_loader=lambda _path: object(),
+                )
+                self.assertFalse(report.accepted)
+                self.assertEqual("potcar_resolution_invalid", report.reason_code)
+
+    def test_runtime_derived_potcar_rejects_requested_source_labels(self):
+        self.write_ws2_potcar_outputs(source_symbols=("W", "S"))
+
+        report = accept_vasp_attempt(
+            self.root,
+            "scf",
+            scheduler_state="COMPLETED",
+            scheduler_exit_code="0:0",
+            vasprun_loader=lambda _path: self.fake_vasprun(),
+            structure_loader=lambda _path: object(),
+        )
+
+        self.assertFalse(report.accepted)
+        self.assertEqual("potcar_source_evidence_invalid", report.reason_code)
 
     def test_relax_requires_ionic_convergence(self):
         self.write_complete_outputs("relax")

@@ -76,6 +76,7 @@ attempt_directory=$PWD
 scratch="$PWD/.vasp-stage-runtime"
 common_evidence=(
   POTCAR
+  POTCAR.resolved
   potcar-source-sha256.txt
   vaspkit-version.txt
   vasp-exit-code.txt
@@ -124,19 +125,6 @@ for name in "${input_names[@]}"; do
 done
 cd -- "$scratch"
 
-potcar_root=/home/scc/pb23030683/POTCAR/PBE
-: > potcar-source-sha256.txt
-: > expected-POTCAR
-for symbol in "${potcar_symbols[@]}"; do
-  source_potcar="$potcar_root/$symbol/POTCAR"
-  test -f "$source_potcar"
-  test ! -L "$source_potcar"
-  source_sha=$(sha256sum "$source_potcar" | awk '{print $1}')
-  [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
-  printf '%s  %s\n' "$source_sha" "$symbol" >> potcar-source-sha256.txt
-  cat -- "$source_potcar" >> expected-POTCAR
-done
-
 /home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103 \
   2>&1 | tee vaspkit-potcar-output.txt
 vaspkit_banner='VASPKIT Standard Edition 1.5.1'
@@ -149,19 +137,42 @@ test "${#vaspkit_markers[@]}" -eq 1
 test "${vaspkit_markers[0]}" = "$vaspkit_banner"
 printf '%s\n' "$vaspkit_banner" > vaspkit-version.txt
 rm -- vaspkit-potcar-output.txt
+mapfile -t potcar_titles < <(sed -n 's/^[[:space:]]*TITEL[[:space:]]*=[[:space:]]*//p' POTCAR)
+test "${#potcar_titles[@]}" -eq "${#potcar_symbols[@]}"
+
+potcar_root=/home/scc/pb23030683/POTCAR/PBE
+: > POTCAR.resolved
+: > potcar-source-sha256.txt
+: > expected-POTCAR
+resolved_symbols=()
+for index in "${!potcar_symbols[@]}"; do
+  title=${potcar_titles[$index]}
+  requested_symbol=${potcar_symbols[$index]}
+  read -r potential_family resolved_symbol title_suffix <<< "$title"
+  test "$potential_family" = PAW_PBE
+  [[ "$resolved_symbol" =~ ^[A-Z][a-z]?(_[A-Za-z0-9]+)?$ ]] || exit 64
+  test -n "$title_suffix"
+  test "${resolved_symbol%%_*}" = "${poscar_elements[$index]}"
+  test "${requested_symbol%%_*}" = "${resolved_symbol%%_*}"
+  resolved_symbols+=("$resolved_symbol")
+  printf '%s\n' "$resolved_symbol" >> POTCAR.resolved
+
+  source_potcar="$potcar_root/$resolved_symbol/POTCAR"
+  test -f "$source_potcar"
+  test ! -L "$source_potcar"
+  source_sha=$(sha256sum "$source_potcar" | awk '{print $1}')
+  [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
+  printf '%s  %s\n' "$source_sha" "$resolved_symbol" >> potcar-source-sha256.txt
+  cat -- "$source_potcar" >> expected-POTCAR
+done
+
 cmp --silent -- expected-POTCAR POTCAR
 rm -- expected-POTCAR
 potcar_sha=$(sha256sum POTCAR | cut -d ' ' -f 1)
 [[ "$potcar_sha" =~ ^[0-9a-f]{64}$ ]]
-mapfile -t potcar_titles < <(sed -n 's/^[[:space:]]*TITEL[[:space:]]*=[[:space:]]*//p' POTCAR)
-test "${#potcar_titles[@]}" -eq "${#potcar_symbols[@]}"
-for index in "${!potcar_symbols[@]}"; do
-  title=${potcar_titles[$index]}
-  symbol=${potcar_symbols[$index]}
-  [[ "$title" == "PAW_PBE $symbol" || "$title" == "PAW_PBE $symbol "* ]]
-done
 
 if test "${potcar_symbols[*]}" = 'Mo_sv S'; then
+  test "${resolved_symbols[*]}" = 'Mo_sv S'
   test "$(sed -n '1s/ .*//p' potcar-source-sha256.txt)" = 2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa
   test "$(sed -n '2s/ .*//p' potcar-source-sha256.txt)" = 0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132
   test "$potcar_sha" = 509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045

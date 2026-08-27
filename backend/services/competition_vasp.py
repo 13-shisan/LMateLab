@@ -77,6 +77,7 @@ _POTCAR_ACCEPTANCE_EVIDENCE: Final = (
     "POTCAR",
     "potcar-source-sha256.txt",
 )
+_POTCAR_RESOLUTION_EVIDENCE: Final = "POTCAR.resolved"
 _FIXED_ACCEPTANCE_CHECK_NAMES: Final = frozenset(
     {
         "stage",
@@ -108,6 +109,7 @@ _ACCEPTANCE_ARTIFACT_NAMES: Final = frozenset(
     (
         *_COMMON_ACCEPTANCE_EVIDENCE,
         *_POTCAR_ACCEPTANCE_EVIDENCE,
+        _POTCAR_RESOLUTION_EVIDENCE,
         "KPOINTS",
         "INCAR",
         "BAND_PATH.policy",
@@ -314,18 +316,35 @@ class PotcarContract:
     source_sha256: tuple[str, ...]
     combined_sha256: str
     vaspkit_version: str
+    spec_symbols: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("symbols", "titles", "source_sha256"):
             object.__setattr__(self, field_name, _owned_string_tuple(field_name, getattr(self, field_name)))
+        spec_symbols = (
+            self.symbols
+            if self.spec_symbols is None
+            else _owned_string_tuple("spec_symbols", self.spec_symbols)
+        )
+        object.__setattr__(self, "spec_symbols", spec_symbols)
         expected_count = len(self.symbols)
         if expected_count == 0 or any(
             len(values) != expected_count
-            for values in (self.titles, self.source_sha256)
+            for values in (self.titles, self.source_sha256, self.spec_symbols)
         ):
             raise ValueError("POTCAR contract entries must have equal nonzero lengths")
-        if any(not _SYMBOL_RE.fullmatch(symbol) for symbol in self.symbols):
+        if any(
+            not _SYMBOL_RE.fullmatch(symbol)
+            for symbol in (*self.symbols, *self.spec_symbols)
+        ):
             raise ValueError("POTCAR contract symbols are invalid")
+        if any(
+            requested.split("_", 1)[0] != resolved.split("_", 1)[0]
+            for requested, resolved in zip(
+                self.spec_symbols, self.symbols, strict=True
+            )
+        ):
+            raise ValueError("POTCAR requested and resolved elements do not match")
         if any(not title or "\n" in title or "\r" in title for title in self.titles):
             raise ValueError("POTCAR contract titles are invalid")
         if any(not _SHA256_RE.fullmatch(digest) for digest in self.source_sha256):
@@ -448,9 +467,13 @@ def validate_potcar(
     root_identity = _validate_attempt_directory(root)
     with ExitStack() as resources:
         directory_fd = _open_attempt_directory(root, root_identity, resources)
+        names = list(_REQUIRED_FILES)
+        resolved_path = root / _POTCAR_RESOLUTION_EVIDENCE
+        if resolved_path.exists() or resolved_path.is_symlink():
+            names.append(_POTCAR_RESOLUTION_EVIDENCE)
         files = {
             name: _open_required_file(root, name, directory_fd, resources)
-            for name in _REQUIRED_FILES
+            for name in names
         }
         effective_contract = contract or _derive_potcar_contract(files)
         result = _validate_opened_potcar(files, effective_contract)
@@ -471,14 +494,45 @@ def _derive_potcar_contract(
     except UnicodeDecodeError:
         raise VaspPolicyError("potcar_spec_invalid", "POTCAR specification is invalid") from None
 
-    symbols = tuple(spec_text.splitlines())
+    requested_symbols = tuple(spec_text.splitlines())
     if (
-        not 1 <= len(symbols) <= 16
-        or len(set(symbols)) != len(symbols)
-        or any(_SYMBOL_RE.fullmatch(symbol) is None for symbol in symbols)
-        or spec_text != "".join(f"{symbol}\n" for symbol in symbols)
+        not 1 <= len(requested_symbols) <= 16
+        or len(set(requested_symbols)) != len(requested_symbols)
+        or any(_SYMBOL_RE.fullmatch(symbol) is None for symbol in requested_symbols)
+        or spec_text != "".join(f"{symbol}\n" for symbol in requested_symbols)
     ):
         raise VaspPolicyError("potcar_spec_invalid", "POTCAR specification is invalid")
+
+    resolved_file = files.get(_POTCAR_RESOLUTION_EVIDENCE)
+    if resolved_file is None:
+        if requested_symbols != DEFAULT_POTCAR_CONTRACT.spec_symbols:
+            raise VaspPolicyError(
+                "potcar_resolution_invalid", "POTCAR resolution evidence is missing"
+            )
+        symbols = requested_symbols
+    else:
+        try:
+            resolved_text = _read_metadata(resolved_file.handle).decode("ascii")
+        except UnicodeDecodeError:
+            raise VaspPolicyError(
+                "potcar_resolution_invalid", "POTCAR resolution evidence is invalid"
+            ) from None
+        symbols = tuple(resolved_text.splitlines())
+        if (
+            len(symbols) != len(requested_symbols)
+            or len(set(symbols)) != len(symbols)
+            or any(_SYMBOL_RE.fullmatch(symbol) is None for symbol in symbols)
+            or resolved_text != "".join(f"{symbol}\n" for symbol in symbols)
+            or any(
+                requested.split("_", 1)[0] != resolved.split("_", 1)[0]
+                for requested, resolved in zip(
+                    requested_symbols, symbols, strict=True
+                )
+            )
+        ):
+            raise VaspPolicyError(
+                "potcar_resolution_invalid", "POTCAR resolution evidence is invalid"
+            )
 
     evidence_lines = evidence_text.splitlines()
     if len(evidence_lines) != len(symbols):
@@ -496,7 +550,10 @@ def _derive_potcar_contract(
             )
         source_sha256.append(match.group(1))
 
-    if symbols == DEFAULT_POTCAR_CONTRACT.symbols:
+    if (
+        requested_symbols == DEFAULT_POTCAR_CONTRACT.spec_symbols
+        and symbols == DEFAULT_POTCAR_CONTRACT.symbols
+    ):
         return DEFAULT_POTCAR_CONTRACT
 
     potcar = files["POTCAR"]
@@ -508,6 +565,7 @@ def _derive_potcar_contract(
         source_sha256=tuple(source_sha256),
         combined_sha256=combined_sha256,
         vaspkit_version="1.5.1",
+        spec_symbols=requested_symbols,
     )
 
 
@@ -518,11 +576,29 @@ def _validate_opened_potcar(
     for opened in files.values():
         _rewind(opened.handle)
 
-    expected_spec = b"".join(symbol.encode("ascii") + b"\n" for symbol in contract.symbols)
+    expected_spec = b"".join(
+        symbol.encode("ascii") + b"\n" for symbol in contract.spec_symbols
+    )
     if _read_metadata(files["POTCAR.spec"].handle) != expected_spec:
         raise VaspPolicyError(
             "potcar_spec_invalid", "POTCAR specification does not match policy"
         )
+
+    resolved_file = files.get(_POTCAR_RESOLUTION_EVIDENCE)
+    if contract.spec_symbols != contract.symbols:
+        if resolved_file is None:
+            raise VaspPolicyError(
+                "potcar_resolution_invalid", "POTCAR resolution evidence is missing"
+            )
+    if resolved_file is not None:
+        expected_resolved = b"".join(
+            symbol.encode("ascii") + b"\n" for symbol in contract.symbols
+        )
+        if _read_metadata(resolved_file.handle) != expected_resolved:
+            raise VaspPolicyError(
+                "potcar_resolution_invalid",
+                "POTCAR resolution evidence does not match policy",
+            )
 
     evidence = _read_metadata(files["potcar-source-sha256.txt"].handle)
     expected_evidence = b"".join(
@@ -553,6 +629,7 @@ def _validate_opened_potcar(
         "sha256": digest,
         "titles": list(contract.titles),
         "symbols": list(contract.symbols),
+        "spec_symbols": list(contract.spec_symbols),
         "source_sha256": list(contract.source_sha256),
         "vaspkit_version": contract.vaspkit_version,
         "size_bytes": potcar.size_bytes,
@@ -615,10 +692,16 @@ def _passed_check(checks: list[dict[str, object]], name: str) -> None:
     checks.append({"name": name, "passed": True})
 
 
-def _acceptance_evidence_names(stage: str, generated_band_path: bool = False) -> tuple[str, ...]:
+def _acceptance_evidence_names(
+    stage: str,
+    generated_band_path: bool = False,
+    resolved_potcar: bool = False,
+) -> tuple[str, ...]:
     names = set(STAGE_REQUIRED_OUTPUTS[stage])
     names.update(_COMMON_ACCEPTANCE_EVIDENCE)
     names.update(_POTCAR_ACCEPTANCE_EVIDENCE)
+    if resolved_potcar:
+        names.add(_POTCAR_RESOLUTION_EVIDENCE)
     if stage == "band":
         names.add("KPOINTS")
         if generated_band_path:
@@ -633,6 +716,7 @@ def _acceptance_size_limit(name: str) -> int:
         "INCAR",
         "KPOINTS",
         "POTCAR.spec",
+        "POTCAR.resolved",
         "potcar-source-sha256.txt",
         "runtime-time.txt",
         "vasp-exit-code.txt",
@@ -1375,6 +1459,10 @@ def accept_vasp_attempt(
     generated_band_path = stage == "band" and (
         band_policy_path.exists() or band_policy_path.is_symlink()
     )
+    resolved_potcar_path = root / _POTCAR_RESOLUTION_EVIDENCE
+    resolved_potcar = (
+        resolved_potcar_path.exists() or resolved_potcar_path.is_symlink()
+    )
     try:
         root_identity = _validate_attempt_directory(root)
     except VaspPolicyError as error:
@@ -1393,7 +1481,9 @@ def accept_vasp_attempt(
                 measurements=measurements, artifacts=artifacts,
             )
         opened_files: dict[str, _OpenedAcceptanceEvidence] = {}
-        for name in _acceptance_evidence_names(stage, generated_band_path):
+        for name in _acceptance_evidence_names(
+            stage, generated_band_path, resolved_potcar
+        ):
             try:
                 opened = _open_acceptance_evidence(root, name, directory_fd, resources)
                 artifact = _hash_opened_evidence(opened)
@@ -1426,8 +1516,11 @@ def accept_vasp_attempt(
         _passed_check(checks, "vasp_exit_code")
 
         try:
+            potcar_file_names = list(_REQUIRED_FILES)
+            if resolved_potcar:
+                potcar_file_names.append(_POTCAR_RESOLUTION_EVIDENCE)
             effective_potcar_contract = potcar_contract or _derive_potcar_contract(
-                {name: opened_files[name] for name in _REQUIRED_FILES}
+                {name: opened_files[name] for name in potcar_file_names}
             )
             vaspkit_text = _decode_metadata(
                 _read_acceptance_metadata(opened_files["vaspkit-version.txt"])
@@ -1444,9 +1537,11 @@ def accept_vasp_attempt(
         _passed_check(checks, "vaspkit_version")
 
         try:
-            potcar_files = {name: opened_files[name] for name in _REQUIRED_FILES}
+            potcar_files = {
+                name: opened_files[name] for name in potcar_file_names
+            }
             _validate_opened_potcar(potcar_files, effective_potcar_contract)
-            for name in _REQUIRED_FILES:
+            for name in potcar_file_names:
                 current_artifact = _hash_opened_evidence(opened_files[name])
                 if current_artifact != artifacts_by_name[name]:
                     raise VaspPolicyError("evidence_changed", "required evidence changed")

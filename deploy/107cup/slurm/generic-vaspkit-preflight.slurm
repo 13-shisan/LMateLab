@@ -39,19 +39,6 @@ Direct
 EOF
 printf '%s\n' W S > POTCAR.spec
 
-potcar_root=/home/scc/pb23030683/POTCAR/PBE
-: > potcar-source-sha256.txt
-: > expected-POTCAR
-for symbol in W S; do
-  source_potcar="$potcar_root/$symbol/POTCAR"
-  test -f "$source_potcar"
-  test ! -L "$source_potcar"
-  source_sha=$(sha256sum "$source_potcar" | awk '{print $1}')
-  [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
-  printf '%s  %s\n' "$source_sha" "$symbol" >> potcar-source-sha256.txt
-  cat -- "$source_potcar" >> expected-POTCAR
-done
-
 vaspkit=/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit
 "$vaspkit" -task 103 2>&1 | tee vaspkit-potcar-output.txt
 vaspkit_banner='VASPKIT Standard Edition 1.5.1'
@@ -63,12 +50,33 @@ mapfile -t potcar_markers < <(read_vaspkit_markers vaspkit-potcar-output.txt)
 test "${#potcar_markers[@]}" -eq 1
 test "${potcar_markers[0]}" = "$vaspkit_banner"
 printf '%s\n' "$vaspkit_banner" > vaspkit-version.txt
-cmp --silent -- expected-POTCAR POTCAR
-rm -- expected-POTCAR vaspkit-potcar-output.txt
+
 mapfile -t potcar_titles < <(sed -n 's/^[[:space:]]*TITEL[[:space:]]*=[[:space:]]*//p' POTCAR)
 test "${#potcar_titles[@]}" -eq 2
-[[ "${potcar_titles[0]}" == "PAW_PBE W" || "${potcar_titles[0]}" == "PAW_PBE W "* ]]
-[[ "${potcar_titles[1]}" == "PAW_PBE S" || "${potcar_titles[1]}" == "PAW_PBE S "* ]]
+potcar_root=/home/scc/pb23030683/POTCAR/PBE
+: > POTCAR.resolved
+: > potcar-source-sha256.txt
+: > expected-POTCAR
+poscar_elements=(W S)
+for index in "${!potcar_titles[@]}"; do
+  title=${potcar_titles[$index]}
+  read -r potential_family resolved_symbol title_suffix <<< "$title"
+  test "$potential_family" = PAW_PBE
+  [[ "$resolved_symbol" =~ ^[A-Z][a-z]?(_[A-Za-z0-9]+)?$ ]] || exit 64
+  test -n "$title_suffix"
+  test "${resolved_symbol%%_*}" = "${poscar_elements[$index]}"
+  printf '%s\n' "$resolved_symbol" >> POTCAR.resolved
+  source_potcar="$potcar_root/$resolved_symbol/POTCAR"
+  test -f "$source_potcar"
+  test ! -L "$source_potcar"
+  source_sha=$(sha256sum "$source_potcar" | awk '{print $1}')
+  [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
+  printf '%s  %s\n' "$source_sha" "$resolved_symbol" >> potcar-source-sha256.txt
+  cat -- "$source_potcar" >> expected-POTCAR
+done
+
+cmp --silent -- expected-POTCAR POTCAR
+rm -- expected-POTCAR vaspkit-potcar-output.txt
 
 test ! -e KPATH.in
 "$vaspkit" -task 302 2>&1 | tee vaspkit-band-output.txt

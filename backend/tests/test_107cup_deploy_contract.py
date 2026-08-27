@@ -30,12 +30,13 @@ class VaspStageFixture:
     hashes = {
         "mo": "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
         "s": "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
-        "w": "4a6ad4d6ac7d8dd634ed1bdc7b3755ab56459e57fd15fc9eaa2ed7fd83d32b88",
+        "w_sv": "4a6ad4d6ac7d8dd634ed1bdc7b3755ab56459e57fd15fc9eaa2ed7fd83d32b88",
         "combined": "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
         "ws2_combined": "6ae462127454203c2cbeed53f77335e8586603ca4bf34dd3768a936cf4f11f22",
     }
     evidence_names = (
         "POTCAR",
+        "POTCAR.resolved",
         "potcar-source-sha256.txt",
         "vaspkit-version.txt",
         "vasp-exit-code.txt",
@@ -75,7 +76,7 @@ class VaspStageFixture:
             "SYSTEM = fixture\n", encoding="utf-8", newline="\n"
         )
         self.sources = {}
-        for symbol in ("Mo_sv", "S", "W"):
+        for symbol in ("Mo_sv", "S", "W_sv"):
             source = self.potcar_root / symbol / "POTCAR"
             source.parent.mkdir(mode=0o700)
             source.write_text(
@@ -116,6 +117,9 @@ case "$*" in
   '-task 103')
     : > POTCAR
     while IFS= read -r symbol; do
+      if test "$symbol" = W; then
+        symbol=W_sv
+      fi
       printf 'TITEL  = PAW_PBE %s fixture\n' "$symbol" >> POTCAR
     done < POTCAR.spec
     ;;
@@ -146,9 +150,9 @@ printf '%s\n' "$*" > "$FIXTURE_MARKERS/sha256sum"
 case "$1" in
   "$FIXTURE_MO_SOURCE") printf '%s  %s\n' '{self.hashes["mo"]}' "$1" ;;
   "$FIXTURE_S_SOURCE") printf '%s  %s\n' '{self.hashes["s"]}' "$1" ;;
-  "$FIXTURE_W_SOURCE") printf '%s  %s\n' '{self.hashes["w"]}' "$1" ;;
+  "$FIXTURE_W_SV_SOURCE") printf '%s  %s\n' '{self.hashes["w_sv"]}' "$1" ;;
   POTCAR)
-    if grep -q 'PAW_PBE W ' POTCAR; then
+    if grep -q 'PAW_PBE W_sv ' POTCAR; then
       printf '%s  POTCAR\n' '{self.hashes["ws2_combined"]}'
     else
       printf '%s  POTCAR\n' '{self.hashes["combined"]}'
@@ -348,7 +352,7 @@ exit "$status"
                 "FIXTURE_ATTEMPT": self.attempt.as_posix(),
                 "FIXTURE_MO_SOURCE": self.sources["Mo_sv"].as_posix(),
                 "FIXTURE_S_SOURCE": self.sources["S"].as_posix(),
-                "FIXTURE_W_SOURCE": self.sources["W"].as_posix(),
+                "FIXTURE_W_SV_SOURCE": self.sources["W_sv"].as_posix(),
                 "FIXTURE_PUBLISH_COLLISION": publish_collision or "",
                 "FIXTURE_VASPKIT_OUTPUT": vaspkit_output
                 if vaspkit_output is not None
@@ -743,12 +747,16 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
             "W\nS\n", (self.fixture.attempt / "POTCAR.spec").read_text()
         )
         self.assertEqual(
-            f'{self.fixture.hashes["w"]}  W\n'
+            f'{self.fixture.hashes["w_sv"]}  W_sv\n'
             f'{self.fixture.hashes["s"]}  S\n',
             (self.fixture.attempt / "potcar-source-sha256.txt").read_text(),
         )
         self.assertEqual(
-            ["TITEL  = PAW_PBE W fixture", "TITEL  = PAW_PBE S fixture"],
+            "W_sv\nS\n",
+            (self.fixture.attempt / "POTCAR.resolved").read_text(),
+        )
+        self.assertEqual(
+            ["TITEL  = PAW_PBE W_sv fixture", "TITEL  = PAW_PBE S fixture"],
             (self.fixture.attempt / "POTCAR").read_text().splitlines(),
         )
         kpoints = (self.fixture.attempt / "KPOINTS").read_text()
@@ -1068,14 +1076,14 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "seen_potcar_symbols",
             'test "${symbol%%_*}" = "${poscar_elements[$index]}"',
             "potcar_root=/home/scc/pb23030683/POTCAR/PBE",
-            'source_potcar="$potcar_root/$symbol/POTCAR"',
+            'source_potcar="$potcar_root/$resolved_symbol/POTCAR"',
             'cat -- "$source_potcar" >> expected-POTCAR',
             "cmp --silent -- expected-POTCAR POTCAR",
             "rm -- expected-POTCAR",
             "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
             "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
             "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
-            '"PAW_PBE $symbol"',
+            'test "$potential_family" = PAW_PBE',
             "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103",
             "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 302",
             "BAND_PATH.policy",
@@ -1094,6 +1102,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
         source = self.read_required("slurm/vasp-stage.slurm")
         for evidence_name in (
             "POTCAR",
+            "POTCAR.resolved",
             "potcar-source-sha256.txt",
             "vaspkit-version.txt",
             "vasp-exit-code.txt",
