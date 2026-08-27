@@ -57,6 +57,7 @@ _RUNTIME_RSS_RE: Final = re.compile(
     r"^\s*Maximum resident set size \(kbytes\):\s*(?P<value>\S+)\s*$"
 )
 _INCAR_NEDOS_RE: Final = re.compile(r"^\s*NEDOS\s*=\s*(?P<value>\S+)\s*$")
+_KPOINT_LABEL_RE: Final = re.compile(r"^[A-Za-z][A-Za-z0-9_.+-]{0,63}$", re.ASCII)
 _EFERMI_RE: Final = re.compile(
     r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?$",
     re.ASCII,
@@ -1409,8 +1410,15 @@ def _validate_generated_band_path(
     if len(coordinates) < 2 or len(coordinates) % 2:
         raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
     for line in coordinates:
-        fields = line.split("!", 1)[0].split()
-        if len(fields) != 3:
+        coordinate_text, separator, annotation = line.partition("!")
+        fields = coordinate_text.split()
+        if separator:
+            label = annotation.strip()
+        elif len(fields) == 4:
+            label = fields.pop()
+        else:
+            label = ""
+        if len(fields) != 3 or _KPOINT_LABEL_RE.fullmatch(label) is None:
             raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
         try:
             values = tuple(float(value) for value in fields)
