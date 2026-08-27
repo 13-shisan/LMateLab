@@ -112,20 +112,23 @@ Viewer 必须无法提交、取消、重试或访问敏感文件。已登录的 
 
 ## 8. 通用二维 PBE 输入策略
 
-内置示例继续使用 `mos2_v1` 和既有 `Mo_sv/S` 固定哈希合同。Operator 上传的周期 POSCAR/CIF 使用 `pbe_2d_v1`，服务只把规范元素顺序写入 `POTCAR.spec`，Git、数据库和 API 都不保存 POTCAR 内容或赝势源路径。
+内置示例继续使用 `mos2_v1` 和既有 `Mo_sv/S` 固定哈希合同。Operator 上传的周期 POSCAR/CIF 使用 `pbe_2d_v1`，服务只把规范元素顺序写入 `POTCAR.spec`；VASPKIT 103 在计算节点把实际推荐名写入 `POTCAR.resolved`。Git、数据库和 API 都不保存 POTCAR 内容或赝势源路径。
 
 VASP stage 作业在计算节点内执行以下固定步骤：
 
 ```text
 最终 POSCAR 元素顺序
-  -> /home/scc/pb23030683/POTCAR/PBE/<symbol>/POTCAR
+  -> POTCAR.spec（请求元素，例如 W / S）
   -> VASPKIT 103
-  -> 与源文件顺序拼接结果逐字节核对
-  -> POTCAR + 源哈希 + VASPKIT 版本证据
+  -> POTCAR.resolved（实际推荐赝势，例如 W_sv / S）
+  -> /home/scc/pb23030683/POTCAR/PBE/<resolved>/POTCAR
+  -> 与解析后源文件顺序拼接结果逐字节核对
+  -> POTCAR + 请求/解析映射 + 源哈希 + VASPKIT 版本证据
 
 已验收 SCF POSCAR + CHGCAR
   -> VASPKIT 302
   -> KPATH.in 格式与大小门禁
+  -> 校验真实四列高对称点标签，例如 kx ky kz GAMMA
   -> KPOINTS + band-path-generator.txt
   -> BAND VASP
 ```
