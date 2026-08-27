@@ -17,6 +17,7 @@ from ase import Atoms
 from ase.data import atomic_numbers
 from ase.io import read as ase_read
 from ase.io import write as ase_write
+from pymatgen.core import Element
 
 
 MAX_STRUCTURE_BYTES = 1024 * 1024
@@ -180,7 +181,7 @@ def _validate_and_order_atoms(
     atoms: Atoms,
     source_format: str,
     element_order: list[str],
-) -> Atoms:
+) -> tuple[Atoms, list[str]]:
     symbols = atoms.get_chemical_symbols()
     if not symbols:
         raise InputValidationError("structure contains no atoms")
@@ -203,15 +204,26 @@ def _validate_and_order_atoms(
         ]
         if symbols != expected:
             raise InputValidationError("POSCAR atom groups must follow the element header")
-        return atoms
+        return atoms, element_order
 
+    try:
+        element_order = sorted(
+            set(symbols),
+            key=lambda symbol: (
+                Element(symbol).iupac_ordering,
+                atomic_numbers[symbol],
+                symbol,
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InputValidationError("structure element set is invalid") from exc
     order = [
         index
         for element in element_order
         for index, symbol in enumerate(symbols)
         if symbol == element
     ]
-    return atoms[order]
+    return atoms[order], element_order
 
 
 def _formula_and_counts(symbols: list[str], element_order: list[str]) -> tuple[str, dict[str, int]]:
@@ -258,7 +270,7 @@ def parse_structure_bytes(content: bytes, filename: str) -> ParsedStructure:
     atoms, source_format, element_order = _read_structure(
         text, _preflight_vasp_header(text)
     )
-    atoms = _validate_and_order_atoms(atoms, source_format, element_order)
+    atoms, element_order = _validate_and_order_atoms(atoms, source_format, element_order)
     _validate_geometry(atoms)
     symbols = atoms.get_chemical_symbols()
     formula, counts = _formula_and_counts(symbols, element_order)
