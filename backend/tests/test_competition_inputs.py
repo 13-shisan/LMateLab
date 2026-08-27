@@ -177,13 +177,26 @@ Direct
         self.assertEqual(parsed.original_filename, "uploaded.cif")
         self.assertEqual(parsed.canonical_poscar.splitlines()[5].split(), [b"Mo", b"S"])
 
-    def test_accepts_cif_based_on_content_and_canonicalizes_mo_before_s(self):
+    def test_accepts_cif_and_canonicalizes_iupac_order_independent_of_atom_rows(self):
         parsed = parse_structure_bytes(VALID_CIF, "POSCAR")
+        reordered = parse_structure_bytes(
+            VALID_CIF.replace(
+                b"S1 S 0.333333 0.666667 0.578000\n"
+                b"Mo1 Mo 0.000000 0.000000 0.500000\n"
+                b"S2 S 0.333333 0.666667 0.422000\n",
+                b"Mo1 Mo 0.000000 0.000000 0.500000\n"
+                b"S2 S 0.333333 0.666667 0.422000\n"
+                b"S1 S 0.333333 0.666667 0.578000\n",
+            ),
+            "reordered.cif",
+        )
 
         self.assertEqual(parsed.source_format, "cif")
         self.assertEqual(parsed.summary["formula"], "MoS2")
         self.assertEqual(parsed.summary["elements"], ["Mo", "S"])
         self.assertEqual(parsed.canonical_poscar.splitlines()[5].split(), [b"Mo", b"S"])
+        self.assertEqual(reordered.summary, parsed.summary)
+        self.assertEqual(reordered.canonical_poscar.splitlines()[5].split(), [b"Mo", b"S"])
         reparsed = parse_structure_bytes(parsed.canonical_poscar, "canonical")
         self.assertEqual(reparsed.source_format, "vasp")
         self.assertEqual(reparsed.summary["counts"], {"Mo": 1, "S": 2})

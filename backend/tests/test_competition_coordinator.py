@@ -284,7 +284,14 @@ class CoordinatorTestCase(unittest.TestCase):
                         "source_kind": "builtin",
                         "steps": list(FIXED_STEPS),
                         "template_version": "mos2_v1",
-                    }
+                    },
+                    "structure_summary": {
+                        "atom_count": 3,
+                        "counts": {"Mo": 1, "S": 2},
+                        "elements": ["Mo", "S"],
+                        "formula": "MoS2",
+                        "periodic": [True, True, True],
+                    },
                 },
             )
             session.add(run)
@@ -1030,6 +1037,22 @@ class CompetitionCoordinatorTests(CoordinatorTestCase):
         with self.assertRaises(CoordinatorError) as unvalidated:
             self.coordinator.start(invalid, self.owner_id)
         self.assertEqual("workflow_not_startable", unvalidated.exception.code)
+
+    def test_start_rejects_missing_structure_summary_without_submission(self):
+        workflow_id = self.create_workflow()
+        with self.SessionLocal() as session:
+            run = session.get(WorkflowRun, workflow_id)
+            metadata = json.loads(run.metadata_json)
+            metadata.pop("structure_summary")
+            run.metadata_json = metadata
+            session.commit()
+
+        with self.assertRaises(CoordinatorError) as raised:
+            self.coordinator.start(workflow_id, self.owner_id)
+
+        self.assertEqual("workflow_scope_invalid", raised.exception.code)
+        self.assertEqual(0, self.attempt_count(workflow_id=workflow_id))
+        self.assertEqual([], self.slurm.submitted_steps)
 
     def test_start_revalidates_fixed_material_template_and_source_provenance(self):
         cases = (
