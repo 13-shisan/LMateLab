@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from models_workflow import WorkflowAttempt, WorkflowFile, WorkflowRun, WorkflowStep
+from services.competition_inputs import stage5_input_names
 from services.competition_vasp import FIXED_STAGE_ORDER, VaspPolicyError
 
 
@@ -88,12 +89,6 @@ def _close_handle(handle: BinaryIO) -> None:
         handle.close()
     except OSError:
         pass
-_STAGE5_INPUT_NAMES: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType({
-    "relax": ("INCAR", "KPOINTS", "POSCAR", "POTCAR.spec"),
-    "scf": ("INCAR", "KPOINTS", "POTCAR.spec"),
-    "band": ("INCAR", "KPOINTS", "POTCAR.spec"),
-    "dos": ("INCAR", "KPOINTS", "POTCAR.spec"),
-})
 _PARENT_INPUTS: Final[Mapping[str, tuple[tuple[str, str, str, str], ...]]] = MappingProxyType({
     "relax": (),
     "scf": (("relax", "CONTCAR", "POSCAR", "attempt_output"),),
@@ -421,7 +416,7 @@ def _select_input_sources(
         WorkflowFile.source_kind == "generated",
     )))
     sources: list[_InputSource] = []
-    for filename in _STAGE5_INPUT_NAMES[step.step_key]:
+    for filename in stage5_input_names(workflow.template_version, step.step_key):
         matches = []
         for row in generated:
             metadata = _metadata_object(row.metadata_json, code="stage5_inputs_invalid")
@@ -908,7 +903,9 @@ def _recover_or_return_published(
         )
         if not _same_recovery_rows(rows, expected_rows):
             raise VaspPolicyError("input_publication_mismatch", "attempt publication does not match current lineage")
-        _validate_published_rows(target, rows, step.step_key)
+        _validate_published_rows(
+            target, rows, step.step_key, workflow.template_version
+        )
         if journal.exists():
             payload = _validate_journal_identity(_read_recovery_journal(journal), workflow, step, attempt)
             if not _same_published_journal_rows(payload.get("rows"), rows):
@@ -930,7 +927,7 @@ def _recover_or_return_published(
     # IDs are journal-originated; all other immutable provenance must still match.
     if not _same_recovery_rows(rows, expected_rows):
         raise VaspPolicyError("input_recovery_invalid", "attempt recovery journal does not match current lineage")
-    _validate_published_rows(target, rows, step.step_key)
+    _validate_published_rows(target, rows, step.step_key, workflow.template_version)
     try:
         session.add_all([_workflow_file_from_payload(row) for row in rows])
         _commit_prepared_rows(session)
@@ -1004,8 +1001,13 @@ def _same_published_journal_rows(
     return saved_rows == current_rows
 
 
-def _validate_published_rows(target: Path, rows: tuple[dict[str, Any], ...], step_key: str) -> None:
-    expected_names = _expected_destination_names(step_key)
+def _validate_published_rows(
+    target: Path,
+    rows: tuple[dict[str, Any], ...],
+    step_key: str,
+    template_version: str,
+) -> None:
+    expected_names = _expected_destination_names(step_key, template_version)
     if len(rows) != len(expected_names) or {Path(row.get("relative_path", "")).name for row in rows} != expected_names:
         raise VaspPolicyError("input_publication_mismatch", "attempt input ledger is incomplete")
     expected_prefix = f"{rows[0]['workflow_id']}/attempts/{rows[0]['attempt_id']}/" if rows else ""
@@ -1025,8 +1027,8 @@ def _validate_published_rows(target: Path, rows: tuple[dict[str, Any], ...], ste
         _verify_file_payload(target / Path(row["relative_path"]).name, row)
 
 
-def _expected_destination_names(step_key: str) -> set[str]:
-    return set(_STAGE5_INPUT_NAMES[step_key]) | {
+def _expected_destination_names(step_key: str, template_version: str) -> set[str]:
+    return set(stage5_input_names(template_version, step_key)) | {
         destination
         for _parent, _source, destination, _source_kind in _PARENT_INPUTS[step_key]
     }

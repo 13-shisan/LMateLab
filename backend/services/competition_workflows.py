@@ -34,6 +34,7 @@ from services.competition_inputs import (
     load_template,
     materialize_inputs,
     parse_structure_bytes,
+    template_key,
     validate_draft_payload,
 )
 from services.competition_vasp import render_acceptance_scf_incar
@@ -315,11 +316,23 @@ def _resolve_draft_commit_outcome(
                 .where(WorkflowEvent.workflow_id == run.id)
                 .order_by(WorkflowEvent.sequence)
             ).all()
+            structure_summary = metadata.get("structure_summary")
+            normalized_payload = metadata.get("normalized_payload")
+            expected_material = (
+                structure_summary.get("formula")
+                if isinstance(structure_summary, dict)
+                else None
+            )
+            expected_source_kind = (
+                normalized_payload.get("source_kind")
+                if isinstance(normalized_payload, dict)
+                else None
+            )
             if (
                 run.owner_id != owner_id
                 or run.status != "draft"
-                or run.material != "MoS2"
-                or run.source_kind != "builtin"
+                or run.material != expected_material
+                or run.source_kind != expected_source_kind
                 or run.release_commit != release_commit
                 or run.input_sha256 != input_sha256
                 or _metadata(run.metadata_json) != metadata
@@ -459,7 +472,7 @@ def _create_draft_common(
             id=str(uuid.uuid4()),
             owner_id=owner_id,
             template_version=validated["template_version"],
-            material="MoS2",
+            material=materialized["structure_summary"]["formula"],
             source_kind=validated["source_kind"],
             status="draft",
             release_commit=release_commit,
@@ -472,16 +485,17 @@ def _create_draft_common(
                     "upload_unavailable", "structure upload is unavailable"
                 )
         template_definition = load_template(validated["template_version"])
+        key = template_key(validated["template_version"])
         template_row = session.scalar(
             select(WorkflowTemplate).where(
-                WorkflowTemplate.template_key == "mos2",
+                WorkflowTemplate.template_key == key,
                 WorkflowTemplate.version == validated["template_version"],
             )
         )
         if template_row is None:
             session.add(
                 WorkflowTemplate(
-                    template_key="mos2",
+                    template_key=key,
                     version=validated["template_version"],
                     definition_json=template_definition,
                 )
@@ -688,9 +702,10 @@ def _reload_owned_workflow(
 
 def _validate_workflow(session: Session, root: Path, run: WorkflowRun) -> None:
     template = load_template(run.template_version)
+    key = template_key(run.template_version)
     template_row = session.scalar(
         select(WorkflowTemplate).where(
-            WorkflowTemplate.template_key == "mos2",
+            WorkflowTemplate.template_key == key,
             WorkflowTemplate.version == run.template_version,
         )
     )
@@ -706,6 +721,12 @@ def _validate_workflow(session: Session, root: Path, run: WorkflowRun) -> None:
         raise WorkflowServiceError("invalid_template", "workflow template is invalid")
     if validated["source_kind"] != run.source_kind:
         raise WorkflowServiceError("invalid_metadata", "workflow metadata is invalid")
+    structure_summary = metadata.get("structure_summary")
+    if (
+        not isinstance(structure_summary, dict)
+        or structure_summary.get("formula") != run.material
+    ):
+        raise WorkflowServiceError("invalid_metadata", "workflow material is invalid")
 
     steps = session.scalars(
         select(WorkflowStep)

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class DraftCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    template_version: Literal["mos2_v1"]
+    template_version: Literal["mos2_v1", "pbe_2d_v1"]
     source_kind: Literal["builtin", "upload"]
     steps: list[str]
     parameters: dict[str, dict[str, int | float]]

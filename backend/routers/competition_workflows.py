@@ -330,6 +330,32 @@ def _raise_service_error(exc: WorkflowServiceError) -> None:
     ) from None
 
 
+def _raise_input_error(exc: InputValidationError) -> None:
+    message = str(exc).lower()
+    rules = (
+        (("1 mib",), "structure_file_too_large", "结构文件超过 1 MiB 限制"),
+        (("200 atoms", "exceeds 200 atoms"), "structure_atom_limit", "结构超过 200 个原子限制"),
+        (("filename", "path components"), "structure_filename_invalid", "结构文件名不符合安全要求"),
+        (("element", "potcar"), "structure_elements_invalid", "结构元素或元素顺序无效"),
+        (("periodic", "cell", "positions", "geometry"), "structure_geometry_invalid", "结构晶格或原子坐标无效"),
+        (("utf-8", "binary", "empty"), "structure_content_invalid", "结构文件必须是非空 UTF-8 文本"),
+        (("parsed as vasp or cif", "missing the element header"), "structure_format_invalid", "无法按 POSCAR 或 CIF 解析结构"),
+        (("template", "uploaded structure"), "workflow_template_invalid", "结构来源与计算模板不匹配"),
+    )
+    code = "workflow_input_invalid"
+    detail = "请求内容未通过工作流校验"
+    for terms, candidate_code, candidate_detail in rules:
+        if any(term in message for term in terms):
+            code = candidate_code
+            detail = candidate_detail
+            break
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=detail,
+        headers={"X-Error-Code": code},
+    ) from None
+
+
 def _raise_command_error(exc: Exception) -> None:
     if isinstance(exc, SlurmError):
         code = "scheduler_unavailable"
@@ -454,7 +480,7 @@ async def upload_structure(
             filename=file.filename or "",
         )
     except InputValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
+        _raise_input_error(exc)
     except WorkflowServiceError as exc:
         _raise_service_error(exc)
     except Exception:
@@ -485,7 +511,7 @@ def save_draft(
             release_commit=release_commit(),
         )
     except InputValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
+        _raise_input_error(exc)
     except WorkflowServiceError as exc:
         _raise_service_error(exc)
     except Exception:
@@ -509,7 +535,7 @@ def submit_workflow(
     except (InputValidationError, WorkflowServiceError) as exc:
         if isinstance(exc, WorkflowServiceError):
             _raise_service_error(exc)
-        raise HTTPException(status_code=422, detail=str(exc)) from None
+        _raise_input_error(exc)
     except Exception:
         raise HTTPException(status_code=500, detail="workflow service unavailable") from None
     return result.model_dump(mode="json")

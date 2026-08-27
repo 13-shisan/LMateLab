@@ -30,7 +30,9 @@ class VaspStageFixture:
     hashes = {
         "mo": "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
         "s": "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
+        "w": "4a6ad4d6ac7d8dd634ed1bdc7b3755ab56459e57fd15fc9eaa2ed7fd83d32b88",
         "combined": "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
+        "ws2_combined": "6ae462127454203c2cbeed53f77335e8586603ca4bf34dd3768a936cf4f11f22",
     }
     evidence_names = (
         "POTCAR",
@@ -66,22 +68,21 @@ class VaspStageFixture:
             / "attempts"
             / VALID_ATTEMPT_ID
         )
-        self.dependencies = self.root / "dependencies"
-        for directory in (self.bin, self.markers, self.attempt, self.dependencies):
+        self.potcar_root = self.root / "PBE"
+        for directory in (self.bin, self.markers, self.attempt, self.potcar_root):
             directory.mkdir(parents=True, exist_ok=True)
-        (self.attempt / "POTCAR.spec").write_text(
-            "Mo_sv\nS\n", encoding="utf-8", newline="\n"
+        (self.attempt / "INCAR").write_text(
+            "SYSTEM = fixture\n", encoding="utf-8", newline="\n"
         )
-        for name, content in (
-            ("INCAR", "SYSTEM = MoS2 fixture\n"),
-            ("KPOINTS", "fixture mesh\n0\nGamma\n1 1 1\n0 0 0\n"),
-            ("POSCAR", "MoS2 fixture\n"),
-        ):
-            (self.attempt / name).write_text(content, encoding="utf-8", newline="\n")
-        self.mo_source = self.dependencies / "Mo_sv.POTCAR"
-        self.s_source = self.dependencies / "S.POTCAR"
-        self.mo_source.write_text("Mo fixture\n", encoding="utf-8")
-        self.s_source.write_text("S fixture\n", encoding="utf-8")
+        self.sources = {}
+        for symbol in ("Mo_sv", "S", "W"):
+            source = self.potcar_root / symbol / "POTCAR"
+            source.parent.mkdir(mode=0o700)
+            source.write_text(
+                f"TITEL  = PAW_PBE {symbol} fixture\n", encoding="utf-8"
+            )
+            self.sources[symbol] = source
+        self._configure_inputs(generic=False, stage="scf")
         self._write_stubs()
         self._rewrite_runner()
 
@@ -110,8 +111,29 @@ module() {
             """
 #!/bin/bash
 set -euo pipefail
-printf '%s\n' "$*" > "$FIXTURE_MARKERS/vaspkit"
-printf '%s\n' 'TITEL  = PAW_PBE Mo_sv 02Feb2006' 'TITEL  = PAW_PBE S 06Sep2000' > POTCAR
+printf '%s\n' "$*" >> "$FIXTURE_MARKERS/vaspkit"
+case "$*" in
+  '-task 103')
+    : > POTCAR
+    while IFS= read -r symbol; do
+      printf 'TITEL  = PAW_PBE %s fixture\n' "$symbol" >> POTCAR
+    done < POTCAR.spec
+    ;;
+  '-task 302')
+    cat > KPATH.in <<'EOF'
+WS2 generated path
+20
+Line-mode
+Reciprocal
+0.000000 0.000000 0.000000 ! G
+0.500000 0.000000 0.000000 ! M
+
+0.500000 0.000000 0.000000 ! M
+0.333333 0.333333 0.000000 ! K
+EOF
+    ;;
+  *) exit 64 ;;
+esac
 printf '%s' "$FIXTURE_VASPKIT_OUTPUT"
 """,
         )
@@ -124,7 +146,14 @@ printf '%s\n' "$*" > "$FIXTURE_MARKERS/sha256sum"
 case "$1" in
   "$FIXTURE_MO_SOURCE") printf '%s  %s\n' '{self.hashes["mo"]}' "$1" ;;
   "$FIXTURE_S_SOURCE") printf '%s  %s\n' '{self.hashes["s"]}' "$1" ;;
-  POTCAR) printf '%s  POTCAR\n' '{self.hashes["combined"]}' ;;
+  "$FIXTURE_W_SOURCE") printf '%s  %s\n' '{self.hashes["w"]}' "$1" ;;
+  POTCAR)
+    if grep -q 'PAW_PBE W ' POTCAR; then
+      printf '%s  POTCAR\n' '{self.hashes["ws2_combined"]}'
+    else
+      printf '%s  POTCAR\n' '{self.hashes["combined"]}'
+    fi
+    ;;
   *) exit 64 ;;
 esac
 """,
@@ -205,8 +234,7 @@ exit "$status"
             "/etc/profile.d/modules.sh": self.modules,
             "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit": self.bin
             / "vaspkit",
-            "/home/scc/pb23030683/POTCAR/PBE/Mo_sv/POTCAR": self.mo_source,
-            "/home/scc/pb23030683/POTCAR/PBE/S/POTCAR": self.s_source,
+            "/home/scc/pb23030683/POTCAR/PBE": self.potcar_root,
             "/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh": self.bin
             / "env-nvhpc.sh",
             "/usr/bin/scontrol": self.bin / "scontrol",
@@ -215,15 +243,59 @@ exit "$status"
         self.rewrites = []
         rewritten = self.original_source
         for original, replacement_path in dependencies.items():
-            if rewritten.count(original) != 1:
+            occurrence_count = rewritten.count(original)
+            if occurrence_count < 1:
                 raise AssertionError(f"fixed dependency occurrence changed: {original}")
             replacement = shlex.quote(replacement_path.as_posix())
             rewritten = rewritten.replace(original, replacement)
-            self.rewrites.append((original, replacement))
+            self.rewrites.append((original, replacement, occurrence_count))
         self.rewritten_source = rewritten
         self.runner = self.root / "vasp-stage.fixture.slurm"
         self.runner.write_text(rewritten, encoding="utf-8", newline="\n")
         self.runner.chmod(0o700)
+
+    def _configure_inputs(self, *, generic, stage):
+        if generic:
+            title = "WS2 fixture"
+            elements = "W S"
+            spec = "W\nS\n"
+        else:
+            title = "MoS2 fixture"
+            elements = "Mo S"
+            spec = "Mo_sv\nS\n"
+        poscar = (
+            f"{title}\n"
+            "1.0\n"
+            "3.2 0.0 0.0\n"
+            "-1.6 2.771281292 0.0\n"
+            "0.0 0.0 20.0\n"
+            f"{elements}\n"
+            "1 2\n"
+            "Direct\n"
+            "0.0 0.0 0.5\n"
+            "0.333333 0.666667 0.58\n"
+            "0.333333 0.666667 0.42\n"
+        )
+        (self.attempt / "POSCAR").write_text(
+            poscar, encoding="utf-8", newline="\n"
+        )
+        (self.attempt / "POTCAR.spec").write_text(
+            spec, encoding="utf-8", newline="\n"
+        )
+        if generic and stage == "band":
+            (self.attempt / "KPOINTS").unlink(missing_ok=True)
+            (self.attempt / "BAND_PATH.policy").write_text(
+                '{"generator":"vaspkit","task":302,"version":1}\n',
+                encoding="utf-8",
+                newline="\n",
+            )
+        else:
+            (self.attempt / "BAND_PATH.policy").unlink(missing_ok=True)
+            (self.attempt / "KPOINTS").write_text(
+                "fixture mesh\n0\nGamma\n1 1 1\n0 0 0\n",
+                encoding="utf-8",
+                newline="\n",
+            )
 
     def run(
         self,
@@ -235,12 +307,21 @@ exit "$status"
         slurm_values=None,
         unset=(),
         preserve=(),
+        generic=False,
         **arguments,
     ):
         shutil.rmtree(self.attempt / ".vasp-stage-runtime", ignore_errors=True)
         for path in (
             *self.markers.iterdir(),
-            *(self.attempt / n for n in (*self.evidence_names, *self.stage_output_names)),
+            *(
+                self.attempt / n
+                for n in (
+                    *self.evidence_names,
+                    *self.stage_output_names,
+                    "band-path-generator.txt",
+                    "KPOINTS",
+                )
+            ),
         ):
             if path.name not in preserve and (path.exists() or path.is_symlink()):
                 path.unlink()
@@ -250,6 +331,7 @@ exit "$status"
             "attempt_id": VALID_ATTEMPT_ID,
             **arguments,
         }
+        self._configure_inputs(generic=generic, stage=values["stage"])
         if values["stage"] in {"band", "dos"}:
             (self.attempt / "CHGCAR").write_bytes(b"fixed SCF charge input\n")
         environment = os.environ.copy()
@@ -264,8 +346,9 @@ exit "$status"
                 "FIXTURE_BIN": self.bin.as_posix(),
                 "FIXTURE_MARKERS": self.markers.as_posix(),
                 "FIXTURE_ATTEMPT": self.attempt.as_posix(),
-                "FIXTURE_MO_SOURCE": self.mo_source.as_posix(),
-                "FIXTURE_S_SOURCE": self.s_source.as_posix(),
+                "FIXTURE_MO_SOURCE": self.sources["Mo_sv"].as_posix(),
+                "FIXTURE_S_SOURCE": self.sources["S"].as_posix(),
+                "FIXTURE_W_SOURCE": self.sources["W"].as_posix(),
                 "FIXTURE_PUBLISH_COLLISION": publish_collision or "",
                 "FIXTURE_VASPKIT_OUTPUT": vaspkit_output
                 if vaspkit_output is not None
@@ -635,9 +718,51 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
                         encoding="utf-8"
                     ),
                 )
-                self.assertFalse((scratch / "vaspkit-output.txt").exists())
+                self.assertEqual(
+                    ["-task 103"],
+                    (self.fixture.markers / "vaspkit")
+                    .read_text(encoding="utf-8")
+                    .splitlines(),
+                )
+                self.assertFalse((scratch / "vaspkit-potcar-output.txt").exists())
+                self.assertFalse((scratch / "vaspkit-band-output.txt").exists())
                 for name in outputs:
                     self.assertTrue((self.fixture.attempt / name).is_file(), name)
+
+    def test_generic_ws2_band_generates_potcar_and_302_path_from_final_poscar(self):
+        result = self.fixture.run(stage="band", generic=True)
+        self.assertEqual(0, result.returncode, result)
+
+        self.assertEqual(
+            ["-task 103", "-task 302"],
+            (self.fixture.markers / "vaspkit")
+            .read_text(encoding="utf-8")
+            .splitlines(),
+        )
+        self.assertEqual(
+            "W\nS\n", (self.fixture.attempt / "POTCAR.spec").read_text()
+        )
+        self.assertEqual(
+            f'{self.fixture.hashes["w"]}  W\n'
+            f'{self.fixture.hashes["s"]}  S\n',
+            (self.fixture.attempt / "potcar-source-sha256.txt").read_text(),
+        )
+        self.assertEqual(
+            ["TITEL  = PAW_PBE W fixture", "TITEL  = PAW_PBE S fixture"],
+            (self.fixture.attempt / "POTCAR").read_text().splitlines(),
+        )
+        kpoints = (self.fixture.attempt / "KPOINTS").read_text()
+        self.assertIn("Line-mode", kpoints)
+        self.assertIn("Reciprocal", kpoints)
+        self.assertEqual(
+            '{"generator":"vaspkit","task":302,'
+            '"vaspkit_version":"1.5.1"}\n',
+            (self.fixture.attempt / "band-path-generator.txt").read_text(),
+        )
+        scratch = self.fixture.attempt / ".vasp-stage-runtime"
+        self.assertFalse((scratch / "KPATH.in").exists())
+        self.assertFalse((scratch / "vaspkit-potcar-output.txt").exists())
+        self.assertFalse((scratch / "vaspkit-band-output.txt").exists())
 
     def test_nonzero_vasp_status_is_preserved(self):
         result = self.fixture.run(vasp_status=37)
@@ -666,8 +791,8 @@ class VaspStageLinuxBehaviorTests(unittest.TestCase):
         result = self.fixture.run()
         self.assertEqual(0, result.returncode, result)
         restored = self.fixture.rewritten_source
-        for original, replacement in self.fixture.rewrites:
-            self.assertEqual(1, restored.count(replacement))
+        for original, replacement, occurrence_count in self.fixture.rewrites:
+            self.assertEqual(occurrence_count, restored.count(replacement))
             restored = restored.replace(replacement, original)
         self.assertEqual(self.fixture.original_source, restored)
 
@@ -938,13 +1063,24 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "case \"$stage\" in relax|scf|band|dos)",
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             'test "$PWD" = "$LMATELAB_WORKFLOW_ROOT/$workflow_id/attempts/$attempt_id"',
-            "test \"$(<POTCAR.spec)\" = $'Mo_sv\\nS'",
+            "mapfile -t potcar_symbols < POTCAR.spec",
+            "read -r -a poscar_elements",
+            "seen_potcar_symbols",
+            'test "${symbol%%_*}" = "${poscar_elements[$index]}"',
+            "potcar_root=/home/scc/pb23030683/POTCAR/PBE",
+            'source_potcar="$potcar_root/$symbol/POTCAR"',
+            'cat -- "$source_potcar" >> expected-POTCAR',
+            "cmp --silent -- expected-POTCAR POTCAR",
+            "rm -- expected-POTCAR",
             "2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa",
             "0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132",
             "509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045",
-            "PAW_PBE\\ Mo_sv*",
-            "PAW_PBE\\ S\\ *",
+            '"PAW_PBE $symbol"',
             "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103",
+            "/home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 302",
+            "BAND_PATH.policy",
+            "KPATH.in",
+            "band-path-generator.txt",
             "/home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh",
             "/usr/bin/time -v -o runtime-time.txt",
             'mpirun --bind-to none -np "$SLURM_NTASKS" vasp_std',
@@ -1011,9 +1147,9 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn('test "${vaspkit_markers[0]}" = "$vaspkit_banner"', preflight)
         self.assertLess(preflight.index("mapfile -t vaspkit_markers"), preflight.index("env-nvhpc.sh"))
 
-    def test_stage7_scripts_share_full_line_vaspkit_extractor(self):
+    def test_stage7_scripts_validate_full_line_vaspkit_banners(self):
         banner_assignment = "vaspkit_banner='VASPKIT Standard Edition 1.5.1'"
-        full_line_extractor = (
+        preflight_extractor = (
             "sed -En 's/^[[:space:]]*\\|[[:space:]]+VASPKIT[[:space:]]+"
             "Standard[[:space:]]+Edition[[:space:]]+"
             "([0-9]+\\.[0-9]+\\.[0-9]+)[[:space:]]+\\([0-9]{2}"
@@ -1021,24 +1157,30 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "[[:space:]]+\\|[[:space:]]*$/VASPKIT Standard Edition \\1/p' "
             "vaspkit-output.txt"
         )
-        for script_name in ("slurm/stage7-preflight.slurm", "slurm/vasp-stage.slurm"):
-            with self.subTest(script_name=script_name):
-                source = self.read_required(script_name)
-                self.assertEqual(1, source.count(banner_assignment))
-                self.assertEqual(1, source.count(full_line_extractor))
-                self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', source)
-                self.assertIn(
-                    'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', source
-                )
-                self.assertIn(
-                    "printf '%s\\n' \"$vaspkit_banner\" > vaspkit-version.txt",
-                    source,
-                )
-                self.assertIn("rm -- vaspkit-output.txt", source)
-                self.assertLess(
-                    source.index(full_line_extractor),
-                    source.index('test "${#vaspkit_markers[@]}" -eq 1'),
-                )
+        preflight = self.read_required("slurm/stage7-preflight.slurm")
+        self.assertEqual(1, preflight.count(banner_assignment))
+        self.assertEqual(1, preflight.count(preflight_extractor))
+        self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', preflight)
+        self.assertIn(
+            'test "${vaspkit_markers[0]}" = "$vaspkit_banner"', preflight
+        )
+        self.assertIn("rm -- vaspkit-output.txt", preflight)
+
+        runner = self.read_required("slurm/vasp-stage.slurm")
+        self.assertEqual(1, runner.count(banner_assignment))
+        self.assertIn("read_vaspkit_markers()", runner)
+        self.assertIn('read_vaspkit_markers vaspkit-potcar-output.txt', runner)
+        self.assertIn('read_vaspkit_markers vaspkit-band-output.txt', runner)
+        self.assertIn('test "${#vaspkit_markers[@]}" -eq 1', runner)
+        self.assertIn('test "${#band_vaspkit_markers[@]}" -eq 1', runner)
+        self.assertIn(
+            'test "${band_vaspkit_markers[0]}" = "$vaspkit_banner"', runner
+        )
+        self.assertIn(
+            "printf '%s\\n' \"$vaspkit_banner\" > vaspkit-version.txt", runner
+        )
+        self.assertIn("rm -- vaspkit-potcar-output.txt", runner)
+        self.assertIn("rm -- vaspkit-band-output.txt", runner)
 
     def test_stage7_scripts_initialize_modules_before_vasp_environment(self):
         module_init = "source /etc/profile.d/modules.sh"
@@ -1139,6 +1281,51 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertIn(required, source)
         for forbidden in ("mpirun", "/usr/bin/time", "srun "):
             self.assertNotIn(forbidden, source)
+
+    def test_generic_vaspkit_preflight_is_short_fixed_and_never_runs_vasp(self):
+        source = self.read_required("slurm/generic-vaspkit-preflight.slurm")
+        for required in (
+            "#SBATCH --account=competition",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --qos=qos_p107-rtx5090",
+            "#SBATCH --cpus-per-task=1",
+            "#SBATCH --mem=2G",
+            "#SBATCH --time=00:05:00",
+            "generic-vaspkit-preflight-$SLURM_JOB_ID",
+            "W S",
+            "POTCAR.spec",
+            '"$vaspkit" -task 103',
+            '"$vaspkit" -task 302',
+            "cmp --silent -- expected-POTCAR POTCAR",
+            "KPATH.in",
+            "Line-mode",
+            "Reciprocal",
+            "band-path-generator.txt",
+            "manifest.txt",
+            "manifest.sha256",
+            "GENERIC_VASPKIT_PREFLIGHT_OK",
+        ):
+            self.assertIn(required, source)
+        for forbidden in (
+            "vasp_std",
+            "vasp_gam",
+            "vasp_ncl",
+            "mpirun",
+            "/usr/bin/time",
+            "srun ",
+            "eval ",
+            "bash -c",
+            "sh -c",
+        ):
+            self.assertNotIn(forbidden, source)
+
+        submit = self.read_required("submit-generic-vaspkit-preflight.sh")
+        self.assertIn("test -z \"$(git status --porcelain)\"", submit)
+        self.assertIn(
+            "sbatch --parsable \"$project/deploy/107cup/slurm/"
+            "generic-vaspkit-preflight.slurm\"",
+            submit,
+        )
 
     def test_stage7_internal_acceptance_creator_is_fixed_short_and_nonpublic(self):
         python_source = self.read_required("slurm/stage7-acceptance.py")

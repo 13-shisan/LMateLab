@@ -16,6 +16,17 @@ const REQUEST_FAILURES = new Map([
   [429, { message: '请求过于频繁，请稍后重试', code: 'rate-limited' }],
 ]);
 
+const VALIDATION_FAILURES = new Map([
+  ['structure_file_too_large', '结构文件超过 1 MiB 限制'],
+  ['structure_atom_limit', '结构超过 200 个原子限制'],
+  ['structure_filename_invalid', '结构文件名不符合安全要求'],
+  ['structure_elements_invalid', '结构元素或元素顺序无效'],
+  ['structure_geometry_invalid', '结构晶格或原子坐标无效'],
+  ['structure_content_invalid', '结构文件必须是非空 UTF-8 文本'],
+  ['structure_format_invalid', '无法按 POSCAR 或 CIF 解析结构'],
+  ['workflow_template_invalid', '结构来源与计算模板不匹配'],
+]);
+
 function queryString(entries) {
   const params = new URLSearchParams();
   for (const [key, value] of entries) {
@@ -27,7 +38,10 @@ function queryString(entries) {
   return query ? `?${query}` : '';
 }
 
-function publicRequestFailure(status) {
+function publicRequestFailure(status, errorCode = '') {
+  if (status === 422 && VALIDATION_FAILURES.has(errorCode)) {
+    return { message: VALIDATION_FAILURES.get(errorCode), code: errorCode };
+  }
   if (REQUEST_FAILURES.has(status)) return REQUEST_FAILURES.get(status);
   if (status >= 500 && status <= 599) {
     return { message: '服务暂时不可用，请稍后重试', code: 'server-error' };
@@ -127,7 +141,10 @@ export function createApiCompetitionDataProvider({
       }
 
       if (!response.ok) {
-        const failure = publicRequestFailure(response.status);
+        const failure = publicRequestFailure(
+          response.status,
+          response.headers.get('x-error-code') || '',
+        );
         throw new CompetitionRequestError(failure.message, response.status, failure.code);
       }
 

@@ -20,12 +20,7 @@ from models_workflow import (
     canonical_json,
 )
 from services.competition_attempt_inputs import prepare_attempt_inputs
-from services.competition_inputs import (
-    InputValidationError,
-    TEMPLATE_VERSION,
-    load_template,
-    validate_draft_payload,
-)
+from services.competition_inputs import InputValidationError, load_template, validate_draft_payload
 from services.competition_reconcile import (
     AttemptClaim,
     CancellationOutcome,
@@ -180,9 +175,10 @@ class CompetitionCoordinator:
     @staticmethod
     def _validate_execution_scope(run: WorkflowRun) -> None:
         try:
-            template = load_template(TEMPLATE_VERSION)
+            template = load_template(run.template_version)
             metadata = json.loads(run.metadata_json)
             normalized_payload = metadata.get("normalized_payload")
+            structure_summary = metadata.get("structure_summary")
             validated = validate_draft_payload(normalized_payload)
         except (
             AttributeError,
@@ -195,10 +191,12 @@ class CompetitionCoordinator:
                 "workflow is outside the fixed execution scope",
             ) from exc
         if (
-            run.template_version != TEMPLATE_VERSION
-            or run.material != template.get("material")
-            or validated["template_version"] != run.template_version
+            validated["template_version"] != run.template_version
             or validated["source_kind"] != run.source_kind
+            or not isinstance(structure_summary, dict)
+            or structure_summary.get("formula") != run.material
+            or tuple(step.get("key") for step in template.get("steps", ()))
+            != FIXED_STAGE_ORDER
         ):
             raise CoordinatorError(
                 "workflow_scope_invalid",

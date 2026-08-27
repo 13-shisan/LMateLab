@@ -57,7 +57,20 @@ uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12
 [[ "$attempt_id" =~ $uuid_re ]] || exit 64
 : "${LMATELAB_WORKFLOW_ROOT:?LMATELAB_WORKFLOW_ROOT is required}"
 test "$PWD" = "$LMATELAB_WORKFLOW_ROOT/$workflow_id/attempts/$attempt_id"
-test "$(<POTCAR.spec)" = $'Mo_sv\nS'
+
+mapfile -t potcar_symbols < POTCAR.spec
+test "${#potcar_symbols[@]}" -ge 1
+test "${#potcar_symbols[@]}" -le 16
+read -r -a poscar_elements <<< "$(sed -n '6p' POSCAR)"
+test "${#poscar_elements[@]}" -eq "${#potcar_symbols[@]}"
+declare -A seen_potcar_symbols=()
+for index in "${!potcar_symbols[@]}"; do
+  symbol=${potcar_symbols[$index]}
+  [[ "$symbol" =~ ^[A-Z][a-z]?(_[A-Za-z0-9]+)?$ ]] || exit 64
+  test -z "${seen_potcar_symbols[$symbol]+present}" || exit 64
+  seen_potcar_symbols[$symbol]=1
+  test "${symbol%%_*}" = "${poscar_elements[$index]}" || exit 64
+done
 
 attempt_directory=$PWD
 scratch="$PWD/.vasp-stage-runtime"
@@ -68,6 +81,7 @@ common_evidence=(
   vasp-exit-code.txt
   runtime-time.txt
 )
+generated_band_path=0
 case "$stage" in
   relax)
     input_names=(INCAR KPOINTS POSCAR POTCAR.spec)
@@ -78,7 +92,14 @@ case "$stage" in
     stage_outputs=(OUTCAR vasprun.xml CHGCAR WAVECAR)
     ;;
   band)
-    input_names=(INCAR KPOINTS POSCAR POTCAR.spec CHGCAR)
+    if test -f BAND_PATH.policy && test ! -e KPOINTS; then
+      test "$(<BAND_PATH.policy)" = '{"generator":"vaspkit","task":302,"version":1}'
+      input_names=(INCAR BAND_PATH.policy POSCAR POTCAR.spec CHGCAR)
+      common_evidence+=(KPOINTS band-path-generator.txt)
+      generated_band_path=1
+    else
+      input_names=(INCAR KPOINTS POSCAR POTCAR.spec CHGCAR)
+    fi
     stage_outputs=(OUTCAR vasprun.xml EIGENVAL)
     ;;
   dos)
@@ -103,27 +124,66 @@ for name in "${input_names[@]}"; do
 done
 cd -- "$scratch"
 
-mo_source_sha=$(sha256sum /home/scc/pb23030683/POTCAR/PBE/Mo_sv/POTCAR | awk '{print $1}')
-s_source_sha=$(sha256sum /home/scc/pb23030683/POTCAR/PBE/S/POTCAR | awk '{print $1}')
-test "$mo_source_sha" = 2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa
-test "$s_source_sha" = 0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132
-printf '%s  Mo_sv\n%s  S\n' "$mo_source_sha" "$s_source_sha" > potcar-source-sha256.txt
+potcar_root=/home/scc/pb23030683/POTCAR/PBE
+: > potcar-source-sha256.txt
+: > expected-POTCAR
+for symbol in "${potcar_symbols[@]}"; do
+  source_potcar="$potcar_root/$symbol/POTCAR"
+  test -f "$source_potcar"
+  test ! -L "$source_potcar"
+  source_sha=$(sha256sum "$source_potcar" | awk '{print $1}')
+  [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
+  printf '%s  %s\n' "$source_sha" "$symbol" >> potcar-source-sha256.txt
+  cat -- "$source_potcar" >> expected-POTCAR
+done
 
 /home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 103 \
-  2>&1 | tee vaspkit-output.txt
+  2>&1 | tee vaspkit-potcar-output.txt
 vaspkit_banner='VASPKIT Standard Edition 1.5.1'
-mapfile -t vaspkit_markers < <(
-  sed -En 's/^[[:space:]]*\|[[:space:]]+VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]+\([0-9]{2}[[:space:]][[:alpha:]]{3}\.[[:space:]][0-9]{4}\)[[:space:]]+\|[[:space:]]*$/VASPKIT Standard Edition \1/p' vaspkit-output.txt
-)
+read_vaspkit_markers() {
+  local output=$1
+  sed -En 's/^[[:space:]]*\|[[:space:]]+VASPKIT[[:space:]]+Standard[[:space:]]+Edition[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]+\([0-9]{2}[[:space:]][[:alpha:]]{3}\.[[:space:]][0-9]{4}\)[[:space:]]+\|[[:space:]]*$/VASPKIT Standard Edition \1/p' "$output"
+}
+mapfile -t vaspkit_markers < <(read_vaspkit_markers vaspkit-potcar-output.txt)
 test "${#vaspkit_markers[@]}" -eq 1
 test "${vaspkit_markers[0]}" = "$vaspkit_banner"
 printf '%s\n' "$vaspkit_banner" > vaspkit-version.txt
-rm -- vaspkit-output.txt
-test "$(sha256sum POTCAR | cut -d ' ' -f 1)" = 509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045
+rm -- vaspkit-potcar-output.txt
+cmp --silent -- expected-POTCAR POTCAR
+rm -- expected-POTCAR
+potcar_sha=$(sha256sum POTCAR | cut -d ' ' -f 1)
+[[ "$potcar_sha" =~ ^[0-9a-f]{64}$ ]]
 mapfile -t potcar_titles < <(sed -n 's/^[[:space:]]*TITEL[[:space:]]*=[[:space:]]*//p' POTCAR)
-test "${#potcar_titles[@]}" -eq 2
-[[ "${potcar_titles[0]}" == PAW_PBE\ Mo_sv* ]]
-[[ "${potcar_titles[1]}" == PAW_PBE\ S\ * ]]
+test "${#potcar_titles[@]}" -eq "${#potcar_symbols[@]}"
+for index in "${!potcar_symbols[@]}"; do
+  title=${potcar_titles[$index]}
+  symbol=${potcar_symbols[$index]}
+  [[ "$title" == "PAW_PBE $symbol" || "$title" == "PAW_PBE $symbol "* ]]
+done
+
+if test "${potcar_symbols[*]}" = 'Mo_sv S'; then
+  test "$(sed -n '1s/ .*//p' potcar-source-sha256.txt)" = 2731df97e41766cc617548c5a8267718fdef1f509ac6bafa01e745abea2bdfaa
+  test "$(sed -n '2s/ .*//p' potcar-source-sha256.txt)" = 0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132
+  test "$potcar_sha" = 509d41b6c93c3d7495d976f7a04dcf3f6960cfc94f39f13a67d146a7ded33045
+fi
+
+if test "$generated_band_path" = 1; then
+  test ! -e KPATH.in
+  /home/scc/pb23030683/software/vaspkit.1.5.1/bin/vaspkit -task 302 \
+    2>&1 | tee vaspkit-band-output.txt
+  mapfile -t band_vaspkit_markers < <(read_vaspkit_markers vaspkit-band-output.txt)
+  test "${#band_vaspkit_markers[@]}" -eq 1
+  test "${band_vaspkit_markers[0]}" = "$vaspkit_banner"
+  rm -- vaspkit-band-output.txt
+  test -s KPATH.in
+  test ! -L KPATH.in
+  test "$(wc -c < KPATH.in)" -le 8192
+  sed -n '3p' KPATH.in | grep -Eiq '^[[:space:]]*Line-mode[[:space:]]*$'
+  sed -n '4p' KPATH.in | grep -Eiq '^[[:space:]]*Reciprocal[[:space:]]*$'
+  mv -- KPATH.in KPOINTS
+  printf '%s\n' '{"generator":"vaspkit","task":302,"vaspkit_version":"1.5.1"}' \
+    > band-path-generator.txt
+fi
 
 source /etc/profile.d/modules.sh
 source /home/scc/pb23030683/software/vasp.6.4.2-GPU-Cell/env-nvhpc.sh

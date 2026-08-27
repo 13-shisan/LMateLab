@@ -30,7 +30,7 @@ _REQUIRED_FILES: Final = (
     "potcar-source-sha256.txt",
 )
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$")
-_SYMBOL_RE: Final = re.compile(r"^[A-Za-z0-9_]+$")
+_SYMBOL_RE: Final = re.compile(r"^[A-Z][a-z]?(?:_[A-Za-z0-9]+)?$")
 _REASON_CODE_RE: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$", re.ASCII)
 _VERSION_RE: Final = re.compile(r"(?<![0-9.])([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])")
 _VASPKIT_BANNER_RE: Final = re.compile(
@@ -105,7 +105,14 @@ _ACCEPTANCE_ARTIFACT_NAMES: Final = frozenset(
     for required_outputs in STAGE_REQUIRED_OUTPUTS.values()
     for name in required_outputs
 ) | frozenset(
-    (*_COMMON_ACCEPTANCE_EVIDENCE, *_POTCAR_ACCEPTANCE_EVIDENCE, "KPOINTS", "INCAR")
+    (
+        *_COMMON_ACCEPTANCE_EVIDENCE,
+        *_POTCAR_ACCEPTANCE_EVIDENCE,
+        "KPOINTS",
+        "INCAR",
+        "BAND_PATH.policy",
+        "band-path-generator.txt",
+    )
 )
 _ACCEPTANCE_CHECK_NAMES: Final = _FIXED_ACCEPTANCE_CHECK_NAMES | frozenset(
     f"artifact:{name}" for name in _ACCEPTANCE_ARTIFACT_NAMES
@@ -434,9 +441,9 @@ def render_acceptance_scf_incar(content: bytes) -> bytes:
 def validate_potcar(
     attempt_directory: Path,
     *,
-    contract: PotcarContract = DEFAULT_POTCAR_CONTRACT,
+    contract: PotcarContract | None = None,
 ) -> dict[str, object]:
-    """Validate fixed POTCAR evidence without returning source material or paths."""
+    """Validate POTCAR evidence without returning source material or paths."""
     root = Path(attempt_directory)
     root_identity = _validate_attempt_directory(root)
     with ExitStack() as resources:
@@ -445,9 +452,63 @@ def validate_potcar(
             name: _open_required_file(root, name, directory_fd, resources)
             for name in _REQUIRED_FILES
         }
-        result = _validate_opened_potcar(files, contract)
+        effective_contract = contract or _derive_potcar_contract(files)
+        result = _validate_opened_potcar(files, effective_contract)
         _verify_attempt_directory_identity(root, root_identity, directory_fd)
         return result
+
+
+def _derive_potcar_contract(
+    files: Mapping[str, _OpenedEvidence | _OpenedAcceptanceEvidence],
+) -> PotcarContract:
+    for opened in files.values():
+        _rewind(opened.handle)
+    try:
+        spec_text = _read_metadata(files["POTCAR.spec"].handle).decode("ascii")
+        evidence_text = _read_metadata(
+            files["potcar-source-sha256.txt"].handle
+        ).decode("ascii")
+    except UnicodeDecodeError:
+        raise VaspPolicyError("potcar_spec_invalid", "POTCAR specification is invalid") from None
+
+    symbols = tuple(spec_text.splitlines())
+    if (
+        not 1 <= len(symbols) <= 16
+        or len(set(symbols)) != len(symbols)
+        or any(_SYMBOL_RE.fullmatch(symbol) is None for symbol in symbols)
+        or spec_text != "".join(f"{symbol}\n" for symbol in symbols)
+    ):
+        raise VaspPolicyError("potcar_spec_invalid", "POTCAR specification is invalid")
+
+    evidence_lines = evidence_text.splitlines()
+    if len(evidence_lines) != len(symbols):
+        raise VaspPolicyError(
+            "potcar_source_evidence_invalid",
+            "POTCAR source checksum evidence is invalid",
+        )
+    source_sha256: list[str] = []
+    for line, symbol in zip(evidence_lines, symbols, strict=True):
+        match = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line)
+        if match is None or match.group(2) != symbol:
+            raise VaspPolicyError(
+                "potcar_source_evidence_invalid",
+                "POTCAR source checksum evidence is invalid",
+            )
+        source_sha256.append(match.group(1))
+
+    if symbols == DEFAULT_POTCAR_CONTRACT.symbols:
+        return DEFAULT_POTCAR_CONTRACT
+
+    potcar = files["POTCAR"]
+    _rewind(potcar.handle)
+    combined_sha256 = _sha256_file(potcar.handle)
+    return PotcarContract(
+        symbols=symbols,
+        titles=tuple(f"PAW_PBE {symbol}" for symbol in symbols),
+        source_sha256=tuple(source_sha256),
+        combined_sha256=combined_sha256,
+        vaspkit_version="1.5.1",
+    )
 
 
 def _validate_opened_potcar(
@@ -554,12 +615,14 @@ def _passed_check(checks: list[dict[str, object]], name: str) -> None:
     checks.append({"name": name, "passed": True})
 
 
-def _acceptance_evidence_names(stage: str) -> tuple[str, ...]:
+def _acceptance_evidence_names(stage: str, generated_band_path: bool = False) -> tuple[str, ...]:
     names = set(STAGE_REQUIRED_OUTPUTS[stage])
     names.update(_COMMON_ACCEPTANCE_EVIDENCE)
     names.update(_POTCAR_ACCEPTANCE_EVIDENCE)
     if stage == "band":
         names.add("KPOINTS")
+        if generated_band_path:
+            names.update(("BAND_PATH.policy", "band-path-generator.txt"))
     elif stage == "dos":
         names.update(("INCAR", "KPOINTS"))
     return tuple(sorted(names))
@@ -1230,6 +1293,49 @@ def _parse_nedos(content: bytes) -> int:
     return nedos
 
 
+def _validate_generated_band_path(
+    kpoints_content: bytes,
+    policy_content: bytes,
+    generator_content: bytes,
+) -> None:
+    if policy_content != b'{"generator":"vaspkit","task":302,"version":1}\n':
+        raise VaspPolicyError("band_path_policy_invalid", "band path policy is invalid")
+    if generator_content != (
+        b'{"generator":"vaspkit","task":302,'
+        b'"vaspkit_version":"1.5.1"}\n'
+    ):
+        raise VaspPolicyError(
+            "band_path_generator_invalid", "band path generator evidence is invalid"
+        )
+    try:
+        lines = kpoints_content.decode("ascii").splitlines()
+    except UnicodeDecodeError:
+        raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid") from None
+    if len(lines) < 6 or len(lines) > 20000:
+        raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+    try:
+        points_per_segment = int(lines[1].strip())
+    except ValueError:
+        raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid") from None
+    if not 2 <= points_per_segment <= 1000:
+        raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+    if lines[2].strip().lower() != "line-mode" or lines[3].strip().lower() != "reciprocal":
+        raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+    coordinates = [line for line in lines[4:] if line.strip()]
+    if len(coordinates) < 2 or len(coordinates) % 2:
+        raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+    for line in coordinates:
+        fields = line.split("!", 1)[0].split()
+        if len(fields) != 3:
+            raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+        try:
+            values = tuple(float(value) for value in fields)
+        except ValueError:
+            raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid") from None
+        if any(not math.isfinite(value) or abs(value) > 10 for value in values):
+            raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+
+
 def accept_vasp_attempt(
     attempt_directory: Path,
     stage: str,
@@ -1238,7 +1344,7 @@ def accept_vasp_attempt(
     scheduler_exit_code: str,
     vasprun_loader: Callable[[Path], object] | None = None,
     structure_loader: Callable[[Path], object] | None = None,
-    potcar_contract: PotcarContract = DEFAULT_POTCAR_CONTRACT,
+    potcar_contract: PotcarContract | None = None,
 ) -> AcceptanceReport:
     """Read and scientifically accept one fixed-stage VASP attempt."""
     checks: list[dict[str, object]] = []
@@ -1265,6 +1371,10 @@ def accept_vasp_attempt(
     _passed_check(checks, "scheduler_exit_code")
 
     root = Path(attempt_directory)
+    band_policy_path = root / "BAND_PATH.policy"
+    generated_band_path = stage == "band" and (
+        band_policy_path.exists() or band_policy_path.is_symlink()
+    )
     try:
         root_identity = _validate_attempt_directory(root)
     except VaspPolicyError as error:
@@ -1283,7 +1393,7 @@ def accept_vasp_attempt(
                 measurements=measurements, artifacts=artifacts,
             )
         opened_files: dict[str, _OpenedAcceptanceEvidence] = {}
-        for name in _acceptance_evidence_names(stage):
+        for name in _acceptance_evidence_names(stage, generated_band_path):
             try:
                 opened = _open_acceptance_evidence(root, name, directory_fd, resources)
                 artifact = _hash_opened_evidence(opened)
@@ -1316,21 +1426,26 @@ def accept_vasp_attempt(
         _passed_check(checks, "vasp_exit_code")
 
         try:
+            effective_potcar_contract = potcar_contract or _derive_potcar_contract(
+                {name: opened_files[name] for name in _REQUIRED_FILES}
+            )
             vaspkit_text = _decode_metadata(
                 _read_acceptance_metadata(opened_files["vaspkit-version.txt"])
             )
-            _validate_vaspkit_banner(vaspkit_text, potcar_contract.vaspkit_version)
+            _validate_vaspkit_banner(
+                vaspkit_text, effective_potcar_contract.vaspkit_version
+            )
         except VaspPolicyError as error:
             return _failed_acceptance(
                 check_name="vaspkit_version", reason_code=error.code, checks=checks,
                 measurements=measurements, artifacts=artifacts,
             )
-        measurements["vaspkit_version"] = potcar_contract.vaspkit_version
+        measurements["vaspkit_version"] = effective_potcar_contract.vaspkit_version
         _passed_check(checks, "vaspkit_version")
 
         try:
             potcar_files = {name: opened_files[name] for name in _REQUIRED_FILES}
-            _validate_opened_potcar(potcar_files, potcar_contract)
+            _validate_opened_potcar(potcar_files, effective_potcar_contract)
             for name in _REQUIRED_FILES:
                 current_artifact = _hash_opened_evidence(opened_files[name])
                 if current_artifact != artifacts_by_name[name]:
@@ -1444,9 +1559,18 @@ def accept_vasp_attempt(
         if stage == "band":
             kpoints = next(item for item in artifacts if item["name"] == "KPOINTS")
             measurements["kpoints_sha256"] = kpoints["sha256"]
-            if kpoints["sha256"] != _BAND_KPOINTS_SHA256:
+            try:
+                if generated_band_path:
+                    _validate_generated_band_path(
+                        _read_acceptance_metadata(opened_files["KPOINTS"]),
+                        _read_acceptance_metadata(opened_files["BAND_PATH.policy"]),
+                        _read_acceptance_metadata(opened_files["band-path-generator.txt"]),
+                    )
+                elif kpoints["sha256"] != _BAND_KPOINTS_SHA256:
+                    raise VaspPolicyError("band_kpoints_invalid", "band KPOINTS is invalid")
+            except VaspPolicyError as error:
                 return _failed_acceptance(
-                    check_name="band_kpoints", reason_code="band_kpoints_invalid", checks=checks,
+                    check_name="band_kpoints", reason_code=error.code, checks=checks,
                     measurements=measurements, artifacts=artifacts,
                 )
             _passed_check(checks, "band_kpoints")
