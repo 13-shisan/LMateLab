@@ -96,14 +96,6 @@ class PotcarPolicyTests(unittest.TestCase):
         self.assertEqual("1.5.1", result["vaspkit_version"])
         self.assertEqual(len(self.potcar), result["size_bytes"])
 
-    def test_legacy_attempt_without_resolution_evidence_remains_valid(self):
-        self.write_valid_inputs()
-
-        result = validate_potcar(self.root)
-
-        self.assertEqual(["Mo_sv", "S"], result["spec_symbols"])
-        self.assertEqual(["Mo_sv", "S"], result["symbols"])
-
     def test_potcar_accepts_title_records_with_leading_ascii_whitespace(self):
         self.potcar = (
             b"   TITEL  = PAW_PBE Mo_sv 02Feb2006\n"

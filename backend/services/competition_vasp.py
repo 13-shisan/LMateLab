@@ -716,8 +716,10 @@ def _acceptance_size_limit(name: str) -> int:
     if name in {
         "INCAR",
         "KPOINTS",
+        "BAND_PATH.policy",
         "POTCAR.spec",
         "POTCAR.resolved",
+        "band-path-generator.txt",
         "potcar-source-sha256.txt",
         "runtime-time.txt",
         "vasp-exit-code.txt",
