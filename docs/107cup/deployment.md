@@ -1,6 +1,6 @@
 # 107 杯部署与恢复说明
 
-更新时间：`2026-08-24`
+更新时间：`2026-08-27`
 
 ## 1. 部署边界
 
@@ -109,3 +109,30 @@ Viewer 必须无法提交、取消、重试或访问敏感文件。已登录的 
 发布失败时保持上一版本 `current` 和服务不变。若新服务健康检查失败，恢复器保留旧转发；只有候选完全就绪后才切换正式目标。需要暂停自动恢复时使用运行手册规定的权限 `0600` maintenance 标记，处理完再移除。
 
 回滚只允许选择已存在且清单自检通过的 `releases/<commit>`，先运行隔离 `rollback-smoke.slurm`，不得直接用旧源码覆盖当前目录。服务停止或 `scancel` 前必须核对用户、JobName、Command、WorkDir、Account、Partition/QOS 和 LMateLab ledger，不能操作同一共享账号下的其他作业。完整恢复步骤见 [`service-recovery-runbook.md`](./service-recovery-runbook.md)。
+
+## 8. 通用二维 PBE 输入策略
+
+内置示例继续使用 `mos2_v1` 和既有 `Mo_sv/S` 固定哈希合同。Operator 上传的周期 POSCAR/CIF 使用 `pbe_2d_v1`，服务只把规范元素顺序写入 `POTCAR.spec`；VASPKIT 103 在计算节点把实际推荐名写入 `POTCAR.resolved`。Git、数据库和 API 都不保存 POTCAR 内容或赝势源路径。
+
+VASP stage 作业在计算节点内执行以下固定步骤：
+
+```text
+最终 POSCAR 元素顺序
+  -> POTCAR.spec（请求元素，例如 W / S）
+  -> VASPKIT 103
+  -> POTCAR.resolved（实际推荐赝势，例如 W_sv / S）
+  -> /home/scc/pb23030683/POTCAR/PBE/<resolved>/POTCAR
+  -> 与解析后源文件顺序拼接结果逐字节核对
+  -> POTCAR + 请求/解析映射 + 源哈希 + VASPKIT 版本证据
+
+已验收 SCF POSCAR + CHGCAR
+  -> VASPKIT 302
+  -> KPATH.in 格式与大小门禁
+  -> 校验真实四列高对称点标签，例如 kx ky kz GAMMA
+  -> KPOINTS + band-path-generator.txt
+  -> BAND VASP
+```
+
+允许范围为全周期 POSCAR/CIF、最大 `1 MiB`、最多 `200` 原子和 `16` 种元素，以及非磁性、无 SOC、无 DFT+U、无杂化泛函的 PAW-PBE 基线。页面能够接受结构不代表默认参数对所有金属、磁性材料、强关联材料、分子或三维体相都科学充分；超出范围时应新增经过评审的版本化模板，不能绕过当前策略修改命令或赝势路径。
+
+任何通用化发布前，先通过 Slurm 短作业验证真实 VASPKIT `103` 和 `302`，但不运行 VASP；随后才允许完整 Slurm 构建、候选服务和 Operator 工作流验证。预检、构建或候选任一失败都必须保留旧稳定服务和原始证据。

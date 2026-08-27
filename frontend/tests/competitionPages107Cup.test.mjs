@@ -877,7 +877,7 @@ test('competition dashboard compact timeline keeps the scf band dos fork visible
   );
 });
 
-test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', () => {
+test('new calculation workspace is syntax-valid, controlled-scope, and fail-closed', () => {
   const source = read('../src/pages/competition/CompetitionNewCalculation.jsx');
   assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
 
@@ -890,7 +890,8 @@ test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', 
     'band',
     'dos',
     'POSCAR/CIF 文本，最大 1 MiB，最多 200 个原子',
-    'mos2_v1',
+    'pbe_2d_v1',
+    'VASPKIT 302 自动生成',
     'ENCUT',
     'k-point',
     'convergence',
@@ -916,9 +917,9 @@ test('new calculation workspace is syntax-valid, fixed-scope, and fail-closed', 
   assert.match(source, /function\s+readStoredUser\(storage\)/);
   assert.match(source, /globalThis\.localStorage/);
   assert.match(source, /source_kind:\s*sourceKind/);
-  assert.match(source, /template_version:\s*['"]mos2_v1['"]/);
+  assert.match(source, /sourceKind\s*===\s*['"]builtin['"]\s*\?\s*['"]mos2_v1['"]\s*:\s*['"]pbe_2d_v1['"]/);
   assert.match(source, /steps:\s*\[['"]relax['"],\s*['"]scf['"],\s*['"]band['"],\s*['"]dos['"]\]/);
-  assert.match(source, /模板 mos2_v1 · 输入 SHA-256：保存草稿后由服务端生成/);
+  assert.match(source, /输入 SHA-256：保存草稿后由服务端生成/);
   assert.match(source, /<VaspStructureViewer\s+structure=\{DEMO_STRUCTURE\}\s*\/>/);
   assert.match(source, /<label\s+htmlFor=['"]competition-structure-file['"]/);
   assert.match(source, /<input[^>]*id=['"]competition-structure-file['"][^>]*type=['"]file['"][^>]*onChange=/s);
@@ -1011,7 +1012,7 @@ test('new calculation draft payload uses the fixed template and server upload id
     structureUpload: { id: 'upload-from-server', summary: { formula: 'MoS2' } },
     parameters,
   }), {
-    template_version: 'mos2_v1',
+    template_version: 'pbe_2d_v1',
     source_kind: 'upload',
     steps: ['relax', 'scf', 'band', 'dos'],
     parameters,
@@ -1237,7 +1238,7 @@ test('new calculation workflow preserves the approved dependency fork', () => {
   assert.deepEqual(workflowSteps, [
     { key: 'relax', label: 'relax', dependsOn: [], purpose: '优化离子位置与晶格' },
     { key: 'scf', label: 'SCF', dependsOn: ['relax'], purpose: '生成已验收自洽电荷密度' },
-    { key: 'band', label: 'BAND', dependsOn: ['scf'], purpose: '沿固定高对称路径计算能带' },
+    { key: 'band', label: 'BAND', dependsOn: ['scf'], purpose: '根据最终晶格自动生成高对称路径' },
     { key: 'dos', label: 'DOS', dependsOn: ['scf'], purpose: '基于自洽结果计算态密度' },
   ]);
   assert.match(source, /WORKFLOW_STEPS\.map\(\(step\)\s*=>/);

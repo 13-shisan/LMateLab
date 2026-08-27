@@ -137,6 +137,38 @@ class AttemptInputTests(unittest.TestCase):
                     )
             session.commit()
 
+    def _switch_to_generic_ws2_band_inputs(self):
+        policy = b'{"generator":"vaspkit","task":302,"version":1}\n'
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            run.template_version = "pbe_2d_v1"
+            run.material = "WS2"
+            run.source_kind = "upload"
+            band_kpoints = self._file_with_logical_path(session, "band/KPOINTS")
+            (self.root / band_kpoints.relative_path).unlink()
+            session.delete(band_kpoints)
+            relative_path = (
+                f"{self._stage5_directory_id}/band/BAND_PATH.policy"
+            )
+            self._write_private(relative_path, policy)
+            session.add(
+                WorkflowFile(
+                    id=str(uuid.uuid4()),
+                    workflow_id=self.workflow_id,
+                    owner_id=self.owner_id,
+                    relative_path=relative_path,
+                    size_bytes=len(policy),
+                    sha256=hashlib.sha256(policy).hexdigest(),
+                    source_kind="generated",
+                    metadata_json={
+                        "logical_path": "band/BAND_PATH.policy",
+                        "step_key": "band",
+                    },
+                )
+            )
+            session.commit()
+        self.template_version = "pbe_2d_v1"
+
     def _target_attempt(self, step_key):
         with Session(self.engine) as session:
             step = self._step(session, step_key)
@@ -296,6 +328,33 @@ class AttemptInputTests(unittest.TestCase):
         )
 
         self.assertEqual({"INCAR", "KPOINTS", "POTCAR.spec", "POSCAR", "CHGCAR"}, prepared.names)
+        self.assertFalse((prepared.directory / "WAVECAR").exists())
+
+    def test_generic_band_uses_302_policy_and_inherits_final_scf_inputs(self):
+        self._switch_to_generic_ws2_band_inputs()
+
+        prepared = self.prepare(
+            "band",
+            parent_outputs={
+                "POSCAR": b"final-relaxed-ws2",
+                "CHGCAR": b"ws2-charge",
+                "WAVECAR": b"ignored-wave",
+            },
+        )
+
+        self.assertEqual(
+            {"INCAR", "BAND_PATH.policy", "POTCAR.spec", "POSCAR", "CHGCAR"},
+            prepared.names,
+        )
+        self.assertEqual(
+            b'{"generator":"vaspkit","task":302,"version":1}\n',
+            (prepared.directory / "BAND_PATH.policy").read_bytes(),
+        )
+        self.assertEqual(
+            b"final-relaxed-ws2", (prepared.directory / "POSCAR").read_bytes()
+        )
+        self.assertEqual(b"ws2-charge", (prepared.directory / "CHGCAR").read_bytes())
+        self.assertFalse((prepared.directory / "KPOINTS").exists())
         self.assertFalse((prepared.directory / "WAVECAR").exists())
 
     def test_band_and_dos_follow_real_scf_input_and_output_lineage(self):

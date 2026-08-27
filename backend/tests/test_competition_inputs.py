@@ -49,6 +49,19 @@ Mo1 Mo 0.000000 0.000000 0.500000
 S2 S 0.333333 0.666667 0.422000
 """
 
+VALID_WS2_POSCAR = b"""WS2
+1.0
+3.153 0.0 0.0
+-1.5765 2.7308 0.0
+0.0 0.0 20.0
+W S
+1 2
+Direct
+0.0 0.0 0.5
+0.666667 0.333333 0.579
+0.333333 0.666667 0.421
+"""
+
 FIXED_STEPS = ["relax", "scf", "band", "dos"]
 
 
@@ -56,6 +69,18 @@ def valid_payload(**overrides):
     payload = {
         "template_version": "mos2_v1",
         "source_kind": "builtin",
+        "steps": list(FIXED_STEPS),
+        "parameters": {},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def generic_upload_payload(**overrides):
+    payload = {
+        "template_version": "pbe_2d_v1",
+        "source_kind": "upload",
+        "structure_upload_id": str(uuid.uuid4()),
         "steps": list(FIXED_STEPS),
         "parameters": {},
     }
@@ -121,25 +146,25 @@ Direct
         self.assertIn("vasp", str(raised.exception).lower())
         self.assertIn("cif", str(raised.exception).lower())
 
-    def test_rejects_too_many_atoms_wrong_elements_and_wrong_stoichiometry(self):
+    def test_rejects_too_many_atoms_and_invalid_or_duplicate_element_headers(self):
         invalid_structures = (
             poscar_with_symbols(["Mo", "S"], [67, 134]),
-            poscar_with_symbols(["Mo", "Se"], [1, 2]),
-            poscar_with_symbols(["Mo", "S"], [1, 1]),
+            poscar_with_symbols(["Xx", "S"], [1, 2]),
+            poscar_with_symbols(["Mo", "S", "Mo"], [1, 2, 1]),
         )
         for content in invalid_structures:
             with self.subTest(atom_line=content.splitlines()[5]):
                 with self.assertRaises(InputValidationError):
                     parse_structure_bytes(content, "structure.any")
 
-    def test_rejects_vasp_element_order_other_than_grouped_mo_then_s(self):
-        for content in (
-            poscar_with_symbols(["S", "Mo"], [2, 1]),
-            poscar_with_symbols(["Mo", "S", "Mo"], [1, 2, 1]),
-        ):
-            with self.subTest(atom_line=content.splitlines()[5]):
-                with self.assertRaisesRegex(InputValidationError, "Mo S"):
-                    parse_structure_bytes(content, "not-an-extension.cif")
+    def test_accepts_general_grouped_vasp_elements_and_preserves_order(self):
+        parsed = parse_structure_bytes(VALID_WS2_POSCAR, "WS2.vasp")
+
+        self.assertEqual("vasp", parsed.source_format)
+        self.assertEqual("WS2", parsed.summary["formula"])
+        self.assertEqual(["W", "S"], parsed.summary["elements"])
+        self.assertEqual({"W": 1, "S": 2}, parsed.summary["counts"])
+        self.assertEqual([b"W", b"S"], parsed.canonical_poscar.splitlines()[5].split())
 
     def test_accepts_vasp_based_on_content_not_filename(self):
         parsed = parse_structure_bytes(VALID_POSCAR, "uploaded.cif")
@@ -205,7 +230,7 @@ Direct
 
 
 class TemplateValidationTests(unittest.TestCase):
-    def test_loads_only_the_fixed_canonical_template(self):
+    def test_loads_legacy_and_generic_canonical_templates_only(self):
         template = load_template("mos2_v1")
 
         self.assertEqual(template["template_version"], "mos2_v1")
@@ -232,6 +257,12 @@ class TemplateValidationTests(unittest.TestCase):
             / "template.json"
         )
         self.assertEqual(template_path.read_text(encoding="utf-8"), encoded + "\n")
+
+        generic = load_template("pbe_2d_v1")
+        self.assertEqual("pbe_2d_v1", generic["template_version"])
+        self.assertEqual("structure_elements", generic["potcar_policy"]["source"])
+        band = next(step for step in generic["steps"] if step["key"] == "band")
+        self.assertEqual({"mode": "vaspkit", "task": 302}, band["kpoints"])
         with self.assertRaises(InputValidationError):
             load_template("mos2_v2")
 
@@ -247,6 +278,13 @@ class TemplateValidationTests(unittest.TestCase):
         self.assertEqual(upload["structure_upload_id"], upload_id)
         self.assertEqual(upload["steps"], FIXED_STEPS)
         self.assertEqual(json.loads(builtin["canonical_json"])["steps"], FIXED_STEPS)
+
+        generic = validate_draft_payload(generic_upload_payload())
+        self.assertEqual("pbe_2d_v1", generic["template_version"])
+        with self.assertRaisesRegex(InputValidationError, "requires an uploaded structure"):
+            validate_draft_payload(
+                generic_upload_payload(source_kind="builtin", structure_upload_id=None)
+            )
 
     def test_rejects_extra_fields_invalid_source_and_wrong_fixed_steps(self):
         invalid_payloads = (
@@ -422,6 +460,24 @@ class MaterializationTests(unittest.TestCase):
         self.assertIn("NEDOS = 4000", (directory / "dos" / "INCAR").read_text())
         parsed = parse_structure_bytes((directory / "scf" / "POSCAR").read_bytes(), "POSCAR")
         self.assertEqual(parsed.summary["formula"], "MoS2")
+
+    def test_materializes_ws2_with_structure_potcars_and_vaspkit_302_policy(self):
+        structure = parse_structure_bytes(VALID_WS2_POSCAR, "WS2.vasp")
+        payload = validate_draft_payload(generic_upload_payload())
+
+        result = materialize_inputs(self.workflow_root, structure, payload)
+        directory = Path(result["directory"])
+
+        self.assertEqual("pbe_2d_v1", result["template_version"])
+        self.assertEqual("WS2", result["structure_summary"]["formula"])
+        for step in FIXED_STEPS:
+            self.assertEqual("W\nS\n", (directory / step / "POTCAR.spec").read_text())
+        self.assertFalse((directory / "band" / "KPOINTS").exists())
+        self.assertEqual(
+            '{"generator":"vaspkit","task":302,"version":1}\n',
+            (directory / "band" / "BAND_PATH.policy").read_text(),
+        )
+        self.assertIn("LMateLab PBE", (directory / "relax" / "INCAR").read_text())
 
     def test_materializes_reviewed_kpoints_but_keeps_band_path_fixed(self):
         payload = validate_draft_payload(valid_payload(kpoints={

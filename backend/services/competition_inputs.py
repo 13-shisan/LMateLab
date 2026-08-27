@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import numpy as np
 from ase import Atoms
+from ase.data import atomic_numbers
 from ase.io import read as ase_read
 from ase.io import write as ase_write
 
@@ -21,8 +22,11 @@ from ase.io import write as ase_write
 MAX_STRUCTURE_BYTES = 1024 * 1024
 MAX_ATOMS = 200
 TEMPLATE_VERSION = "mos2_v1"
+GENERIC_TEMPLATE_VERSION = "pbe_2d_v1"
+SUPPORTED_TEMPLATE_VERSIONS = frozenset((TEMPLATE_VERSION, GENERIC_TEMPLATE_VERSION))
 FIXED_STEPS = ("relax", "scf", "band", "dos")
 TEMPLATE_ROOT = Path(__file__).resolve().parents[1] / "competition_templates"
+MAX_ELEMENT_TYPES = 16
 
 
 class InputValidationError(ValueError):
@@ -90,8 +94,13 @@ def _vasp_element_order(text: str) -> list[str]:
     if len(lines) < 7:
         raise InputValidationError("VASP structure is missing the element header")
     symbols = lines[5].split()
-    if symbols != ["Mo", "S"]:
-        raise InputValidationError("POSCAR element order must be exactly 'Mo S'")
+    if (
+        not symbols
+        or len(symbols) > MAX_ELEMENT_TYPES
+        or len(set(symbols)) != len(symbols)
+        or any(symbol not in atomic_numbers for symbol in symbols)
+    ):
+        raise InputValidationError("POSCAR element header is invalid")
     return symbols
 
 
@@ -119,8 +128,10 @@ def _preflight_vasp_header(text: str) -> bool:
     count_tokens = lines[6].split()
     if not symbols or len(symbols) != len(count_tokens):
         return False
-    if any(not symbol.isalpha() or len(symbol) > 3 for symbol in symbols):
+    if any(symbol not in atomic_numbers for symbol in symbols):
         return False
+    if len(symbols) > MAX_ELEMENT_TYPES or len(set(symbols)) != len(symbols):
+        raise InputValidationError("POSCAR element header is invalid")
     if any(not token.isascii() or not token.isdecimal() for token in count_tokens):
         return False
     if any(len(token) > 12 for token in count_tokens):
@@ -131,12 +142,10 @@ def _preflight_vasp_header(text: str) -> bool:
         return False
     if sum(counts) > MAX_ATOMS:
         raise InputValidationError(f"VASP structure exceeds {MAX_ATOMS} atoms")
-    if symbols != ["Mo", "S"]:
-        raise InputValidationError("POSCAR element order must be exactly 'Mo S'")
     return True
 
 
-def _read_structure(text: str, try_vasp: bool) -> tuple[Atoms, str]:
+def _read_structure(text: str, try_vasp: bool) -> tuple[Atoms, str, list[str]]:
     errors: list[str] = []
     if try_vasp:
         try:
@@ -148,8 +157,8 @@ def _read_structure(text: str, try_vasp: bool) -> tuple[Atoms, str]:
                     module=r"ase\.cell",
                 )
                 atoms = ase_read(io.StringIO(text), format="vasp")
-            _vasp_element_order(text)
-            return atoms, "vasp"
+            element_order = _vasp_element_order(text)
+            return atoms, "vasp", element_order
         except Exception as exc:
             errors.append(f"vasp: {exc}")
     else:
@@ -157,7 +166,8 @@ def _read_structure(text: str, try_vasp: bool) -> tuple[Atoms, str]:
 
     try:
         atoms = ase_read(io.StringIO(text), format="cif")
-        return atoms, "cif"
+        element_order = list(dict.fromkeys(atoms.get_chemical_symbols()))
+        return atoms, "cif", element_order
     except Exception as exc:
         errors.append(f"cif: {exc}")
 
@@ -166,28 +176,52 @@ def _read_structure(text: str, try_vasp: bool) -> tuple[Atoms, str]:
     )
 
 
-def _validate_and_order_atoms(atoms: Atoms, source_format: str) -> Atoms:
+def _validate_and_order_atoms(
+    atoms: Atoms,
+    source_format: str,
+    element_order: list[str],
+) -> Atoms:
     symbols = atoms.get_chemical_symbols()
     if not symbols:
         raise InputValidationError("structure contains no atoms")
     if len(symbols) > MAX_ATOMS:
         raise InputValidationError(f"structure exceeds {MAX_ATOMS} atoms")
-    if set(symbols) != {"Mo", "S"}:
-        raise InputValidationError("structure may contain only Mo and S")
-    mo_count = symbols.count("Mo")
-    s_count = symbols.count("S")
-    if mo_count <= 0 or s_count != 2 * mo_count:
-        raise InputValidationError("structure stoichiometry must be Mo:S = 1:2")
+    if (
+        not element_order
+        or len(element_order) > MAX_ELEMENT_TYPES
+        or len(set(element_order)) != len(element_order)
+        or set(element_order) != set(symbols)
+        or any(symbol not in atomic_numbers for symbol in symbols)
+    ):
+        raise InputValidationError("structure element set is invalid")
 
     if source_format == "vasp":
-        expected = ["Mo"] * mo_count + ["S"] * s_count
+        expected = [
+            symbol
+            for element in element_order
+            for symbol in [element] * symbols.count(element)
+        ]
         if symbols != expected:
-            raise InputValidationError("POSCAR atom groups must follow element order 'Mo S'")
+            raise InputValidationError("POSCAR atom groups must follow the element header")
         return atoms
 
-    order = [index for index, symbol in enumerate(symbols) if symbol == "Mo"]
-    order.extend(index for index, symbol in enumerate(symbols) if symbol == "S")
+    order = [
+        index
+        for element in element_order
+        for index, symbol in enumerate(symbols)
+        if symbol == element
+    ]
     return atoms[order]
+
+
+def _formula_and_counts(symbols: list[str], element_order: list[str]) -> tuple[str, dict[str, int]]:
+    counts = {element: symbols.count(element) for element in element_order}
+    divisor = math.gcd(*counts.values())
+    formula = "".join(
+        element + (str(count // divisor) if count // divisor != 1 else "")
+        for element, count in counts.items()
+    )
+    return formula, counts
 
 
 def _validate_geometry(atoms: Atoms) -> None:
@@ -221,19 +255,20 @@ def _write_poscar(atoms: Atoms) -> bytes:
 def parse_structure_bytes(content: bytes, filename: str) -> ParsedStructure:
     audit_filename = _safe_filename(filename)
     text = _decode_structure(content)
-    atoms, source_format = _read_structure(text, _preflight_vasp_header(text))
-    atoms = _validate_and_order_atoms(atoms, source_format)
+    atoms, source_format, element_order = _read_structure(
+        text, _preflight_vasp_header(text)
+    )
+    atoms = _validate_and_order_atoms(atoms, source_format, element_order)
     _validate_geometry(atoms)
     symbols = atoms.get_chemical_symbols()
-    mo_count = symbols.count("Mo")
-    s_count = symbols.count("S")
+    formula, counts = _formula_and_counts(symbols, element_order)
     cell_lengths = [float(value) for value in atoms.cell.lengths()]
     summary = {
         "atom_count": len(symbols),
         "cell_lengths_angstrom": cell_lengths,
-        "counts": {"Mo": mo_count, "S": s_count},
-        "elements": ["Mo", "S"],
-        "formula": "MoS2",
+        "counts": counts,
+        "elements": element_order,
+        "formula": formula,
         "periodic": [bool(value) for value in atoms.pbc],
     }
     return ParsedStructure(
@@ -245,9 +280,9 @@ def parse_structure_bytes(content: bytes, filename: str) -> ParsedStructure:
 
 
 def load_template(template_version: str) -> dict[str, Any]:
-    if template_version != TEMPLATE_VERSION:
-        raise InputValidationError("only template 'mos2_v1' is allowed")
-    path = TEMPLATE_ROOT / TEMPLATE_VERSION / "template.json"
+    if template_version not in SUPPORTED_TEMPLATE_VERSIONS:
+        raise InputValidationError("workflow template is not supported")
+    path = TEMPLATE_ROOT / template_version / "template.json"
     try:
         template = json.loads(
             path.read_text(encoding="utf-8"),
@@ -255,11 +290,35 @@ def load_template(template_version: str) -> dict[str, Any]:
         )
     except (OSError, json.JSONDecodeError) as exc:
         raise InputValidationError("fixed template is unavailable or invalid") from exc
-    if template.get("template_version") != TEMPLATE_VERSION:
-        raise InputValidationError("fixed template version does not match its directory")
+    if template.get("template_version") != template_version:
+        raise InputValidationError("template version does not match its directory")
     if tuple(step.get("key") for step in template.get("steps", ())) != FIXED_STEPS:
         raise InputValidationError("fixed template step definition is invalid")
     return template
+
+
+def template_key(template_version: str) -> str:
+    load_template(template_version)
+    return "mos2" if template_version == TEMPLATE_VERSION else "pbe_2d"
+
+
+def stage5_input_names(template_version: str, step_key: str) -> tuple[str, ...]:
+    template = load_template(template_version)
+    definitions = {
+        definition["key"]: definition for definition in template["steps"]
+    }
+    if step_key not in definitions:
+        raise InputValidationError("workflow stage is not supported")
+    kpoints = definitions[step_key]["kpoints"]
+    kpoints_name = (
+        "BAND_PATH.policy"
+        if kpoints.get("mode") == "vaspkit" and kpoints.get("task") == 302
+        else "KPOINTS"
+    )
+    base = ["INCAR", kpoints_name, "POTCAR.spec"]
+    if step_key == "relax":
+        base.insert(2, "POSCAR")
+    return tuple(base)
 
 
 def _validate_parameter_value(step: str, key: str, value: Any, rule: dict[str, Any]) -> Any:
@@ -295,6 +354,8 @@ def validate_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError
         except ValueError as exc:
             raise InputValidationError("upload source requires a canonical UUID") from exc
+    if payload["template_version"] == GENERIC_TEMPLATE_VERSION and source_kind != "upload":
+        raise InputValidationError("generic PBE template requires an uploaded structure")
 
     if type(payload["steps"]) is not list or tuple(payload["steps"]) != FIXED_STEPS:
         raise InputValidationError("workflow steps must be relax, scf, band, dos in order")
@@ -344,7 +405,7 @@ def validate_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "parameters": dict(sorted(normalized_parameters.items())),
         "source_kind": source_kind,
         "steps": list(FIXED_STEPS),
-        "template_version": TEMPLATE_VERSION,
+        "template_version": payload["template_version"],
     }
     if upload_id is not None:
         normalized["structure_upload_id"] = upload_id
@@ -400,6 +461,17 @@ def _render_kpoints(definition: dict[str, Any]) -> bytes:
     raise InputValidationError("fixed KPOINTS definition is invalid")
 
 
+def _render_kpoint_inputs(definition: dict[str, Any]) -> dict[str, bytes]:
+    if definition.get("mode") == "vaspkit" and definition.get("task") == 302:
+        return {
+            "BAND_PATH.policy": (
+                _canonical_json({"generator": "vaspkit", "task": 302, "version": 1})
+                + "\n"
+            ).encode("ascii")
+        }
+    return {"KPOINTS": _render_kpoints(definition)}
+
+
 def _ensure_inside(path: Path, root: Path) -> None:
     try:
         path.resolve().relative_to(root)
@@ -429,12 +501,19 @@ def materialize_inputs(
     if validated["source_kind"] == "builtin":
         if structure is not None:
             raise InputValidationError("builtin source must use the fixed structure")
-        builtin_path = TEMPLATE_ROOT / TEMPLATE_VERSION / "POSCAR"
+        builtin_path = TEMPLATE_ROOT / validated["template_version"] / "POSCAR"
         parsed_structure = parse_structure_bytes(builtin_path.read_bytes(), "POSCAR")
     else:
         if not isinstance(structure, ParsedStructure):
             raise InputValidationError("upload source requires a parsed structure")
         parsed_structure = structure
+    if validated["template_version"] == TEMPLATE_VERSION and (
+        parsed_structure.summary.get("elements") != ["Mo", "S"]
+        or parsed_structure.summary.get("counts", {}).get("Mo", 0) <= 0
+        or parsed_structure.summary.get("counts", {}).get("S")
+        != 2 * parsed_structure.summary.get("counts", {}).get("Mo", 0)
+    ):
+        raise InputValidationError("legacy MoS2 template requires one Mo and two S atoms")
 
     root = Path(workflow_root).resolve()
     if root.exists() and not root.is_dir():
@@ -450,7 +529,13 @@ def materialize_inputs(
     if completed_dir.exists() or staging_dir.exists():
         raise InputValidationError("generated workflow directory already exists")
 
-    template = load_template(TEMPLATE_VERSION)
+    template = load_template(validated["template_version"])
+    if "potcar_symbols" in template:
+        potcar_symbols = template["potcar_symbols"]
+    elif template.get("potcar_policy") == {"source": "structure_elements"}:
+        potcar_symbols = parsed_structure.summary["elements"]
+    else:
+        raise InputValidationError("template POTCAR policy is invalid")
     records: list[dict[str, Any]] = []
     try:
         staging_dir.mkdir(mode=0o700)
@@ -461,7 +546,9 @@ def materialize_inputs(
             _ensure_inside(step_dir, root)
             step_dir.mkdir(mode=0o700)
             step_dir.chmod(0o700)
-            base_incar = (TEMPLATE_ROOT / TEMPLATE_VERSION / f"INCAR.{step}").read_text(
+            base_incar = (
+                TEMPLATE_ROOT / validated["template_version"] / f"INCAR.{step}"
+            ).read_text(
                 encoding="utf-8"
             )
             kpoints_definition = step_definition["kpoints"]
@@ -470,10 +557,10 @@ def materialize_inputs(
                 kpoints_definition = {"mode": "gamma", "mesh": reviewed_mesh}
             contents = {
                 "INCAR": _render_incar(base_incar, validated["parameters"].get(step, {})),
-                "KPOINTS": _render_kpoints(kpoints_definition),
                 "POSCAR": parsed_structure.canonical_poscar,
-                "POTCAR.spec": ("\n".join(template["potcar_symbols"]) + "\n").encode("ascii"),
+                "POTCAR.spec": ("\n".join(potcar_symbols) + "\n").encode("ascii"),
             }
+            contents.update(_render_kpoint_inputs(kpoints_definition))
             if step == "scf" and _scf_incar_transform is not None:
                 transformed = _scf_incar_transform(contents["INCAR"])
                 if not isinstance(transformed, bytes) or transformed == contents["INCAR"]:
@@ -500,5 +587,5 @@ def materialize_inputs(
         "directory_id": directory_id,
         "files": records,
         "structure_summary": parsed_structure.summary,
-        "template_version": TEMPLATE_VERSION,
+        "template_version": validated["template_version"],
     }

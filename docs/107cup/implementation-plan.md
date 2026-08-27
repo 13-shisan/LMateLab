@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 107 平台独立交付一个围绕固定 MoS2 `relax -> SCF -> BAND -> DOS` 闭环的 LMateLab 竞赛版本，并提供可追溯、可恢复、可只读演示的真实 Slurm/VASP 证据链。
+**Goal:** 在 107 平台独立交付一个围绕受控二维周期结构 `relax -> SCF -> BAND -> DOS` 闭环的 LMateLab 竞赛版本，并提供可追溯、可恢复、可只读演示的真实 Slurm/VASP 证据链。
 
 **Architecture:** 源码由私有 Gitea 管理，107 只读拉取固定提交；构建、网页服务和 VASP 作业全部通过 Slurm 运行在 107 计算节点。4090 仅作为可替换的网络转发与 IP 白名单入口，不保存竞赛业务数据，也不执行 LMateLab 或 VASP 业务逻辑。
 
@@ -41,18 +41,19 @@
 第一版只实现以下主线：
 
 ```text
-固定 MoS2 模板或 Operator 上传一个受限的小型 POSCAR/CIF
+内置 MoS2 基线或 Operator 上传一个受限的小型周期 POSCAR/CIF
   -> 输入生成与校验
+  -> PAW-PBE POTCAR 由结构元素和 VASPKIT 103 生成
   -> 可追溯工作流草稿
   -> Slurm 受控执行
   -> relax
   -> SCF
-  -> BAND
+  -> BAND（基于最终晶格由 VASPKIT 302 生成路径）
   -> DOS
   -> 解析、周期表驱动的 VASP 数据库、图表、导出和证据包
 ```
 
-上传结构只扩展输入来源，不扩展模板和命令范围：单文件最大 `1 MiB`、最多 `200` 个原子，只接受文本 POSCAR/CIF，不接受压缩包、目录、任意模板或任意路径。
+上传结构使用固定 `pbe_2d_v1` 基线，不扩展命令范围：单文件最大 `1 MiB`、最多 `200` 个原子、最多 `16` 种元素，只接受全周期文本 POSCAR/CIF，不接受压缩包、目录、任意模板或任意路径。该基线仅覆盖非磁性、无 SOC、无 DFT+U、无杂化泛函的 PAW-PBE 四步流程；“输入可执行”不等于对每种材料都具备充分的科学参数或收敛保证。
 
 明确不进入第一版：
 
@@ -60,7 +61,7 @@
 - 机器学习、主动学习和跨服务器迁移。
 - QE、EPW、Gaussian、DeepMD、LASP 和 CP2K 工作流。
 - 将原 4090 LMateLab 生产数据库、上传文件、日志或密钥复制到 107。
-- 泛化材料模板、任意命令执行、任意 Slurm 脚本和任意路径浏览。
+- 任意计算模板、任意赝势目录、任意命令执行、任意 Slurm 脚本和任意路径浏览。
 - 为了“看起来完整”而扩展实验记录、学术报告、文献和服务器监控功能。
 
 不再单独安排人工 SCF 基线。VASP、VASPKIT 和现有提交脚本视为可用；第一次真实 VASP 验收合并到阶段 7，失败时保留证据并就地处理。
@@ -139,11 +140,11 @@
 |---|---|---|---|
 | 1. 竞赛仓库初始化 | PARTIAL | Windows 本地 `main`、Gitea `main` 与 107 只读 detached checkout 已同步到 PR #28 合并提交 `044ada5`，107 Deploy Key 只读和 `main` 保护均已完成 | 取得另外两名成员的个人 Git 身份和 PR 证据 |
 | 2. 无 Docker 构建与发布 | DONE | Job 33839 完成构建和原子切换；Job 33979 证明失败不切换；Job 34005 证明旧发布无需重建即可隔离启动 | 保持证据和发布不可变；平台 `sacct` 空表作为已知限制保留 |
-| 3. 最小 107 网页服务 | DONE | PR #52/#53/#70 已部署；当前 Job `43710/anode16` 运行发布 `79e7f773...`，4090 每分钟短守护、maintenance、单候选恢复和先验切换已通过真实停服/恢复验收 | 按运行手册维护；SSH 主连接真实失效时由 Operator 完成一次二次验证 |
+| 3. 最小 107 网页服务 | DONE | 当前稳定 Job `43737/anode16` 运行发布 `b58cfe40...`；4090 每分钟短守护、maintenance、单候选恢复和先验切换已通过真实停服/恢复验收 | 在通用工作流候选通过前保持 Job `43737` 不动；SSH 主连接真实失效时由 Operator 完成一次二次验证 |
 | 4. 访问与角色控制 | PARTIAL | Viewer/Operator 认证已通过；阶段 5 业务路由角色边界已验收；阶段 6 Job `38628` 再证明非归属 Slurm 作业取消失败关闭 | 配置三名成员独立应用身份 |
-| 5. 工作流模型与输入校验 | DONE | 固定提交 `46f2f0d` 已在 107 完成前快照、Slurm 构建、私有库迁移、API/SQLite、三视口浏览器、停服和后快照闭环；独立证据 PR #22 已合并为 `3cf9b44` | 保持证据不可变 |
+| 5. 工作流模型与输入校验 | PARTIAL | 旧 `mos2_v1` 证据保持完成；`pbe_2d_v1` 通用周期结构、动态元素顺序和安全 422 错误已实现，107 Job `46096` 已通过受影响的后端与 runner 测试 `152/152`，但尚未构建和发布 | 合并后通过 107 正式构建，并以 WS2 验证上传、草稿、attempt 输入和错误边界 |
 | 6. Slurm 适配器 | DONE | PR #27 合并提交 `9346552` 已在 107 完成 Job `38620` 前快照、Job `38621` 构建、Job `38623` smoke 与 Job `38629` 后快照；`38625/38626/38627/38628` 分别覆盖成功、失败、自有取消和非归属拒绝，历史失败 Job `38598` 保留；独立证据 PR #28 已合并为 `044ada5` 并完成三端同步 | 保持证据不可变；阶段 7 仅在用户明确确认后开始 |
-| 7. VASP 四步闭环 | DONE | 成功链 Job `40212/40250/40251/40252` 均通过；固定失败链 Job `40264/40265` 精确收敛为 SCF `scientific_failed/electronic_not_converged`，BAND/DOS 为 `blocked` 且零 attempt、零目录、零 Job ID；核验 Job `40274` 与浏览器结果一致 | 保持 `docs/107cup/stage7-vasp-evidence.md` 和真实输出不可变；下一阶段不得改变固定闭环合同 |
+| 7. VASP 四步闭环 | PARTIAL | 旧 MoS2 成功/失败链证据保持完成且不可变；WS2 Job `46090` 已在 107 真实验证 VASPKIT 103 推荐 `W_sv/S`、源文件逐字节核对和基于实际晶格的 302 `GAMMA-M-K-GAMMA`，但没有运行 WS2 VASP，也尚未部署 | 合并、正式构建和候选服务通过后再做 Operator 上传与完整四步验收；失败时保留旧 Job `43737` |
 | 8. 结果解析与证据包 | DONE | PR `#42-#48` 已合并；Job `40308` 真实只读解析、Job `40831` 最终构建及 Job `40832` 稳定部署通过；用户确认结构、BAND、DOS、成功/失败详情、只读数据库和五种下载正常，旧服务与临时转发已清理 | 保持 `docs/107cup/stage8-results-evidence.md`、真实结果和下载哈希不可变；进入阶段 9 |
 | 9. 恢复、安全和回归 | DONE | 功能 PR `#50` 和证据 PR `#51` 已合并；Job `40860` 构建、`40910/40913/40923` 快照、`40911` 隔离回滚、`40916` 真实结果只读复核、`40917` 稳定服务和 Viewer 浏览器验收全部通过 | 保持 `docs/107cup/stage9-recovery-security-evidence.md`、正式 SQLite、Stage 7/8 attempt 和证据包不可变；进入阶段 10 |
 | 10. 比赛交付验收 | PARTIAL | PR #55/#56/#57/#60/#61/#63/#66/#68/#70 已合并；修改密码版由 Job `43709/anode01` 构建、`43710/anode16` 提供服务并经 `43711/anode16` 只读验收；公网入口和发布身份一致 | 当前发布仍需由用户现场完成一次真实改密与全新认证态 Viewer/Operator 复跑，三名成员还需使用各自 Gitea 身份完成独立复核 |
@@ -404,7 +405,7 @@ workflow_templates
 
 - [x] 先写失败测试覆盖缺文件、路径穿越、命令注入、错误元素顺序和参数越界。
 - [x] 创建 Alembic migration，并在全新数据库和上一 schema 的数据库副本上各运行一次；两者均升级到 `107c0ffee001`，六张表齐全且 `PRAGMA integrity_check=ok`。
-- [x] 固定 MoS2 模板版本为 `mos2_v1`，不接受任意模板上传。
+- [x] 保留内置 MoS2 基线 `mos2_v1`，上传周期结构使用固定 `pbe_2d_v1`；不接受用户上传模板。
 - [x] Operator 可以上传一个最大 `1 MiB`、最多 `200` 原子的文本 POSCAR/CIF；Viewer 和 demo 模式在 provider 调用前拒绝写入。
 - [x] 上传文件先使用结构解析器读取并记录 SHA-256，不依赖扩展名、MIME 字符串或用户提供的路径决定可信格式。
 - [x] 合法输入先保存为可追溯草稿；只有 Operator 明确确认后才进入 `validated`，界面显示“已校验，等待 Slurm 适配器”。
@@ -469,6 +470,8 @@ relax -> SCF -> BAND -> DOS
 - [x] relax 验收结构输出、电子收敛、离子收敛和正常结束标记。
 - [x] SCF 验收 CHGCAR、WAVECAR、费米能级和正常结束标记。
 - [x] BAND 只复用已验收 SCF 产物并记录输入文件哈希。
+- [ ] `pbe_2d_v1` 的 POTCAR 按最终 POSCAR 元素顺序由 VASPKIT `103` 生成，并逐字节核对固定 PAW-PBE 源文件后记录哈希。
+- [ ] `pbe_2d_v1` 的 BAND attempt 继承已验收 SCF 的最终 `POSCAR` 和 `CHGCAR`，由 VASPKIT `302` 生成 `KPATH.in`，受控发布为 `KPOINTS` 并记录生成器证据。
 - [x] DOS 只复用已验收 SCF 产物并记录输入文件哈希。
 - [x] 记录 VASP 版本、VASPKIT 版本、GPU/CPU、峰值内存、耗时和 Slurm ExitCode。
 - [x] 执行一个完整成功工作流。
@@ -999,3 +1002,15 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 候选服务 Job `43737/anode16:18731` 在排除旧节点 `anode18` 后提交，内部 live/ready、commit/manifest 和服务状态一致后，4090 恢复器完成临时探测与正式 relay 切换。Windows `127.0.0.1:21763`、4090 内部入口和公网 `222.195.94.37:18733` 均返回新身份；旧 Job `43726/anode18` 经完整归属核验后受控停止为 `CANCELLED`，旧端口不可达，未触及共享账号下其他作业。
 - Stage 10 只读 Job `43738/anode16` 为 `COMPLETED/0:0`，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。数据库 `integrity_check=ok`，三条既有工作流与固定成功/失败证据包哈希未变，没有提交 VASP；证据 manifest 和摘要 SHA-256 分别为 `b316bdc39ee29dc62c754d5cd06836e2e7a8b34fb2f99dd700c3ddf059cb81d6` 与 `6633e7aa0b282487c4c7e6dc62112255b704fc274374ddf9566317f79b3199ae`。
 - 生产运行的是已通过本地三视口布局与交互验收的同一固定前端 release。本次 Chrome 登录态控制未能建立，且未读取浏览器存储或真实密码，因此不把本地截图冒充全新生产认证会话；用户刷新后的生产 VASP 数据库页面、全新 Viewer/Operator 全流程和三名成员独立复核仍属人工门禁，Stage 10 保持 `PARTIAL`。
+
+### 17.25 通用周期结构 POTCAR 与 BAND 路径修复
+
+- 分支 `codex/107cup-general-material-workflow` 保留 `mos2_v1` 历史合同，为上传结构新增固定 `pbe_2d_v1`。当前范围严格限制为全周期 POSCAR/CIF、最多 `1 MiB`、`200` 原子和 `16` 种元素，以及非磁性、无 SOC、无 DFT+U、无杂化泛函的 PAW-PBE 四步基线；不开放任意模板、赝势路径、命令或 Slurm 参数。
+- Stage 5 从结构解析器取得规范元素顺序，为每一步写入对应 `POTCAR.spec`。BAND 不预写固定 `KPOINTS`，只发布不可变 `BAND_PATH.policy`；attempt 从已验收 SCF 继承最终 `POSCAR` 和 `CHGCAR`。
+- 计算节点 runner 先执行 VASPKIT `103`，把结构请求元素保留在 `POTCAR.spec`，把实际推荐赝势写入 `POTCAR.resolved`。随后对解析后的源执行普通文件、非符号链接、基础元素/顺序和 SHA-256 检查，并把生成 POTCAR 与按解析顺序直接拼接的 PAW-PBE 源文件逐字节比较。旧 `Mo_sv/S` 继续额外执行既有两个源哈希和合并哈希门禁。
+- 通用 BAND runner 在已验收 SCF 的最终结构目录执行 VASPKIT `302`，只接受非符号链接、非空、最大 `8192` 字节且具有 `Line-mode/Reciprocal` 头的 `KPATH.in`，再发布为 `KPOINTS`，同时记录 `band-path-generator.txt`。后端验收接受 VASPKIT 1.5.1 的真实 `kx ky kz LABEL` 与兼容的 `kx ky kz ! LABEL`，并检查标签、数值有限性、分段点数和值域。
+- 初次真实预检 Job `46081` 保留在 `/home/scc/pb23030683/lmatelab-107cup/evidence/stage7/generic-vaspkit-preflight-46081`。它证明 VASPKIT 103 对结构元素 `W/S` 实际推荐 `W_sv/S`，也暴露了旧实现错误要求推荐名必须仍为 `W/S`；该失败现场不得删除。
+- 修复后 Job `46090/anode01` 输出 `GENERIC_VASPKIT_PREFLIGHT_OK`，stderr 为 `0` 字节。`POTCAR.spec` 为 `W/S`，`POTCAR.resolved` 为 `W_sv/S`，真实源 SHA-256 分别为 `931c2d770f65867ef30f3db3421922900fc0890ebac5c3e12f63b6a2064023d7` 和 `0fc7481fb0695f01bdc6462160264c5c84044ae9ec85a907d398b887a2bc3132`；VASPKIT 302 从 WS2 六方晶格生成 `GAMMA-M-K-GAMMA`，manifest SHA-256 为 `003c2c1b55e60db99d37621ac3929bc4f9a34d611949efc30cf3bf06d27b07af9`。该作业没有 VASP 输出。
+- Job `46092` 因 `sbatch --wrap` 默认 `/bin/sh` 不支持 `pipefail` 而在测试前退出；Job `46093` 随后真实暴露两项 302 元数据未使用 8 KiB 上限。两份失败日志保留。修复后的 Job `46096` 在提交 `6898739efe9aa451ffce3320962fb97c81321790` 上通过 `test_competition_vasp` 与 `test_107cup_deploy_contract` 共 `152/152`。
+- 本地同时通过 Python 编译、`git diff --check` 和 WSL runner/部署合同 `46/46`。这些结果证明 103/302 与后端合同，不表示 WS2 已运行真实 VASP，也不表示该分支已经部署。
+- [ ] 完整构建、候选服务、只读验收和 Operator 上传/草稿浏览器复核通过后，再把阶段 5/7 恢复为 `DONE`；旧稳定 Job `43737` 在候选通过前不得停止。

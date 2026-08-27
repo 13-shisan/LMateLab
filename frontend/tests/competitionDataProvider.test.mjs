@@ -203,6 +203,32 @@ test('live request failures expose only stable status-based public errors', asyn
   }
 });
 
+test('live structure validation uses only allowlisted error headers', async () => {
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    fetchImpl: async () => new Response(
+      JSON.stringify({ detail: '/home/private/ase-parser-trace' }),
+      {
+        status: 422,
+        headers: {
+          'content-type': 'application/json',
+          'x-error-code': 'structure_format_invalid',
+        },
+      },
+    ),
+  });
+
+  await assert.rejects(
+    () => provider.uploadStructure(new Blob(['invalid'])),
+    (error) => {
+      assert.equal(error.code, 'structure_format_invalid');
+      assert.equal(error.message, '无法按 POSCAR 或 CIF 解析结构');
+      assert.doesNotMatch(error.message, /home|ase|trace/i);
+      return true;
+    },
+  );
+});
+
 test('live malformed JSON responses never retain the response text', async () => {
   const privateResponse = '{"detail":"/home/private/sensitive-response-marker\n$(scancel 1)"';
   for (const status of [200, 503]) {

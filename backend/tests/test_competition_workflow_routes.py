@@ -49,6 +49,10 @@ Direct
 0.333333 0.666667 0.422000
 """
 
+VALID_WS2_POSCAR = VALID_POSCAR.replace(b"MoS2", b"WS2", 1).replace(
+    b"Mo S", b"W S", 1
+)
+
 TEST_RELEASE_COMMIT = "b" * 40
 
 
@@ -278,6 +282,28 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             run = session.get(WorkflowRun, draft["id"])
             self.assertEqual(self.operator_id, run.owner_id)
 
+    def test_operator_can_create_generic_ws2_workflow(self):
+        upload = self.client.post(
+            "/api/competition/structures",
+            files={"file": ("WS2.vasp", VALID_WS2_POSCAR, "text/plain")},
+        )
+        self.assertEqual(201, upload.status_code, upload.text)
+        self.assertEqual("WS2", upload.json()["summary"]["formula"])
+
+        draft = self.create_draft(payload={
+            "template_version": "pbe_2d_v1",
+            "source_kind": "upload",
+            "structure_upload_id": upload.json()["id"],
+            "steps": ["relax", "scf", "band", "dos"],
+            "parameters": {},
+        })
+
+        self.assertEqual("WS2", draft["structure_summary"]["formula"])
+        self.assertEqual("pbe_2d_v1", draft["template_version"])
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, draft["id"])
+            self.assertEqual("WS2", run.material)
+
     def test_oversize_upload_is_rejected_before_structure_service(self):
         with mock.patch(
             "routers.competition_workflows.stage_structure"
@@ -294,7 +320,19 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
             )
 
         self.assertEqual(422, response.status_code, response.text)
+        self.assertEqual("structure_file_too_large", response.headers.get("X-Error-Code"))
         stage_structure_spy.assert_not_called()
+        self.assertNotIn(str(self.workflow_root), response.text)
+
+    def test_malformed_structure_returns_safe_actionable_validation_code(self):
+        response = self.client.post(
+            "/api/competition/structures",
+            files={"file": ("WS2.vasp", b"not a POSCAR or CIF\n", "text/plain")},
+        )
+
+        self.assertEqual(422, response.status_code, response.text)
+        self.assertEqual("structure_format_invalid", response.headers.get("X-Error-Code"))
+        self.assertEqual("无法按 POSCAR 或 CIF 解析结构", response.json()["detail"])
         self.assertNotIn(str(self.workflow_root), response.text)
 
     def test_exact_upload_limit_reaches_structure_service(self):

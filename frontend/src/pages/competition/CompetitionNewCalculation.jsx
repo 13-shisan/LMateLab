@@ -15,7 +15,7 @@ import './CompetitionPages.css';
 const WORKFLOW_STEPS = [
   { key: 'relax', label: 'relax', dependsOn: [], purpose: '优化离子位置与晶格' },
   { key: 'scf', label: 'SCF', dependsOn: ['relax'], purpose: '生成已验收自洽电荷密度' },
-  { key: 'band', label: 'BAND', dependsOn: ['scf'], purpose: '沿固定高对称路径计算能带' },
+  { key: 'band', label: 'BAND', dependsOn: ['scf'], purpose: '根据最终晶格自动生成高对称路径' },
   { key: 'dos', label: 'DOS', dependsOn: ['scf'], purpose: '基于自洽结果计算态密度' },
 ];
 
@@ -32,7 +32,7 @@ const STEP_PARAMETERS = {
   },
   band: {
     ENCUT: '520 eV',
-    'k-point': '固定高对称路径',
+    'k-point': 'VASPKIT 302 自动生成',
     convergence: '复用已验收 SCF 电荷密度',
   },
   dos: {
@@ -120,7 +120,7 @@ function buildDraftPayload({ sourceKind, structureUpload, parameters }) {
     throw new Error('请先上传并通过服务端解析结构文件。');
   }
   const payload = {
-    template_version: 'mos2_v1',
+    template_version: sourceKind === 'builtin' ? 'mos2_v1' : 'pbe_2d_v1',
     source_kind: sourceKind,
     steps: ['relax', 'scf', 'band', 'dos'],
     parameters,
@@ -165,7 +165,8 @@ function describeCommandStatus({
   if (serverState.structureUpload) {
     return `结构已由服务端解析 · 上传 ID ${serverState.structureUpload.id}`;
   }
-  return `未保存 · mos2_v1 · ${sourceKind === 'builtin' ? '内置 MoS2' : '上传结构'}`;
+  const templateVersion = sourceKind === 'builtin' ? 'mos2_v1' : 'pbe_2d_v1';
+  return `未保存 · ${templateVersion} · ${sourceKind === 'builtin' ? '内置 MoS2' : '上传结构'}`;
 }
 
 function isInputMutationLocked({
@@ -444,7 +445,7 @@ export default function CompetitionNewCalculation() {
       <header className="competition-calculation-header">
         <div>
           <h1>新建 VASP 计算</h1>
-          <p>单层 MoS2 固定四步工作流审阅</p>
+          <p>受控二维材料 PBE 四步工作流审阅</p>
         </div>
         {readOnly ? <PreviewReadOnlyNotice /> : null}
       </header>
@@ -455,7 +456,10 @@ export default function CompetitionNewCalculation() {
             <span>01</span>
             <h2 id="competition-source-title">来源与结构</h2>
           </div>
-          <p>模板 mos2_v1 · 输入 SHA-256：保存草稿后由服务端生成</p>
+          <p>
+            模板 {sourceKind === 'builtin' ? 'mos2_v1' : 'pbe_2d_v1'}
+            {' · '}输入 SHA-256：保存草稿后由服务端生成
+          </p>
         </div>
 
         <div className="competition-source-segment" role="group" aria-label="结构来源">
@@ -495,8 +499,8 @@ export default function CompetitionNewCalculation() {
                   onChange={handleStructureFileChange}
                 />
                 <strong>{uploadPending ? '服务端解析中' : (originalFileName || '未选择文件')}</strong>
-                <span>POSCAR/CIF 文本，最大 1 MiB，最多 200 个原子</span>
-                <small>结构内容仅由服务端解析；文件名仅用于审计显示</small>
+                <span>周期 POSCAR/CIF 文本，最大 1 MiB，最多 200 个原子</span>
+                <small>元素决定 POTCAR.spec；VASPKIT 103 在计算节点生成 POTCAR</small>
                 {originalFileName && !uploadPending ? (
                   <button
                     className="competition-upload-clear"
