@@ -1724,9 +1724,10 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn("LMATELAB_REGISTRATION_ENABLED=0", source)
         self.assertIn("LMATELAB_PASSWORD_RESET_ENABLED=0", source)
 
-    def test_public_relay_allows_login_but_rejects_business_writes(self):
+    def test_public_relay_allows_only_bounded_operator_workflow_writes(self):
         relay = self.read_required("relay/nginx.conf.example")
         self.assertIn("listen 18733", relay)
+        self.assertIn("client_max_body_size 2m", relay)
         self.assertIn("client_body_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/client-body", relay)
         self.assertIn("proxy_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/proxy-temp", relay)
         self.assertIn("proxy_http_version 1.1", relay)
@@ -1738,13 +1739,48 @@ class CompetitionDeployContractTests(unittest.TestCase):
         )[0]
         self.assertIn("limit_except POST", change_password)
         self.assertIn("deny all", change_password)
-        self.assertIn("proxy_pass http://127.0.0.1:18734", change_password)
+        self.assertIn("proxy_pass http://127.0.0.1:18740", change_password)
+
+        for exact_path in (
+            "/api/competition/structures",
+            "/api/competition/drafts",
+        ):
+            marker = f"location = {exact_path}"
+            self.assertIn(marker, relay)
+            location = relay.split(marker, 1)[1].split("location ", 1)[0]
+            self.assertIn("limit_except POST", location)
+            self.assertIn("deny all", location)
+            self.assertIn("proxy_pass http://127.0.0.1:18740", location)
+
+        uuid_pattern = (
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        command_marker = (
+            'location ~ "^/api/competition/workflows/'
+            f'{uuid_pattern}/(submit|start|cancel)$"'
+        )
+        retry_marker = (
+            'location ~ "^/api/competition/workflows/'
+            f'{uuid_pattern}/steps/(relax|scf|band|dos)/retry$"'
+        )
+        for marker in (command_marker, retry_marker):
+            self.assertIn(marker, relay)
+            location = relay.split(marker, 1)[1].split("location ", 1)[0]
+            self.assertIn("limit_except POST", location)
+            self.assertIn("deny all", location)
+            self.assertIn("proxy_pass http://127.0.0.1:18740", location)
+
+        self.assertNotIn("location /api/competition/", relay)
+        self.assertNotIn("/api/competition/agent/", relay)
+        self.assertNotIn("/api/vasp/", relay)
         self.assertIn("limit_except POST", relay)
         self.assertIn("location /api/", relay)
-        self.assertIn("limit_except GET", relay)
-        self.assertIn("deny all", relay)
+        fallback = relay.split("location /api/", 1)[1].split("location /", 1)[0]
+        self.assertIn("limit_except GET", fallback)
+        self.assertIn("deny all", fallback)
         self.assertIn("allow 114.214.203.210", relay)
-        self.assertIn("proxy_pass http://127.0.0.1:18734", relay)
+        self.assertIn("proxy_pass http://127.0.0.1:18740", relay)
 
 
 if __name__ == "__main__":
