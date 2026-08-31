@@ -1021,3 +1021,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 候选服务 Job `46107` 在排除旧节点 `anode16` 后运行于 `P107-A100/anode19:18731`。内部 `verify-runtime.sh`、4090 恢复状态、Windows Operator 隧道和公网 `222.195.94.37:18733` 的 live/ready 均返回 Job `46107`、commit `6012b2b` 和同一 manifest。旧 Job `43737/anode16` 经用户、JobName、Account、Partition/QOS、Command、WorkDir 和节点完整匹配后受控停止为 `CANCELLED`；旧端口已关闭，未触及共享账号下其他作业。
 - Stage 10 只读 Job `46109/anode19` 为 `COMPLETED/0:0`，耗时 41 秒，输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为空。两套数据库完整性为 `ok`，release `653` 项清单、4 条现有工作流和既有成功/失败证据只读复核通过；证据 manifest 与 summary 的 SHA-256 分别为 `28709bb9a51a8dde374b3d99f223a257b5781a694d01c65edd191b7b9d1f909d` 和 `5bd4eb5f54afc66c2a4b96ea6ccbd8c18c5fc4f845a6d4dae58a78dc8448ce94`。该作业没有提交 VASP。
 - [ ] 当前机器门禁已完成；阶段 5/7 仍保持 `PARTIAL`，直到 Operator 在全新登录会话完成通用结构上传、草稿和提交前校验，并在明确授权后取得 WS2 四步真实 VASP 证据。不得把 Job `46090` 的无 VASP 预检或 Job `46109` 的只读验收写成 WS2 计算完成。
+
+### 17.26 公网 Operator 精确写入门禁候选
+
+- 用户明确要求队友无需各自建立 SSH 隧道，在白名单网络中直接通过 `http://222.195.94.37:18733` 使用各自 Operator 账号提交和取消计算。
+- 候选只为 `/api/competition/structures`、`/api/competition/drafts` 以及带严格 UUID 的 `submit|start|cancel|retry` 路径增加 POST 例外。通用 `/api/` 仍只允许 GET，不放行注册、Agent、VASP/QE 数据库写入、管理接口或任意工作流路径。
+- 白名单只是第一层；FastAPI 的 `require_operator` 和 owner 范围检查继续是必须门禁。Nginx 请求体上限为 `2 MiB` 仅用于容纳 multipart 开销，后端结构文件上限仍为 `1 MiB`。
+- 当前入口是 HTTP，没有 TLS，且 `211.86.0.0/16` 白名单覆盖较广。该方案是比赛期间受限入口，不得仅依赖 IP 认证，也不得描述为已完成互联网级 TLS 安全。
+- [ ] 完成门禁：部署前合同测试通过；4090 上先备份活动配置并运行 `nginx -t`；重载后用无副作请求证明精确 POST 到达后端，普通业务 POST 仍为 `403`，Viewer 写入仍被后端拒绝，live/ready 身份不变。本节候选验证不提交真实 VASP。
