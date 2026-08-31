@@ -1028,4 +1028,8 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 候选只为 `/api/competition/structures`、`/api/competition/drafts` 以及带严格 UUID 的 `submit|start|cancel|retry` 路径增加 POST 例外。通用 `/api/` 仍只允许 GET，不放行注册、Agent、VASP/QE 数据库写入、管理接口或任意工作流路径。
 - 白名单只是第一层；FastAPI 的 `require_operator` 和 owner 范围检查继续是必须门禁。Nginx 请求体上限为 `2 MiB` 仅用于容纳 multipart 开销，后端结构文件上限仍为 `1 MiB`。
 - 当前入口是 HTTP，没有 TLS，且 `211.86.0.0/16` 白名单覆盖较广。该方案是比赛期间受限入口，不得仅依赖 IP 认证，也不得描述为已完成互联网级 TLS 安全。
-- [ ] 完成门禁：部署前合同测试通过；4090 上先备份活动配置并运行 `nginx -t`；重载后用无副作请求证明精确 POST 到达后端，普通业务 POST 仍为 `403`，Viewer 写入仍被后端拒绝，live/ready 身份不变。本节候选验证不提交真实 VASP。
+- PR #79 已将功能提交 `956804701414ba89243dd169e83b58c94ddcb3ff` 合并为 `cf813fe9564b2d29864acce089d21413547b3d94`。本地部署合同 `33/33` 通过；4090 上与合并后 `main` blob 一致的候选配置通过 Nginx `1.18.0` 语法检查。
+- 107 Slurm Job `50263` 固定运行功能提交的部署合同和工作流路由权限测试，输出 `PUBLIC_OPERATOR_WRITE_TEST_OK` 并通过 `78/78`。短作业结束后 `squeue/sacct` 无保留行，因此不写成 `COMPLETED/0:0`；stdout/stderr 为 `30/23287` 字节，SHA-256 分别为 `47ef178c7361ea0adf6e0f921b0092338423d46d6456215cde5a48dcb0d18a92` 与 `42146f5a8c0d9b72b6df752c95e8ecc97d3149f30162dbf10ca357ee809cf59d`，权限已收紧为 `0600`。
+- 4090 活动配置以旧 SHA-256 锁定后备份、原子替换并 reload；新配置为 `0600`，SHA-256 为 `88b62e7331dda744a0d0ede7c94921eeb197a6b83af0667105ed1932816c6b6b`。备份 `nginx.conf.before-public-operator-write.20260831T035304Z` 为 `0600`，SHA-256 为 `6c6dafe1d3091684e372a3431b562a5d05a829e499479e88ba97bd7f377211dc`。
+- 公网无认证真实 multipart 结构上传与 `drafts/submit/start/cancel/retry` 均到达 FastAPI 并返回 `401`；注册、Agent、VASP 数据库 POST 和对写入路径的 GET 仍由 Nginx 返回 `403`。`live/ready` 仍返回 Job `46107`、`anode19`、运行提交 `6012b2b...` 和原 manifest。
+- [x] 机器门禁完成；本次没有读取真实密码/JWT，没有创建草稿、工作流或 VASP Job。队友仍需使用各自 Operator 账号完成一次真实公网上传/草稿验收；在用户明确授权前不点击正式提交。
