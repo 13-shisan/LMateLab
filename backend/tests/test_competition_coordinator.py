@@ -1595,15 +1595,46 @@ class CoordinatorRetryTests(CoordinatorTestCase):
         self.assertEqual("cancelling", self.latest_attempt("relax").status)
         self.assertEqual("cancelling", self.run_status())
 
-    def test_workflow_cancel_rejects_non_owner_and_zero_active_attempts(self):
+    def test_workflow_cancel_handles_validated_run_before_first_attempt(self):
         with self.assertRaises(CoordinatorError) as non_owner:
             self.coordinator.cancel(self.workflow_id, self.owner_id + 1)
         self.assertEqual("workflow_not_found", non_owner.exception.code)
 
-        with self.assertRaises(CoordinatorError) as zero:
-            self.coordinator.cancel(self.workflow_id, self.owner_id)
-        self.assertEqual("workflow_not_cancellable", zero.exception.code)
+        outcome = self.coordinator.cancel(self.workflow_id, self.owner_id)
+
+        self.assertEqual(self.workflow_id, outcome.workflow_id)
+        self.assertIsNone(outcome.attempt_id)
+        self.assertIsNone(outcome.job_id)
+        self.assertEqual("cancelled", outcome.status)
+        self.assertEqual("cancelled_before_start", outcome.result)
+        self.assertEqual("cancelled", self.run_status())
         self.assertEqual([], self.slurm.cancelled_jobs)
+        with self.SessionLocal() as session:
+            steps = session.scalars(
+                select(WorkflowStep)
+                .where(WorkflowStep.workflow_id == self.workflow_id)
+                .order_by(WorkflowStep.position)
+            ).all()
+            attempts = session.scalar(
+                select(func.count())
+                .select_from(WorkflowAttempt)
+                .join(WorkflowStep, WorkflowStep.id == WorkflowAttempt.step_id)
+                .where(WorkflowStep.workflow_id == self.workflow_id)
+            )
+        self.assertEqual(["cancelled"] * 4, [step.status for step in steps])
+        self.assertEqual(0, attempts)
+        self.assertEqual(
+            ["workflow_cancelled_before_start", "workflow_status_changed"],
+            [event.event_type for event in self.event_rows()[-2:]],
+        )
+
+        with self.assertRaises(CoordinatorError) as duplicate:
+            self.coordinator.cancel(self.workflow_id, self.owner_id)
+        self.assertEqual("workflow_not_cancellable", duplicate.exception.code)
+        with self.assertRaises(CoordinatorError) as start:
+            self.coordinator.start(self.workflow_id, self.owner_id)
+        self.assertEqual("workflow_not_startable", start.exception.code)
+        self.assertEqual([], self.slurm.submitted_steps)
 
     def test_workflow_cancel_fails_closed_with_multiple_active_attempts(self):
         self.start()

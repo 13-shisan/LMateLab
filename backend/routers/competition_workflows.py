@@ -408,8 +408,10 @@ def _command_payload(outcome: Any) -> dict[str, Any]:
 def _cancellation_payload(outcome: Any) -> dict[str, Any]:
     return {
         "workflow_id": str(outcome.workflow_id),
-        "attempt_id": str(outcome.attempt_id),
-        "job_id": str(outcome.job_id),
+        "attempt_id": (
+            str(outcome.attempt_id) if outcome.attempt_id is not None else None
+        ),
+        "job_id": str(outcome.job_id) if outcome.job_id is not None else None,
         "status": str(outcome.status),
         "result": str(outcome.result),
     }

@@ -104,6 +104,7 @@
 }
 
 .competition-status.is-blocked,
+.competition-status.is-cancelled,
 .competition-status.is-stale {
   color: #93370d;
   background: #fff4ed;

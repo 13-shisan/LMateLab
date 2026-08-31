@@ -42,6 +42,7 @@ const STATUS_LABELS = {
   running: '运行中',
   waiting: '等待',
   queued: '排队中',
+  cancelled: '已取消',
   blocked: '已阻断',
   failed: '失败',
   stale: '状态陈旧',

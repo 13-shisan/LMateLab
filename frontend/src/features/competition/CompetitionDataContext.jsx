@@ -143,6 +143,7 @@ export function useCompetitionPollingResource(
   { enabled, intervalMs = 10000, requestKey = null } = {},
 ) {
   const [refreshKey, setRefreshKey] = useState(0);
+  const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
   const resource = useCompetitionResource(
     useCallback(() => loader(refreshKey), [loader, refreshKey]),
     { preserveReady: true, requestKey },
@@ -152,11 +153,11 @@ export function useCompetitionPollingResource(
   useEffect(() => {
     if (!pollingEnabled || resource.refreshing) return undefined;
     const timer = globalThis.setTimeout(
-      () => setRefreshKey((value) => value + 1),
+      refresh,
       intervalMs,
     );
     return () => globalThis.clearTimeout(timer);
-  }, [pollingEnabled, intervalMs, resource.refreshing]);
+  }, [pollingEnabled, intervalMs, resource.refreshing, refresh]);
 
-  return resource;
+  return useMemo(() => ({ ...resource, refresh }), [resource, refresh]);
 }

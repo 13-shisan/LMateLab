@@ -126,6 +126,13 @@ function shouldPollWorkflow(mode, status) {
     ].includes(status);
 }
 
+function isWorkflowCancellable(workflow) {
+  if (workflow === null || typeof workflow !== 'object' || Array.isArray(workflow)) {
+    return false;
+  }
+  return ['validated', 'queued', 'running', 'unknown'].includes(workflow.status);
+}
+
 function createAttemptLogRequestKey(workflowId, attemptId, stream) {
   if (
     typeof workflowId !== 'string'
@@ -248,13 +255,14 @@ export default function CompetitionWorkflowDetail() {
 
   const dataKindLabel = workflowDataKindLabel(workflow.data_kind);
   const failedStep = findRetryableFailedStep(workflowSteps);
+  const cancellable = isWorkflowCancellable(workflow);
 
   async function handleCancel() {
     setCommandError('');
     if (commandPending) return;
     setCommandPending(true);
     try {
-      await executeWorkflowCommand({
+      const executed = await executeWorkflowCommand({
         mode,
         user,
         command: 'cancel',
@@ -263,6 +271,7 @@ export default function CompetitionWorkflowDetail() {
         pending: commandPending,
         write: () => provider.cancelWorkflow(workflow.id),
       });
+      if (executed) state.refresh();
     } catch (error) {
       setCommandError(error?.message || '工作流取消失败');
     } finally {
@@ -275,7 +284,7 @@ export default function CompetitionWorkflowDetail() {
     if (commandPending || failedStep === null) return;
     setCommandPending(true);
     try {
-      await executeWorkflowCommand({
+      const executed = await executeWorkflowCommand({
         mode,
         user,
         command: 'retry',
@@ -284,6 +293,7 @@ export default function CompetitionWorkflowDetail() {
         pending: commandPending,
         write: () => provider.retryWorkflow({ id: workflow.id, step: failedStep.key }),
       });
+      if (executed) state.refresh();
     } catch (error) {
       setCommandError(error?.message || '工作流重试失败');
     } finally {
@@ -396,7 +406,7 @@ export default function CompetitionWorkflowDetail() {
           <button
             className="competition-workflow-command-button is-cancel"
             type="button"
-            disabled={readOnly || commandPending}
+            disabled={readOnly || commandPending || !cancellable}
             onClick={handleCancel}
           >
             <CircleX size={16} aria-hidden="true" />

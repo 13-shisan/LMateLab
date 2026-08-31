@@ -1393,7 +1393,10 @@ test('workflow detail page loads immutable evidence and handles missing ids expl
     source,
     /const\s+readOnly\s*=\s*mode\s*===\s*['"]demo['"]\s*\|\|\s*!canWriteCompetitionData\(user\);/,
   );
-  assert.match(source, /disabled=\{readOnly\s*\|\|\s*commandPending\}/);
+  assert.match(
+    source,
+    /disabled=\{readOnly\s*\|\|\s*commandPending\s*\|\|\s*!cancellable\}/,
+  );
   assert.match(source, /disabled=\{readOnly\s*\|\|\s*commandPending\s*\|\|\s*failedStep\s*===\s*null\}/);
   assert.match(source, /provider\.cancelWorkflow\(workflow\.id\)/);
   assert.match(
@@ -1565,6 +1568,7 @@ test('workflow detail commands fail closed and execute valid cancel and retry on
   const executeWorkflowCommand = loadFunction(source, 'executeWorkflowCommand', {
     canWriteCompetitionData,
   });
+  const isWorkflowCancellable = loadFunction(source, 'isWorkflowCancellable');
   const calls = [];
   const base = {
     mode: 'live',
@@ -1625,6 +1629,20 @@ test('workflow detail commands fail closed and execute valid cancel and retry on
   assert.match(source, /const\s*\[commandPending,\s*setCommandPending\]\s*=\s*useState\(false\);/);
   assert.equal(source.match(/setCommandPending\(true\)/g)?.length, 2);
   assert.equal(source.match(/finally\s*{\s*setCommandPending\(false\);\s*}/g)?.length, 2);
+  for (const status of ['validated', 'queued', 'running', 'unknown']) {
+    assert.equal(isWorkflowCancellable({ status }), true, status);
+  }
+  for (const status of [
+    'draft', 'preparing', 'submitting', 'awaiting_acceptance', 'cancelling',
+    'cancelled', 'succeeded', 'failed', 'scientific_failed', 'blocked', undefined,
+  ]) {
+    assert.equal(isWorkflowCancellable({ status }), false, String(status));
+  }
+  for (const invalid of [null, undefined, [], 'validated']) {
+    assert.equal(isWorkflowCancellable(invalid), false);
+  }
+  assert.match(source, /disabled=\{readOnly\s*\|\|\s*commandPending\s*\|\|\s*!cancellable\}/);
+  assert.equal(source.match(/if\s*\(executed\)\s*state\.refresh\(\);/g)?.length, 2);
   assert.match(source, /async\s+function\s+handleCancel[\s\S]*?try\s*{[\s\S]*?catch/s);
   assert.match(source, /async\s+function\s+handleRetry[\s\S]*?try\s*{[\s\S]*?catch/s);
 });
