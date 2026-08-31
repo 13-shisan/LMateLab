@@ -58,6 +58,7 @@ _CANCELLATION_EVENT_TYPES: Final = frozenset(
         "cancellation_requested",
         "cancellation_raced_terminal",
         "cancellation_failed",
+        "workflow_cancelled_before_start",
     }
 )
 _RECONCILABLE_ATTEMPT_STATUSES: Final = frozenset(
@@ -475,6 +476,69 @@ class CompetitionCoordinator:
             self._step_statuses(session, workflow_id)
             active = self._active_attempts(session, workflow_id)
             if not active:
+                if run.status == "validated":
+                    active_step = WorkflowStep.__table__.alias(
+                        "cancel_active_step"
+                    )
+                    any_attempt_exists = (
+                        select(WorkflowAttempt.id)
+                        .select_from(
+                            WorkflowAttempt.__table__.join(
+                                active_step,
+                                active_step.c.id == WorkflowAttempt.step_id,
+                            )
+                        )
+                        .where(active_step.c.workflow_id == workflow_id)
+                        .exists()
+                    )
+                    cancelled = session.execute(
+                        update(WorkflowRun)
+                        .where(
+                            WorkflowRun.id == workflow_id,
+                            WorkflowRun.owner_id == owner_id,
+                            WorkflowRun.status == "validated",
+                            ~any_attempt_exists,
+                        )
+                        .values(status="cancelled")
+                        .execution_options(synchronize_session=False)
+                    )
+                    if cancelled.rowcount == 1:
+                        cancelled_steps = session.execute(
+                            update(WorkflowStep)
+                            .where(
+                                WorkflowStep.workflow_id == workflow_id,
+                                WorkflowStep.status == "waiting",
+                            )
+                            .values(status="cancelled")
+                            .execution_options(synchronize_session=False)
+                        )
+                        if cancelled_steps.rowcount != len(FIXED_STAGE_ORDER):
+                            session.rollback()
+                            raise CoordinatorError(
+                                "workflow_ledger_invalid",
+                                "workflow step ledger is invalid",
+                            )
+                        append_workflow_event(
+                            session,
+                            workflow_id=workflow_id,
+                            event_type="workflow_cancelled_before_start",
+                            payload={"reason_code": "operator_cancelled_before_start"},
+                        )
+                        append_workflow_event(
+                            session,
+                            workflow_id=workflow_id,
+                            event_type="workflow_status_changed",
+                            payload={"status": "cancelled"},
+                        )
+                        session.commit()
+                        return CancellationOutcome(
+                            workflow_id=workflow_id,
+                            attempt_id=None,
+                            job_id=None,
+                            status="cancelled",
+                            result="cancelled_before_start",
+                        )
+                    session.rollback()
                 raise CoordinatorError(
                     "workflow_not_cancellable",
                     "workflow does not have an active attempt",

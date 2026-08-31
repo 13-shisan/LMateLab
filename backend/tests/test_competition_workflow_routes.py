@@ -592,6 +592,32 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         self.assertEqual(422, injected.status_code, injected.text)
         self.assertEqual(2, self.coordinator.cancel.call_count)
 
+    def test_workflow_cancel_before_start_returns_null_scheduler_identity(self):
+        draft = self.create_draft()
+        self.coordinator.cancel.return_value = SimpleNamespace(
+            workflow_id=draft["id"],
+            attempt_id=None,
+            job_id=None,
+            status="cancelled",
+            result="cancelled_before_start",
+        )
+
+        response = self.client.post(
+            f"/api/competition/workflows/{draft['id']}/cancel", json={}
+        )
+
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(
+            {
+                "workflow_id": draft["id"],
+                "attempt_id": None,
+                "job_id": None,
+                "status": "cancelled",
+                "result": "cancelled_before_start",
+            },
+            response.json(),
+        )
+
     def test_workflow_commands_reject_every_body_override_before_coordinator(self):
         workflow_id = str(uuid.uuid4())
         for suffix in ("start", "steps/scf/retry", "cancel"):

@@ -1033,3 +1033,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 4090 活动配置以旧 SHA-256 锁定后备份、原子替换并 reload；新配置为 `0600`，SHA-256 为 `88b62e7331dda744a0d0ede7c94921eeb197a6b83af0667105ed1932816c6b6b`。备份 `nginx.conf.before-public-operator-write.20260831T035304Z` 为 `0600`，SHA-256 为 `6c6dafe1d3091684e372a3431b562a5d05a829e499479e88ba97bd7f377211dc`。
 - 公网无认证真实 multipart 结构上传与 `drafts/submit/start/cancel/retry` 均到达 FastAPI 并返回 `401`；注册、Agent、VASP 数据库 POST 和对写入路径的 GET 仍由 Nginx 返回 `403`。`live/ready` 仍返回 Job `46107`、`anode19`、运行提交 `6012b2b...` 和原 manifest。
 - [x] 机器门禁完成；本次没有读取真实密码/JWT，没有创建草稿、工作流或 VASP Job。队友仍需使用各自 Operator 账号完成一次真实公网上传/草稿验收；在用户明确授权前不点击正式提交。
+
+### 17.27 未开始工作流取消修复
+
+- 截图中的目标工作流已经通过校验，但尚未点击开始计算：工作流状态为 `validated`，四个步骤均为 `waiting`，attempt 数为 `0`，Job ID 为空。旧协调器只允许存在活动 attempt 的工作流取消，因此返回 `workflow_not_cancellable`；这不是权限错误，也没有调用 `scancel`。
+- 候选允许 Operator 取消本人名下仍为 `validated` 且数据库中不存在任何 attempt 的工作流。状态更新在同一事务中把工作流和固定四步全部置为 `cancelled`，写入 `workflow_cancelled_before_start` 与 `workflow_status_changed` 事件，并返回 `result=cancelled_before_start`、`attempt_id=null`、`job_id=null`；不创建虚假 attempt，不调用 Slurm。
+- 已有 `queued/running` 工作流继续走原有活动 attempt、作业归属和 `scancel` 门禁。终态、存在历史 attempt 的 `validated` 异常账本以及并发状态变化全部失败关闭，不得借本修复操作同一 107 账号下的其他作业。
+- 前端只在 `validated/queued/running/unknown` 状态允许点击取消；`cancelled/succeeded/failed/cancelling` 等状态禁用按钮。取消或重试成功后立即刷新工作流，不要求用户手动刷新；四步取消状态显示为“已取消”。
+- 本地聚焦后端取消与 API 测试 `74/74`、Slurm 与安全回归 `77/77`（另有 4 项平台条件跳过）、正式构建同款后端白名单 `515/515`（另有 28 项 Windows/POSIX 条件跳过）以及前端全量 `149/149` 已通过。PR 合并、107 Slurm 构建、服务切换和目标工作流真实取消验收完成前，本节只表示本地候选，线上仍运行旧 release `6012b2b...`。

@@ -64,8 +64,8 @@ class SubmissionOutcome:
 @dataclass(frozen=True)
 class CancellationOutcome:
     workflow_id: str
-    attempt_id: str
-    job_id: str
+    attempt_id: str | None
+    job_id: str | None
     status: str
     result: str
 
