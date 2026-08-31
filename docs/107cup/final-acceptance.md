@@ -133,3 +133,11 @@ Operator 由用户在 Windows 隧道入口现场登录，页面确认身份为�
 ## 9. DONE 判定
 
 只有本文件所有 `PENDING` 被真实证据替换、六层测试全部通过、桌面/移动/视频素材齐全且三名成员独立复核后，才能将本文件和 `implementation-plan.md` 的 Stage 10 改为 `DONE`。在此之前结论保持 `PARTIAL`。
+
+## 10. 公网 Operator 写入边界更新
+
+PR #79 于 `2026-08-31` 合并为 `cf813fe9564b2d29864acce089d21413547b3d94`，只修改 4090 公网 relay 的写入门禁。白名单内 Operator 现可以通过 `http://222.195.94.37:18733` 调用结构上传、草稿、提交、启动、取消和固定步骤重试接口；Viewer 仍被 FastAPI 角色门禁拒绝，Operator 仍只能操作本人工作流。注册、Agent、数据库变更和其他写入路径继续由 Nginx 拒绝。
+
+107 权限回归 Job `50263` 通过 `78/78` 并输出 `PUBLIC_OPERATOR_WRITE_TEST_OK`。4090 活动配置为 `0600`，SHA-256 为 `88b62e7331dda744a0d0ede7c94921eeb197a6b83af0667105ed1932816c6b6b`，旧配置以 `0600` 备份为 `nginx.conf.before-public-operator-write.20260831T035304Z`。公网无副作用请求证明精确 POST 已到达后端，未列入精确 allowlist 的写路径仍为 `403`；稳定服务仍为 Job `46107/anode19` 和运行提交 `6012b2b...`，没有重建、重启或提交 VASP。
+
+该入口仍是 HTTP 而非 HTTPS，且白名单包含 `211.86.0.0/16`，不能把 IP 白名单当作唯一认证。本次未使用队友的真实凭据，因此三名成员独立复核、全新认证态浏览器素材和真实 VASP 门禁仍未关闭，Stage 10 继续为 `PARTIAL`。
