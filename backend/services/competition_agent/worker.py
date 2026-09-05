@@ -19,8 +19,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.poll_seconds is not None and not 0.2 <= args.poll_seconds <= 30:
         parser.error("--poll-seconds must be between 0.2 and 30")
-    if not 1 <= args.max_idle_cycles <= 10000:
-        parser.error("--max-idle-cycles must be between 1 and 10000")
+    if not 0 <= args.max_idle_cycles <= 10000:
+        parser.error("--max-idle-cycles must be between 0 and 10000")
 
     idle_cycles = 0
     while True:
@@ -31,7 +31,9 @@ def main() -> int:
             print(f"processed {run.id} {run.status}", flush=True)
         else:
             idle_cycles += 1
-            if args.once or idle_cycles >= args.max_idle_cycles:
+            if args.once or (
+                args.max_idle_cycles and idle_cycles >= args.max_idle_cycles
+            ):
                 print("idle", flush=True)
                 return 0
         if args.once:

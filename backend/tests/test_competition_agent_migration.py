@@ -29,11 +29,13 @@ class CompetitionAgentMigrationTests(unittest.TestCase):
             with patch.dict(os.environ, {"DATABASE_URL": database_url}):
                 command.upgrade(config, "head")
             engine = create_engine(database_url)
-            self.addCleanup(engine.dispose)
-            self.assertIn("competition_agent_runs", inspect(engine).get_table_names())
-            with engine.connect() as connection:
-                self.assertEqual(before, connection.scalar(text("SELECT COUNT(*) FROM workflow_runs")))
-                self.assertEqual(0, connection.scalar(text("SELECT COUNT(*) FROM competition_agent_runs")))
+            try:
+                self.assertIn("competition_agent_runs", inspect(engine).get_table_names())
+                with engine.connect() as connection:
+                    self.assertEqual(before, connection.scalar(text("SELECT COUNT(*) FROM workflow_runs")))
+                    self.assertEqual(0, connection.scalar(text("SELECT COUNT(*) FROM competition_agent_runs")))
+            finally:
+                engine.dispose()
 
 
 if __name__ == "__main__":

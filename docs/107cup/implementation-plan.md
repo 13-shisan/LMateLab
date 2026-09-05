@@ -1055,11 +1055,22 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 新增 `compute-cluster-run-data.md`、218 行 `slurm-job-ledger.csv` 和确定性生成器；Stage 10 交付清单覆盖这三项。完整日志使用 Windows 独立附件包交付，不提交 Git，且排除正式数据库、凭据、VASP 大文件和 POTCAR。
 - 本次只执行短时只读查询和日志打包，没有提交新的 Slurm 作业。快照时服务恢复 Job `54176/P107-A100/anode18` 健康运行，未被取消或修改。
 
-### 17.29 107 服务器界面候选
+### 17.29 107 服务器界面合并
 
 - 分支 `codex/107cup-server-ui` 从最新 `origin/main` 建立，只把旧 MatFlow “服务器”能力的界面结构收敛迁移到 107 杯左侧导航；新增固定入口 `/dashboard/server`，不恢复 Dell、4090、Dawn、多服务器入口或用户跨服务器分布，也不采用正在另行更新的服务器界面。
 - 页面固定展示 `P107-RTX5090` 与 `P107-A100` 两个竞赛分区的已知配置，分别对应 `anode01-anode15 / 120 GPU` 与 `anode16-anode26 / 88 GPU`。配置资源与动态利用率严格分开：节点数和 GPU 数标注为配置值，实时空闲、忙碌、CPU 和内存仍显示“待接入”，不得从个人工作流数量推断全体集群负载。
 - 页面只复用现有只读接口：`/api/health/live` 提供网页服务 Job、计算节点、发布类型、数据模式和提交身份，`/api/competition/dashboard` 提供当前账号可见的 attempt 排队、运行、累计数量和更新时间。没有增加写路由、Slurm 命令或后端服务器监控 router，也没有修改 107 数据库、作业或当前生产服务。
 - 桌面 `1440x900` 与移动 `390x844` 已用本地演示发布完成真实浏览器检查；两种视口均无整页横向溢出，控制台错误和警告为 `0`。首次移动截图发现宽表格空态落在横向滚动区右侧，修复后空态固定在首个可见区域；浏览器截图保留在本地 `frontend/output/playwright/`，不作为生产证据提交 Git。
 - 本地前端测试 `157/157`、定向 ESLint 和 107 杯 Vite 构建（`1871` 个模块）已通过。本次页面及其导航、Provider、响应式样式、E2E 路由和测试均加入 Stage 10 确定性交付清单。
-- [ ] 当前仅为本地候选。PR 合并、107 Slurm 构建、候选服务、`18733` 切换和真实账号浏览器复核均未执行；`18733` 与 `18755` 仍保持原状。下一步先完成本候选的代码审查与合并，再单独实施 107 集群实时采集，最后进入 Agent/Qoder 的 `18755 -> 18733` 生产化迁移。
+- PR #87 已把功能提交 `6ee01f2110ef197fec484c66d710eeb32cea567f` 合并为 `4eca4f39cae9dc67a553489d573a8811cb5947cb`。当前完成的是源码、测试和本地真实浏览器验收；107 Slurm 构建、候选服务、`18733` 切换和真实账号浏览器复核尚未执行，因此不能把该页面写成已经上线。
+- `18733` 与 `18755` 均未因本节工作停止或修改。下一步进入 Agent/Qoder 的 `18755 -> 18733` 生产化迁移；集群级实时资源采集是独立后续项，不阻塞 Agent 迁移，也不能用工作流数量代替。
+
+### 17.30 Agent/Qoder 107 生产合同候选
+
+- 分支 `codex/107cup-agent-production` 基于服务器页面合并提交建立。`18755` 的 Agent、Qoder、文献/PDF、结构构建、计算规划和个人结果源码已经由 PR #83 进入 `main`；本节不再次复制页面或业务代码，只补齐其在 107 上运行并由 `18733` 访问所需的生产合同。
+- 107 专用依赖固定加入 `pypdf==5.9.0` 与 `qoder-agent-sdk==1.0.14`。Qoder 的“安装”接口改为只校验构建时安装的固定版本和 CLI，不得在网页或 Worker 运行时执行 `pip install`，从而保持 `releases/<commit>` 不可变。
+- Agent 上传、文献 SQLite、示例、设置、LLM 密钥、Qoder runtime 和 workspace 全部固定在 `/home/scc/pb23030683/lmatelab-107cup` 的私有目录。构建作业创建 `0700` 目录并补齐只读示例；密钥文件不创建占位内容、不进入 Git，必须由 Operator 在受控入口配置。
+- Agent Worker 改为 `P107-A100` 上最长 4 天的 Slurm 服务作业，读取与 Web 服务相同的 `runtime.env` 和不可变 release。`agent_worker_control.py` 在登录节点只执行短时 `squeue/scontrol/sbatch`，逐项核对用户、JobName、Command、WorkDir、Account、Partition 和 QOS；已有唯一归属 Worker 时复用，存在重复或归属不符时失败关闭，绝不自动 `scancel`。
+- Web 服务每次迁移前使用 SQLite Online Backup API 生成不可覆盖的 `0600` 一致性备份，迁移后同时执行 Alembic head 与两套数据库 `integrity_check`。该机制不等于数据库回滚；候选失败时保留备份、旧服务和旧 relay，由人工确认迁移兼容性后处理。
+- 4090 Nginx 仍以 IP 白名单和应用角色双重限制访问。Agent 的 Qoder 管理、设置、文件上传、文献索引、结构包、运行创建、会话删除和批准接口按实际 HTTP 方法逐条精确放行；不存在整个 `/api/competition/agent/` 的通配写权限。PDF 上限为应用限制 `20 MiB`，代理请求体上限相应设为 `21 MiB`。
+- 当前本地部署合同与行为测试已覆盖固定依赖、无运行时安装、私有路径、SQLite 备份、Worker 防重复提交和精确代理规则。PR、107 计算节点网络探测、正式 Slurm 构建、候选 Web/Worker、真实 Operator/Viewer Agent/Qoder 验收、`18733` 原子切换和 `18755` 停止均尚未完成；在全部门禁通过前两个入口继续保留。

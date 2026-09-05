@@ -396,6 +396,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
         self.assertEqual(10, len(examples))
         self.assertEqual(2, len(outcars))
         self.assertTrue(all(item["builtin_example"] for item in outcars))
+        self.assertEqual(
+            ["Dawn5 / Cr2C12Se6F6 SCF", "Dawn5 / Cr2C12O6F6 SCF"],
+            [item["group_name"] for item in outcars],
+        )
         energies = [item["facts"]["final_energy_eV"] for item in created.json()["input"]["analysis_results"]]
         self.assertEqual([-169.84809903, -188.11837156], energies)
 

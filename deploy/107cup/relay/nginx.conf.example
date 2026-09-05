@@ -17,7 +17,7 @@ http {
     server {
         listen 18733;
         server_name _;
-        client_max_body_size 2m;
+        client_max_body_size 21m;
 
         allow 127.0.0.1;
         allow ::1;
@@ -73,6 +73,126 @@ http {
         }
 
         location = /api/competition/drafts {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/qoder/install {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/qoder/login {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/qoder/service/start {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/qoder/service/stop {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/settings {
+            limit_except GET PUT {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/files {
+            limit_except GET POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/literature/index {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/structures/build {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/structures/bundle {
+            limit_except POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location = /api/competition/agent/runs {
+            limit_except GET POST {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location ~ "^/api/competition/agent/runs/conversations/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" {
+            limit_except DELETE {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:18740;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location ~ "^/api/competition/agent/runs/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/approve$" {
             limit_except POST {
                 deny all;
             }

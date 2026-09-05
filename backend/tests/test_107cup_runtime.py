@@ -311,7 +311,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         ):
             self.assertIn(f'os.getenv("{variable}"', authz_source)
 
-    def test_competition_requirements_exclude_agent_and_ml_runtimes(self):
+    def test_competition_requirements_exclude_unbounded_ml_runtimes(self):
         requirements = BACKEND_ROOT / "requirements-107cup.txt"
         self.assertTrue(requirements.is_file(), str(requirements))
         packages = {
@@ -336,6 +336,8 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             "alembic",
             "ase",
             "httpx",
+            "pypdf",
+            "qoder-agent-sdk",
         ):
             self.assertIn(required, packages)
 

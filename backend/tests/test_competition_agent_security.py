@@ -25,7 +25,8 @@ class CompetitionAgentSecurityTests(unittest.TestCase):
     def test_worker_slurm_only_processes_agent_queue(self):
         source = (BACKEND_ROOT.parent / "deploy" / "107cup" / "agent-worker.slurm").read_text(encoding="utf-8")
         self.assertIn("services.competition_agent.worker", source)
-        self.assertIn("--poll-seconds 1 --max-idle-cycles 240", source)
+        self.assertIn("--poll-seconds 1 --max-idle-cycles 0", source)
+        self.assertIn('source "$runtime_env"', source)
         self.assertNotIn("QODER_PERSONAL_ACCESS_TOKEN", source)
         for forbidden in ["sbatch ", "scancel ", "vasp_std", "POTCAR"]:
             self.assertNotIn(forbidden, source)
@@ -35,7 +36,7 @@ class CompetitionAgentSecurityTests(unittest.TestCase):
         self.assertIn('qoder_sdk_version = "1.0.14"', source)
         self.assertIn('"remote-control"', source)
         self.assertIn('"--capacity", "1"', source)
-        for forbidden in ["shell=true", "os.system", "sbatch", "scancel"]:
+        for forbidden in ["shell=true", "os.system", "sbatch", "scancel", '"pip", "install"']:
             self.assertNotIn(forbidden, source)
 
 

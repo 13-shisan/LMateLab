@@ -1727,7 +1727,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
     def test_public_relay_allows_only_bounded_operator_workflow_writes(self):
         relay = self.read_required("relay/nginx.conf.example")
         self.assertIn("listen 18733", relay)
-        self.assertIn("client_max_body_size 2m", relay)
+        self.assertIn("client_max_body_size 21m", relay)
         self.assertIn("client_body_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/client-body", relay)
         self.assertIn("proxy_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/proxy-temp", relay)
         self.assertIn("proxy_http_version 1.1", relay)
@@ -1772,7 +1772,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             self.assertIn("proxy_pass http://127.0.0.1:18740", location)
 
         self.assertNotIn("location /api/competition/", relay)
-        self.assertNotIn("/api/competition/agent/", relay)
+        self.assertNotRegex(relay, r"location\s+(?:\^~\s+)?/api/competition/agent/\s*\{")
         self.assertNotIn("/api/vasp/", relay)
         self.assertIn("limit_except POST", relay)
         self.assertIn("location /api/", relay)
