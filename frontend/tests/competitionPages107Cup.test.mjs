@@ -829,6 +829,34 @@ test('competition dashboard normalizes malformed ready payloads', () => {
   });
 });
 
+test('competition server page is 107-scoped and read-only', () => {
+  const source = read('../src/pages/competition/CompetitionServer.jsx');
+  const styles = read('../src/pages/competition/CompetitionServer.css');
+
+  assert.doesNotThrow(() => parse(source, { sourceType: 'module', plugins: ['jsx'] }));
+  for (const token of [
+    '107 集群资源',
+    'P107-RTX5090',
+    'P107-A100',
+    'LMateLab 作业',
+    '网页服务',
+    '节点与 GPU 明细',
+    'provider.getDashboard()',
+    'provider.getServiceHealth()',
+    'useCompetitionPollingResource',
+  ]) {
+    assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(source, /server-monitor\/servers|Dell|Dawn|4090服务器|用户使用总览/);
+  assert.doesNotMatch(source, /fetch\s*\(|axios|method:\s*['"](?:POST|PUT|PATCH|DELETE)/);
+  assert.match(styles, /\.competition-server-page\s*\{/);
+  assert.match(styles, /@media\s*\(max-width:\s*700px\)/);
+  assert.doesNotMatch(styles, /font-size:\s*[^;]*vw|letter-spacing:\s*-/);
+  for (const radius of styles.matchAll(/border-radius:\s*(\d+)px/g)) {
+    assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
+  }
+});
+
 test('competition dashboard styles keep the approved responsive work layout', () => {
   const source = read('../src/pages/Dashboard.css');
 

@@ -26,6 +26,7 @@ const routeChecks = [
   { path: '/dashboard/workflows', heading: '工作流' },
   { path: '/dashboard/results', heading: '计算结果' },
   { path: '/dashboard/database/vasp', heading: 'VASP 数据库' },
+  { path: '/dashboard/server', heading: '107 集群资源', screenshot: 'server' },
 ];
 
 async function login(page) {

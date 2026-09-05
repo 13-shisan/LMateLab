@@ -7,6 +7,7 @@ const protectedRoutes = [
   { path: '/dashboard/workflows', activeLabel: '工作流', root: '.competition-workflows-page' },
   { path: '/dashboard/results', activeLabel: '结果', root: '.competition-results-page' },
   { path: '/dashboard/database/vasp', activeLabel: 'VASP 数据库', root: '.competition-database-page' },
+  { path: '/dashboard/server', activeLabel: '服务器', root: '.competition-server-page' },
 ];
 
 const optionalAgentRoute = {

@@ -84,6 +84,17 @@ export function createDemoCompetitionDataProvider() {
       return clone(DEMO_DASHBOARD);
     },
 
+    async getServiceHealth() {
+      return {
+        status: 'ok',
+        job_id: 'DEMO-SERVICE',
+        node: 'anode18',
+        commit: '0000000000000000000000000000000000000000',
+        release_kind: 'preview',
+        data_mode: 'demo',
+      };
+    },
+
     async listWorkflows({ query = '', status = '' } = {}) {
       const items = DEMO_WORKFLOWS.filter((workflow) => (
         matchesQuery(workflow, query) && matchesStatus(workflow, status)

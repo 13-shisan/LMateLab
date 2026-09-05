@@ -637,6 +637,7 @@
   .competition-results-page,
   .competition-result-detail-page,
   .competition-database-page,
+  .competition-server-page,
   .competition-agent-page
 ) {
   width: 100%;
@@ -654,6 +655,7 @@
   .competition-results-header,
   .competition-result-detail-header,
   .competition-database-header,
+  .competition-server-header,
   .competition-agent-header
 ) {
   position: relative;
@@ -672,7 +674,8 @@
   .competition-workflow-detail-header,
   .competition-results-header,
   .competition-result-detail-header,
-  .competition-database-header
+  .competition-database-header,
+  .competition-server-header
 ) :is(h1, h2) {
   color: var(--lm-workbench-ink);
 }
@@ -684,6 +687,7 @@
   .competition-results-header,
   .competition-result-detail-header,
   .competition-database-header,
+  .competition-server-header,
   .competition-agent-header
 ) :is(h1) {
   font-size: 25px;
@@ -883,6 +887,7 @@
     .competition-results-header,
     .competition-result-detail-header,
     .competition-database-header,
+    .competition-server-header,
     .competition-agent-header
   ) {
     padding: 15px 16px;

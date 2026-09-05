@@ -100,7 +100,7 @@ test('107 cup build uses a dedicated route entry without unrelated pages', () =>
   }
 });
 
-test('107 cup entry atomically exposes exactly seven protected preview routes', () => {
+test('107 cup entry atomically exposes the eight protected preview routes', () => {
   const competitionApp = readFileSync(new URL('../src/App107Cup.jsx', import.meta.url), 'utf8');
   const ast = parse(competitionApp, { sourceType: 'module', plugins: ['jsx'] });
   const lazyPages = [...competitionApp.matchAll(
@@ -127,6 +127,7 @@ test('107 cup entry atomically exposes exactly seven protected preview routes', 
     'CompetitionResults',
     'CompetitionResultDetail',
     'CompetitionVaspDatabase',
+    'CompetitionServer',
   ]);
   assert.deepEqual(protectedPaths, [
     '/dashboard',
@@ -136,8 +137,9 @@ test('107 cup entry atomically exposes exactly seven protected preview routes', 
     '/dashboard/results',
     '/dashboard/results/:workflowId',
     '/dashboard/database/vasp',
+    '/dashboard/server',
   ]);
-  assert.equal(protectedRoutes.length, 7);
+  assert.equal(protectedRoutes.length, 8);
   assert.equal(protectedPaths.every((path) => path?.startsWith('/dashboard')), true);
   assert.match(
     competitionApp,
