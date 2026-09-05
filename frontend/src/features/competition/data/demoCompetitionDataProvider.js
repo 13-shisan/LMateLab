@@ -167,7 +167,7 @@ export function createDemoCompetitionDataProvider() {
     async getAgentRuntime() {
       return {
         provider: 'mock', connected: false, qoder_available: false,
-        qoder: { interface: 'qoder-agent-sdk', enabled: false, connected: false, auth_mode: 'pat', model: null },
+        qoder: { interface: 'qodercn-agent-sdk', enabled: false, connected: false, auth_mode: 'pat', model: null },
       };
     },
 
@@ -177,7 +177,7 @@ export function createDemoCompetitionDataProvider() {
     async stopQoderService() { return rejectMutation('Qoder 服务停止'); },
 
     async getAgentSettings() {
-      return { api_url: '', model: '', api_key_configured: false };
+      return { api_url: '', model: '', api_key_configured: false, api_key_write_allowed: false };
     },
 
     async updateAgentSettings() {

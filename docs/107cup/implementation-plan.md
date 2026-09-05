@@ -1087,3 +1087,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 候选 Web Job `54304/P107-A100/anode16` 在迁移前为两套 SQLite 生成不可覆盖备份，迁移后同时通过两套 Alembic head、`integrity_check`、live 和 ready；Agent Worker Job `54305/P107-A100/anode16` 作为唯一归属 Worker 发布了与 Web 相同的 commit 和 manifest。
 - 4090 Nginx 活动配置在保留全部 IP 白名单的前提下，已更新为 `21m` 请求体上限和逐条 Agent 写路由，源模板 SHA-256 为 `298b1cb799fba9c44a6638b3711733b67c0fdc57e329a67ebe1a135a61d5ce34`，旧配置备份为 `nginx.conf.before-agent.54304`。切换前公网仍返回旧 Job `54176`；取消临时 `18742` 后，恢复器原子把 `18740/18733` 切换为 Job `54304`，4090 内部、Windows 公网的 live/ready、首页、服务器页和 Agent 页均通过，未登录 Agent 读写返回 `401`。
 - 旧 107 Web Job `54176` 与 `Pzxp` 所有的 4090 `18755` 仍保留作为回退边界。下一门禁是使用真实 Operator 与 Viewer 复核 Agent 权限，由 Operator 在网页写入 LLM API Key 并完成 Qoder 登录；这些通过前不停止两个旧服务，`18755` 最终只能由其进程所有者 `Pzxp` 停止。
+
+### 17.32 Qoder CN 与 API Key 安全入口纠正
+
+- 17.30 和 17.31 记录的是当时真实执行过的全球版 `qoder-agent-sdk/qodercli` 构建与探测，历史证据不改写。后续核对确认比赛使用的是大陆版 Qoder，因此新候选改为固定 `qodercn-agent-sdk==1.0.14`、内置 `qoderclicn 1.1.38`、`QODERCN_CONFIG_DIR` 和 `QODERCN_PERSONAL_ACCESS_TOKEN`；只接受 `qoder.cn` 或 `qoder.com.cn` 的带 challenge 设备授权链接。
+- 截图中的“请求参数无效”实际来自后端已有的密钥传输门禁 `API key requires HTTPS or loopback access`，不是 API Key 格式校验失败。公网 `http://222.195.94.37:18733` 没有 TLS，因此新页面禁用密钥输入并给出明确提示；API URL 和模型仍可单独保存。
+- 允许的密钥入口限定为 HTTPS 或直达 107 Web 服务的 `127.0.0.1` SSH 隧道。4090 Nginx 在 Agent 设置路由覆盖写入实际入口 scheme，后端优先采用该可信标记，防止公网请求通过伪造 `Host: 127.0.0.1` 绕过。
+- 构建作业显式创建权限为 `0700` 的 `runtime/qoder/config`。API Key 仍只进入权限为 `0600` 的 `config/secrets/llm-api-key`；Git、日志和聊天中均不得出现真实密钥或 Qoder PAT。
+- 本节完成条件是：本地门禁通过；107 Slurm 计算节点完成全量后端测试、大陆版 CLI 版本与登录命令探测；新 Web/Worker 候选通过身份、manifest 和数据库完整性核对；公网入口明确拒绝密钥并仍可保存 URL/模型；Windows 回环隧道可以保存密钥；真实 Qoder CN 登录完成前不得显示或宣称“已连接”。
+- `18733` 的 Agent 页面、文献/PDF、结构构建、计算规划和个人结果功能以已合并的 `18755` 源码为基线，但运行位置、认证边界和数据路径按 107 生产合同收敛，因此不是逐字节复制。`18755` 的既有历史只有在取得完整、已认证且归属明确的导出文件后，才能通过一次性 Slurm 迁移作业导入；不得从页面截图、部分分页或其他用户数据推断补写。

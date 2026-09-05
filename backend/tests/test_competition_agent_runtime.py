@@ -189,7 +189,7 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
         )
 
     def test_mock_runtime_never_reads_personal_access_token(self):
-        with mock.patch.dict(os.environ, {"QODER_PERSONAL_ACCESS_TOKEN": "must-not-be-read"}):
+        with mock.patch.dict(os.environ, {"QODERCN_PERSONAL_ACCESS_TOKEN": "must-not-be-read"}):
             with mock.patch.dict(os.environ, {}, clear=False):
                 output = MockQoderRuntime().run(
                     request_kind="template_recommendation",

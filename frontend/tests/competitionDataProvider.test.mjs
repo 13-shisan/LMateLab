@@ -251,6 +251,37 @@ test('live structure validation uses only allowlisted error headers', async () =
   );
 });
 
+test('live API key transport failures expose the allowlisted security message', async () => {
+  const provider = createApiCompetitionDataProvider({
+    authHeaders: () => ({}),
+    fetchImpl: async () => new Response(
+      JSON.stringify({ detail: '/private/server/detail' }),
+      {
+        status: 400,
+        headers: {
+          'content-type': 'application/json',
+          'x-error-code': 'agent_api_key_secure_transport_required',
+        },
+      },
+    ),
+  });
+
+  await assert.rejects(
+    () => provider.updateAgentSettings({
+      api_url: 'https://api.deepseek.com/chat/completions',
+      model: 'deepseek-chat',
+      api_key: 'synthetic-test-key',
+    }),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.equal(error.code, 'agent_api_key_secure_transport_required');
+      assert.equal(error.message, 'API Key 只能通过 HTTPS 或 127.0.0.1 SSH 隧道保存');
+      assert.equal(JSON.stringify(error).includes('/private/server/detail'), false);
+      return true;
+    },
+  );
+});
+
 test('live malformed JSON responses never retain the response text', async () => {
   const privateResponse = '{"detail":"/home/private/sensitive-response-marker\n$(scancel 1)"';
   for (const status of [200, 503]) {

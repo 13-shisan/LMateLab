@@ -26,6 +26,12 @@ const VALIDATION_FAILURES = new Map([
   ['structure_format_invalid', '无法按 POSCAR 或 CIF 解析结构'],
   ['workflow_template_invalid', '结构来源与计算模板不匹配'],
 ]);
+const PUBLIC_ERROR_CODES = new Map([
+  [
+    'agent_api_key_secure_transport_required',
+    'API Key 只能通过 HTTPS 或 127.0.0.1 SSH 隧道保存',
+  ],
+]);
 
 function queryString(entries) {
   const params = new URLSearchParams();
@@ -39,6 +45,9 @@ function queryString(entries) {
 }
 
 function publicRequestFailure(status, errorCode = '') {
+  if (PUBLIC_ERROR_CODES.has(errorCode)) {
+    return { message: PUBLIC_ERROR_CODES.get(errorCode), code: errorCode };
+  }
   if (status === 422 && VALIDATION_FAILURES.has(errorCode)) {
     return { message: VALIDATION_FAILURES.get(errorCode), code: errorCode };
   }

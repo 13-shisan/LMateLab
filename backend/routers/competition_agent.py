@@ -57,6 +57,20 @@ from services.competition_agent.uploads import (
 
 
 router = APIRouter(prefix="/competition/agent", tags=["competition-agent"])
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_GATEWAY_SCHEME_HEADER = "x-lmatelab-gateway-scheme"
+
+
+def _api_key_write_allowed(request: Request) -> bool:
+    gateway_scheme = request.headers.get(_GATEWAY_SCHEME_HEADER)
+    if gateway_scheme is not None:
+        return gateway_scheme == "https"
+    client_host = request.client.host if request.client else ""
+    return (
+        request.url.scheme == "https"
+        or client_host in _LOOPBACK_HOSTS
+        or request.url.hostname in _LOOPBACK_HOSTS
+    )
 
 
 def require_agent_enabled() -> None:
@@ -83,7 +97,7 @@ def runtime_status(_user: User = Depends(require_viewer_or_operator)):
         ),
         "qoder_available": qoder_connected,
         "qoder": {
-            "interface": "qoder-agent-sdk",
+            "interface": "qodercn-agent-sdk",
             "enabled": provider == "qoder",
             "connected": qoder_connected,
             "auth_mode": auth_mode,
@@ -121,8 +135,12 @@ def stop_qoder_service_endpoint(_user: User = Depends(require_operator)):
 
 
 @router.get("/settings", dependencies=[Depends(require_agent_enabled)])
-def agent_settings(_user: User = Depends(require_operator)):
-    return {**read_settings(), "api_key_configured": llm_configured()}
+def agent_settings(request: Request, _user: User = Depends(require_operator)):
+    return {
+        **read_settings(),
+        "api_key_configured": llm_configured(),
+        "api_key_write_allowed": _api_key_write_allowed(request),
+    }
 
 
 @router.put("/settings", dependencies=[Depends(require_agent_enabled)])
@@ -132,16 +150,22 @@ def update_agent_settings(
     _user: User = Depends(require_operator),
 ):
     try:
-        if payload.api_key:
-            client_host = request.client.host if request.client else ""
-            if request.url.scheme != "https" and client_host not in {"127.0.0.1", "::1"}:
-                raise HTTPException(status_code=400, detail="API key requires HTTPS or loopback access")
+        if payload.api_key and not _api_key_write_allowed(request):
+            raise HTTPException(
+                status_code=400,
+                detail="API key requires HTTPS or loopback access",
+                headers={"X-Error-Code": "agent_api_key_secure_transport_required"},
+            )
         write_settings(payload.api_url, payload.model)
         if payload.api_key:
             write_api_key(payload.api_key)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
-    return {**read_settings(), "api_key_configured": llm_configured()}
+    return {
+        **read_settings(),
+        "api_key_configured": llm_configured(),
+        "api_key_write_allowed": _api_key_write_allowed(request),
+    }
 
 
 @router.get("/library/structures", dependencies=[Depends(require_agent_enabled)])

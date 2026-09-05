@@ -16,10 +16,11 @@ class AgentDeploymentContractTests(unittest.TestCase):
     def test_agent_dependencies_are_fixed_in_the_107_release(self):
         requirements = self.read(BACKEND / "requirements-107cup.txt").splitlines()
         self.assertIn("pypdf==5.9.0", requirements)
-        self.assertIn("qoder-agent-sdk==1.0.14", requirements)
+        self.assertIn("qodercn-agent-sdk==1.0.14", requirements)
 
         qoder = self.read(BACKEND / "services" / "qoder_management.py")
-        self.assertIn('QODER_SDK_VERSION = "1.0.14"', qoder)
+        self.assertIn('QODERCN_SDK_VERSION = "1.0.14"', qoder)
+        self.assertIn('"_bundled" / "qoderclicn"', qoder)
         self.assertIn("PackageNotFoundError", qoder)
         self.assertNotIn('"pip", "install"', qoder)
         self.assertNotIn("subprocess.run(\n                [sys.executable", qoder)
@@ -64,6 +65,7 @@ class AgentDeploymentContractTests(unittest.TestCase):
             "LMATELAB_LLM_API_KEY_FILE": f"{root}/config/secrets/llm-api-key",
             "LMATELAB_QODER_RUNTIME_DIR": f"{root}/runtime/qoder",
             "LMATELAB_QODER_WORKSPACE_ROOT": f"{root}/data/qoder-workspace",
+            "QODERCN_CONFIG_DIR": f"{root}/runtime/qoder/config",
         }
         values = dict(
             line.split("=", 1)
@@ -91,7 +93,7 @@ class AgentDeploymentContractTests(unittest.TestCase):
             'wait "$worker_pid"',
         ):
             self.assertIn(required, worker)
-        for forbidden in ("pip install", "nohup", "QODER_PERSONAL_ACCESS_TOKEN"):
+        for forbidden in ("pip install", "nohup", "QODERCN_PERSONAL_ACCESS_TOKEN"):
             self.assertNotIn(forbidden, worker)
 
         for required in (
@@ -151,6 +153,10 @@ class AgentDeploymentContractTests(unittest.TestCase):
             self.assertIn(f"limit_except {methods}", location)
             self.assertIn("deny all", location)
             self.assertIn("proxy_pass http://127.0.0.1:18740", location)
+            if path == "/api/competition/agent/settings":
+                self.assertIn(
+                    "proxy_set_header X-LMateLab-Gateway-Scheme $scheme", location
+                )
 
         uuid_pattern = (
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"

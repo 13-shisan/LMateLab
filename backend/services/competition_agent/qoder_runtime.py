@@ -112,11 +112,11 @@ class RealQoderRuntime:
             raise RuntimeError("real Qoder runtime is not authorized")
         if self.config.auth_mode not in {"pat", "cli"}:
             raise RuntimeError("unsupported Qoder authentication mode")
-        if self.config.auth_mode == "pat" and not self._environ.get("QODER_PERSONAL_ACCESS_TOKEN"):
-            raise RuntimeError("Qoder personal access token is unavailable")
+        if self.config.auth_mode == "pat" and not self._environ.get("QODERCN_PERSONAL_ACCESS_TOKEN"):
+            raise RuntimeError("Qoder CN personal access token is unavailable")
         try:
             import anyio
-            from qoder_agent_sdk import (
+            from qodercn_agent_sdk import (
                 AssistantMessage,
                 QoderAgentOptions,
                 ResultMessage,
@@ -126,7 +126,7 @@ class RealQoderRuntime:
                 query,
             )
         except ImportError as exc:
-            raise RuntimeError("qoder-agent-sdk is not installed") from exc
+            raise RuntimeError("qodercn-agent-sdk is not installed") from exc
 
         system_prompt = (
             "You are LMateLab's advisory-only VASP assistant. Use only the JSON data "

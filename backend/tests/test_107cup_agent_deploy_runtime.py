@@ -139,7 +139,7 @@ class QoderReleaseRuntimeTests(unittest.TestCase):
                 "os.environ", {"LMATELAB_QODER_MANAGEMENT_ENABLED": "1"}, clear=True
             ),
             mock.patch.object(qoder_management, "version", return_value="1.0.14"),
-            mock.patch.object(qoder_management, "_cli_path", return_value=Path("qodercli")),
+            mock.patch.object(qoder_management, "_cli_path", return_value=Path("qoderclicn")),
             mock.patch.object(qoder_management, "qoder_status", return_value=expected),
             mock.patch.object(qoder_management.subprocess, "run") as run,
         ):
@@ -159,6 +159,24 @@ class QoderReleaseRuntimeTests(unittest.TestCase):
                 qoder_management.QoderManagementError, "version mismatch"
             ):
                 qoder_management.install_qoder()
+
+    def test_login_url_accepts_only_qoder_cn_device_challenges(self):
+        from services import qoder_management
+
+        expected = "https://qoder.cn/device/selectAccounts?challenge=sample"
+        self.assertEqual(expected, qoder_management._extract_login_url(f"Open {expected}"))
+        self.assertEqual(
+            "https://qoder.com.cn/device/selectAccounts?challenge=sample",
+            qoder_management._extract_login_url(
+                "Open https://qoder.com.cn/device/selectAccounts?challenge=sample"
+            ),
+        )
+        for rejected in (
+            "https://qoder.com/device/selectAccounts?challenge=sample",
+            "https://qoder.cn/account/integrations?challenge=sample",
+            "https://qoder.cn/device/selectAccounts",
+        ):
+            self.assertIsNone(qoder_management._extract_login_url(rejected))
 
 
 if __name__ == "__main__":

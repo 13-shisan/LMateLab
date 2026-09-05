@@ -259,6 +259,7 @@ export default function CompetitionAgent() {
     (literatureLibrary.data?.items || []).find((item) => item.id === id) || { id }
   ));
   const selectedWorkflow = (workflows.data?.items || []).find((item) => item.id === workflowId) || null;
+  const apiKeyWriteAllowed = settings.data?.api_key_write_allowed === true;
   const selectedWorkflowResult = useCompetitionResource(useCallback(
     () => selectedWorkflow?.status === 'succeeded'
       ? provider.getResult(selectedWorkflow.id)
@@ -379,6 +380,10 @@ export default function CompetitionAgent() {
   async function saveSettings(event) {
     event.preventDefault();
     setSettingsMessage('');
+    if (settingsForm.api_key && !apiKeyWriteAllowed) {
+      setSettingsMessage('API Key 只能通过 HTTPS 或 127.0.0.1 SSH 隧道保存');
+      return;
+    }
     try {
       const payload = { api_url: settingsForm.api_url, model: settingsForm.model };
       if (settingsForm.api_key) payload.api_key = settingsForm.api_key;
@@ -511,13 +516,13 @@ export default function CompetitionAgent() {
             <strong>普通问答接口</strong>
             <label>API URL<input value={settingsForm.api_url} onChange={(event) => setSettingsForm((value) => ({ ...value, api_url: event.target.value }))} /></label>
             <label>模型<input value={settingsForm.model} onChange={(event) => setSettingsForm((value) => ({ ...value, model: event.target.value }))} /></label>
-            <label>API Key<input type="password" autoComplete="new-password" value={settingsForm.api_key} placeholder={settings.data?.api_key_configured ? '已配置，留空不修改' : '输入 API Key'} onChange={(event) => setSettingsForm((value) => ({ ...value, api_key: event.target.value }))} /></label>
+            <label>API Key<input type="password" autoComplete="new-password" value={settingsForm.api_key} disabled={!apiKeyWriteAllowed} placeholder={!apiKeyWriteAllowed ? '请通过安全入口配置' : settings.data?.api_key_configured ? '已配置，留空不修改' : '输入 API Key'} onChange={(event) => setSettingsForm((value) => ({ ...value, api_key: event.target.value }))} />{!apiKeyWriteAllowed ? <span className="competition-agent-secret-note">公网 HTTP 页面不传输密钥，请使用 HTTPS 或 127.0.0.1 SSH 隧道。</span> : null}</label>
             <button type="submit"><KeyRound size={16} />保存</button>
           </section>
           <aside className="competition-agent-qoder-settings" aria-label="Qoder 接口">
-            <div><Cpu size={16} /><strong>Qoder 接口</strong><span className={`competition-agent-status is-${runtime.data?.qoder?.connected ? 'succeeded' : 'failed'}`}>{runtime.data?.qoder?.connected ? '已连接' : '未连接'}</span></div>
+            <div><Cpu size={16} /><strong>Qoder CN 接口</strong><span className={`competition-agent-status is-${runtime.data?.qoder?.connected ? 'succeeded' : 'failed'}`}>{runtime.data?.qoder?.connected ? '已连接' : '未连接'}</span></div>
             <dl>
-              <div><dt>接口</dt><dd>{runtime.data?.qoder?.interface || 'qoder-agent-sdk'}</dd></div>
+              <div><dt>接口</dt><dd>{runtime.data?.qoder?.interface || 'qodercn-agent-sdk'}</dd></div>
               <div><dt>用途</dt><dd>计算处理（可选）</dd></div>
               <div><dt>认证</dt><dd>{runtime.data?.qoder?.auth_mode || '未配置'}</dd></div>
               <div><dt>模型</dt><dd>{runtime.data?.qoder?.model || '默认'}</dd></div>
@@ -530,7 +535,7 @@ export default function CompetitionAgent() {
               <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.authenticated || runtime.data?.qoder?.service_running} onClick={() => manageQoder('start', provider.startQoderService)}><Play size={14} />启动服务</button>
               <button type="button" title="停止 Qoder 服务" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.service_running} onClick={() => manageQoder('stop', provider.stopQoderService)}><Square size={13} /></button>
             </div>
-            {runtime.data?.qoder?.login_url ? <a className="competition-agent-qoder-login" href={runtime.data.qoder.login_url} target="_blank" rel="noreferrer">打开 Qoder 授权页<ExternalLink size={12} /></a> : null}
+            {runtime.data?.qoder?.login_url ? <a className="competition-agent-qoder-login" href={runtime.data.qoder.login_url} target="_blank" rel="noreferrer">打开 Qoder CN 授权页<ExternalLink size={12} /></a> : null}
           </aside>
           {settingsMessage ? <p>{settingsMessage}</p> : null}
         </form>

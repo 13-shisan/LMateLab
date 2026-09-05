@@ -337,7 +337,7 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
             "ase",
             "httpx",
             "pypdf",
-            "qoder-agent-sdk",
+            "qodercn-agent-sdk",
         ):
             self.assertIn(required, packages)
 

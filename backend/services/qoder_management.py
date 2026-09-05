@@ -10,9 +10,11 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
-QODER_SDK_VERSION = "1.0.14"
+QODERCN_SDK_VERSION = "1.0.14"
+QODERCN_LOGIN_HOSTS = frozenset({"qoder.cn", "qoder.com.cn"})
 _LOGIN_LOCK = threading.Lock()
 _LOGIN_PROCESS: subprocess.Popen[str] | None = None
 _LOGIN_URL: str | None = None
@@ -44,11 +46,22 @@ def _workspace_dir() -> Path:
     return path
 
 
+def _qodercn_env() -> dict[str, str]:
+    values = os.environ.copy()
+    config_dir = Path(
+        values.get("QODERCN_CONFIG_DIR") or (_runtime_dir() / "config")
+    )
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    config_dir.chmod(0o700)
+    values["QODERCN_CONFIG_DIR"] = str(config_dir)
+    return values
+
+
 def _cli_path() -> Path | None:
-    spec = importlib.util.find_spec("qoder_agent_sdk")
+    spec = importlib.util.find_spec("qodercn_agent_sdk")
     if spec is None or spec.origin is None:
         return None
-    candidate = Path(spec.origin).resolve().parent / "_bundled" / "qodercli"
+    candidate = Path(spec.origin).resolve().parent / "_bundled" / "qoderclicn"
     return candidate if candidate.is_file() and os.access(candidate, os.X_OK) else None
 
 
@@ -71,6 +84,7 @@ def _account_status(cli: Path) -> dict[str, object]:
             capture_output=True,
             text=True,
             timeout=8,
+            env=_qodercn_env(),
         )
         value = json.loads(result.stdout) if result.returncode == 0 else {}
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
@@ -107,16 +121,30 @@ def qoder_status() -> dict[str, object]:
 def install_qoder() -> dict[str, object]:
     _require_enabled()
     try:
-        installed_version = version("qoder-agent-sdk")
+        installed_version = version("qodercn-agent-sdk")
     except PackageNotFoundError as exc:
         raise QoderManagementError("Qoder is not installed in this release") from exc
-    if installed_version != QODER_SDK_VERSION:
+    if installed_version != QODERCN_SDK_VERSION:
         raise QoderManagementError(
-            f"Qoder release version mismatch: expected {QODER_SDK_VERSION}"
+            f"Qoder CN release version mismatch: expected {QODERCN_SDK_VERSION}"
         )
     if _cli_path() is None:
-        raise QoderManagementError("Qoder CLI is unavailable in this release")
+        raise QoderManagementError("Qoder CN CLI is unavailable in this release")
     return qoder_status()
+
+
+def _extract_login_url(line: str) -> str | None:
+    for candidate in re.findall(r"https://\S+", line):
+        value = candidate.rstrip(".,;:)]}'\"")
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme == "https"
+            and parsed.hostname in QODERCN_LOGIN_HOSTS
+            and parsed.path == "/device/selectAccounts"
+            and any(parse_qs(parsed.query).get("challenge", []))
+        ):
+            return value
+    return None
 
 
 def _read_login_output(process: subprocess.Popen[str]) -> None:
@@ -124,10 +152,10 @@ def _read_login_output(process: subprocess.Popen[str]) -> None:
     try:
         assert process.stdout is not None
         for line in process.stdout:
-            match = re.search(r"https://qoder\.com/\S+", line)
-            if match:
+            login_url = _extract_login_url(line)
+            if login_url:
                 with _LOGIN_LOCK:
-                    _LOGIN_URL = match.group(0)
+                    _LOGIN_URL = login_url
         return_code = process.wait()
         with _LOGIN_LOCK:
             if return_code != 0:
@@ -160,6 +188,7 @@ def start_login() -> dict[str, object]:
                     text=True,
                     bufsize=1,
                     start_new_session=True,
+                    env=_qodercn_env(),
                 )
             except OSError as exc:
                 raise QoderManagementError("Qoder login could not start") from exc
@@ -196,6 +225,7 @@ def start_service() -> dict[str, object]:
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
+                env=_qodercn_env(),
             )
         except OSError as exc:
             raise QoderManagementError("Qoder service could not start") from exc
@@ -216,7 +246,7 @@ def stop_service() -> dict[str, object]:
         command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "replace")
     except OSError as exc:
         raise QoderManagementError("Qoder service identity cannot be verified") from exc
-    if "qodercli" not in command or "remote-control" not in command:
+    if "qoderclicn" not in command or "remote-control" not in command:
         raise QoderManagementError("Qoder service identity does not match")
     try:
         os.kill(pid, signal.SIGTERM)

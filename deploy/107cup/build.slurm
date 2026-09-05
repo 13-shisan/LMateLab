@@ -42,6 +42,7 @@ mkdir -p \
   "$root/runtime" \
   "$root/runtime/cache/vasp-elements" \
   "$root/runtime/qoder" \
+  "$root/runtime/qoder/config" \
   "$root/config/agent" \
   "$root/config/secrets" \
   "$root/data/db" \
@@ -56,6 +57,7 @@ mkdir -p \
   "$root/backups"
 chmod 700 \
   "$root/runtime/qoder" \
+  "$root/runtime/qoder/config" \
   "$root/config/agent" \
   "$root/config/secrets" \
   "$root/data/agent" \

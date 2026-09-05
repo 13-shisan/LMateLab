@@ -32,12 +32,16 @@ cd ../frontend
 npm ci
 ```
 
-Qoder 是可选能力。Linux 部署启用 `LMATELAB_QODER_MANAGEMENT_ENABLED=1` 后，可在 Agent 设置中
-一键安装固定版本；也可以手动安装同一版本：
+Qoder CN 是可选能力。Linux 发布在构建阶段固定安装大陆版 SDK；启用
+`LMATELAB_QODER_MANAGEMENT_ENABLED=1` 后，Agent 设置中的“一键安装”只校验版本和内置
+`qoderclicn`，不会在 Web 或 Worker 运行期间安装软件。手动安装同一版本的命令为：
 
 ```bash
-python -m pip install qoder-agent-sdk==1.0.14
+python -m pip install qodercn-agent-sdk==1.0.14
 ```
+
+LLM API Key 不允许经比赛期间的公网 HTTP 入口提交。Operator 必须通过 HTTPS 或直达 107
+计算节点 Web 服务的 `127.0.0.1` SSH 隧道保存；API URL 和模型不含密钥，仍可从公网入口更新。
 
 公开 QMOF 全量结构和 CIF 文件体积较大，不随 Git 仓库分发。请从
 [QMOF 官方仓库](https://github.com/arosen93/QMOF) 下载数据集，使用仓库提供的 CSV 导入脚本建立只读索引：
