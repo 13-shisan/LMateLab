@@ -102,7 +102,14 @@ for _attempt in $(seq 1 60); do
   if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
       "http://127.0.0.1:$port/api/health/live" >/dev/null \
     && curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
-      "http://127.0.0.1:$port/api/health/ready" >/dev/null; then
+      "http://127.0.0.1:$port/api/health/ready" >/dev/null \
+    && python "$source_root/deploy/107cup/service_recovery.py" verify-health \
+      --job-id "$SLURM_JOB_ID" \
+      --node "${SLURMD_NODENAME:-$(hostname)}" \
+      --port "$port" \
+      --commit "$commit" \
+      --manifest-sha256 "$manifest_sha256" \
+      --started-at "$started_at" >/dev/null; then
     ready=1
     break
   fi

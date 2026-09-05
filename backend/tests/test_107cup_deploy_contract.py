@@ -1489,6 +1489,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
             "uvicorn main_107cup:app",
             "--workers 1",
             "service_recovery.py",
+            "verify-health",
             "publish",
             "/api/health/live",
             "/api/health/ready",
@@ -1503,6 +1504,7 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertNotIn("#SBATCH --time=7-00:00:00", source)
         self.assertNotIn("exec uvicorn", source)
         self.assertLess(source.index("uvicorn main_107cup:app"), source.index(" publish "))
+        self.assertLess(source.index("verify-health"), source.index(" publish "))
 
     def test_service_recovery_is_bounded_owned_and_single_candidate(self):
         source = self.read_required("service_recovery.py")
