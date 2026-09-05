@@ -16,6 +16,7 @@ CANCEL_LINE = re.compile(
     r"\[(?P<at>[^]]+)]\s+error:\s+\*\*\* JOB (?P<job_id>\d+) ON "
     r"(?P<node>\S+) CANCELLED"
 )
+REMOTE_ROOT = "/home/scc/pb23030683/lmatelab-107cup"
 
 FIELDS = (
     "job_id",
@@ -47,7 +48,8 @@ FIELDS = (
     "stderr_bytes",
     "stdout_sha256",
     "stderr_sha256",
-    "evidence_files",
+    "remote_evidence_files",
+    "attachment_files",
     "notes",
 )
 
@@ -253,6 +255,7 @@ def _load_stage6_children(evidence_dir: Path) -> list[dict[str, object]]:
         start_epoch = job["start_time"]["number"]
         end_epoch = job["end_time"]["number"]
         iso = lambda value: datetime.fromtimestamp(value, timezone.utc).isoformat()
+        evidence_paths = (path, scheduler.parent / "summary.json")
         rows.append(
             {
                 "job_id": job_id,
@@ -284,11 +287,13 @@ def _load_stage6_children(evidence_dir: Path) -> list[dict[str, object]]:
                 "finished_at": iso(end_epoch),
                 "queue_seconds": max(0, start_epoch - submit_epoch),
                 "run_seconds": max(0, end_epoch - start_epoch),
-                "evidence_files": ";".join(
-                    (
-                        path.relative_to(evidence_dir.parent).as_posix(),
-                        (scheduler.parent / "summary.json").relative_to(evidence_dir.parent).as_posix(),
-                    )
+                "remote_evidence_files": ";".join(
+                    f"{REMOTE_ROOT}/{item.relative_to(evidence_dir.parent).as_posix()}"
+                    for item in evidence_paths
+                ),
+                "attachment_files": ";".join(
+                    f"stage6/{item.relative_to(scheduler.parent).as_posix()}"
+                    for item in evidence_paths
                 ),
                 "notes": "Stage 6 child job; not duplicated in root logs",
             }
@@ -381,8 +386,13 @@ def _root_rows(logs_dir: Path, evidence_dir: Path) -> list[dict[str, object]]:
                 "stderr_bytes": stderr.stat().st_size if stderr else 0,
                 "stdout_sha256": _sha256(stdout) if stdout else "",
                 "stderr_sha256": _sha256(stderr) if stderr else "",
-                "evidence_files": ";".join(
-                    path.relative_to(logs_dir.parent).as_posix()
+                "remote_evidence_files": ";".join(
+                    f"{REMOTE_ROOT}/{path.relative_to(logs_dir.parent).as_posix()}"
+                    for path in (stdout, stderr)
+                    if path is not None
+                ),
+                "attachment_files": ";".join(
+                    f"root-logs/{path.name}"
                     for path in (stdout, stderr)
                     if path is not None
                 ),
@@ -471,7 +481,12 @@ def _vasp_rows(path: Path) -> list[dict[str, object]]:
                     "run_seconds": source["run_seconds"],
                     "vasp_wall_seconds": source["vasp_wall_seconds"],
                     "peak_rss_kbytes": source["peak_rss_kbytes"],
-                    "evidence_files": source["working_directory"],
+                    "remote_evidence_files": f'{REMOTE_ROOT}/{source["working_directory"]}',
+                    "attachment_files": (
+                        "unavailable"
+                        if source["runtime_evidence"] == "missing"
+                        else f'vasp-runtime/{source["working_directory"]}'
+                    ),
                     "notes": (
                         f'attempt={source["attempt_id"]}; release={source["release_commit"]}; '
                         f'runtime={source["runtime_evidence"]}'
@@ -505,11 +520,12 @@ def _stage7_terminal_row(evidence_dir: Path) -> dict[str, object]:
             "stderr_bytes": stderr.stat().st_size,
             "stdout_sha256": _sha256(stdout),
             "stderr_sha256": _sha256(stderr),
-            "evidence_files": ";".join(
-                (
-                    stdout.relative_to(evidence_dir.parent).as_posix(),
-                    stderr.relative_to(evidence_dir.parent).as_posix(),
-                )
+            "remote_evidence_files": ";".join(
+                f"{REMOTE_ROOT}/{item.relative_to(evidence_dir.parent).as_posix()}"
+                for item in (stdout, stderr)
+            ),
+            "attachment_files": ";".join(
+                f"stage7/{item.name}" for item in (stdout, stderr)
             ),
             "notes": "This job wrote only to evidence/stage7, so it is absent from root logs",
         }

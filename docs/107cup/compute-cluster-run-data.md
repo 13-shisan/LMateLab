@@ -57,6 +57,8 @@ Slurm 终态分类为：
 
 这使故意失败 Job `38626` 可以同时记录为“Slurm failed”和“适配器失败分支验收通过”，也使 Slurm `COMPLETED/0:0` 但科学门禁未通过的 VASP 作业不会被伪报为成功结果。
 
+CSV 同时提供两套证据定位：`remote_evidence_files` 是 107 上以 `/home/scc/pb23030683/lmatelab-107cup` 开头的完整绝对路径，便于登录服务器后直接核对；`attachment_files` 是解压评审 ZIP 后相对于附件根目录的可移植路径。两列均以分号分隔多个文件，不使用仅在开发者 Windows 电脑上有效的本地绝对路径。
+
 ## 3. 按功能分类
 
 | 功能类别 | 总数 | Completed | Failed | Cancelled | Running |
@@ -230,11 +232,11 @@ compute-cluster-run-data-20260905/submission-attachment
 | 项目 | 值 |
 |---|---|
 | 附件目录文件数 | `563` |
-| 附件目录未压缩大小 | `16,950,661 bytes` |
+| 附件目录未压缩大小 | `16,981,635 bytes` |
 | `SHA256SUMS.txt` 覆盖文件数 | `562`（不包含清单自身） |
 | 压缩包 | `lmatelab-107cup-compute-cluster-run-data-20260905.zip` |
-| 压缩包大小 | `1,878,977 bytes` |
-| 压缩包 SHA-256 | `eaabb20b4351d6e14862222beda409b0d8aed06242070d2d36de477e6c30fa8d` |
+| 压缩包大小 | `1,881,177 bytes` |
+| 压缩包 SHA-256 | `17db1b8646239cec4881a3e2ba93bca4b5acd7b51eeb89c7bd9b930dc36bf997` |
 
 压缩包自身哈希保存在同目录的 `lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256`，避免自引用；包内 `SHA256SUMS.txt` 用于逐文件复核。
 
