@@ -81,7 +81,7 @@ class CompetitionAgentRouteTests(unittest.TestCase):
             "LMATELAB_COMPETITION_AGENT_PROVIDER": "qoder",
             "LMATELAB_QODER_AUTH_MODE": "cli",
             "LMATELAB_QODER_CONNECTED": "1",
-            "QODER_PERSONAL_ACCESS_TOKEN": "must-not-leak",
+            "QODERCN_PERSONAL_ACCESS_TOKEN": "must-not-leak",
         }
         with mock.patch.dict("os.environ", environment, clear=True):
             response = self.client.get("/api/competition/agent/runtime")
@@ -93,7 +93,7 @@ class CompetitionAgentRouteTests(unittest.TestCase):
                 "connected": True,
                 "qoder_available": True,
                 "qoder": {
-                    "interface": "qoder-agent-sdk",
+                    "interface": "qodercn-agent-sdk",
                     "enabled": True,
                     "connected": True,
                     "auth_mode": "cli",
@@ -152,6 +152,53 @@ class CompetitionAgentRouteTests(unittest.TestCase):
         with mock.patch.dict("os.environ", environment, clear=True):
             response = self.client.post("/api/competition/agent/qoder/service/start")
         self.assertEqual(403, response.status_code)
+
+    def test_agent_api_key_requires_https_or_loopback_destination(self):
+        settings_file = Path(self.temp_dir.name) / "config" / "settings.json"
+        key_file = Path(self.temp_dir.name) / "secrets" / "llm-api-key"
+        environment = {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_AGENT_SETTINGS_FILE": str(settings_file),
+            "LMATELAB_LLM_API_KEY_FILE": str(key_file),
+        }
+        payload = {
+            "api_url": "https://api.deepseek.com/chat/completions",
+            "model": "deepseek-chat",
+            "api_key": "synthetic-test-key",
+        }
+        with mock.patch.dict("os.environ", environment, clear=True):
+            public_status = self.client.get(
+                "/api/competition/agent/settings",
+                headers={
+                    "host": "127.0.0.1:18733",
+                    "x-lmatelab-gateway-scheme": "http",
+                },
+            )
+            public_write = self.client.put(
+                "/api/competition/agent/settings",
+                json=payload,
+                headers={
+                    "host": "127.0.0.1:18733",
+                    "x-lmatelab-gateway-scheme": "http",
+                },
+            )
+            loopback_write = self.client.put(
+                "/api/competition/agent/settings",
+                json=payload,
+                headers={"host": "127.0.0.1:21763"},
+            )
+
+        self.assertEqual(200, public_status.status_code, public_status.text)
+        self.assertFalse(public_status.json()["api_key_write_allowed"])
+        self.assertEqual(400, public_write.status_code, public_write.text)
+        self.assertEqual(
+            "agent_api_key_secure_transport_required",
+            public_write.headers.get("x-error-code"),
+        )
+        self.assertEqual(200, loopback_write.status_code, loopback_write.text)
+        self.assertTrue(loopback_write.json()["api_key_write_allowed"])
+        self.assertTrue(loopback_write.json()["api_key_configured"])
+        self.assertEqual("synthetic-test-key", key_file.read_text(encoding="utf-8"))
 
     def test_operator_uploads_text_and_uses_it_for_file_analysis(self):
         environment = {

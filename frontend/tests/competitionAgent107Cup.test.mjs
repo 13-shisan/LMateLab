@@ -230,14 +230,14 @@ test('Agent mounts complete VASP calculation directories and exposes the optiona
 
   for (const token of [
     'CalculationDirectoryTree', 'selectedCalculationIds', 'calculation_ids',
-    'VASP 计算目录', 'webkitdirectory', 'Qoder 接口', 'qoder-agent-sdk',
+    'VASP 计算目录', 'webkitdirectory', 'Qoder CN 接口', 'qodercn-agent-sdk',
   ]) assert.match(page, new RegExp(token));
   assert.match(provider, /calculation_id/);
   assert.match(provider, /group_name/);
   assert.doesNotMatch(page, /category === 'result'.*type="checkbox"/s);
 });
 
-test('Qoder settings expose fixed install, login, and service controls', () => {
+test('Qoder CN settings expose fixed install, login, and service controls', () => {
   const page = readFileSync(
     new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
     'utf8',
@@ -246,10 +246,12 @@ test('Qoder settings expose fixed install, login, and service controls', () => {
     new URL('../src/features/competition/data/apiCompetitionDataProvider.js', import.meta.url),
     'utf8',
   );
-  for (const token of ['一键安装', '一键登录', '启动服务', '停止 Qoder 服务', '打开 Qoder 授权页']) {
+  for (const token of ['一键安装', '一键登录', '启动服务', '停止 Qoder 服务', '打开 Qoder CN 授权页']) {
     assert.match(page, new RegExp(token));
   }
   for (const route of ['/qoder/install', '/qoder/login', '/qoder/service/start', '/qoder/service/stop']) {
     assert.match(provider, new RegExp(route));
   }
+  assert.match(page, /api_key_write_allowed/);
+  assert.match(page, /公网 HTTP 页面不传输密钥/);
 });

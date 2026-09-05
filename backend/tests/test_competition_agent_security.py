@@ -27,13 +27,14 @@ class CompetitionAgentSecurityTests(unittest.TestCase):
         self.assertIn("services.competition_agent.worker", source)
         self.assertIn("--poll-seconds 1 --max-idle-cycles 0", source)
         self.assertIn('source "$runtime_env"', source)
-        self.assertNotIn("QODER_PERSONAL_ACCESS_TOKEN", source)
+        self.assertNotIn("QODERCN_PERSONAL_ACCESS_TOKEN", source)
         for forbidden in ["sbatch ", "scancel ", "vasp_std", "POTCAR"]:
             self.assertNotIn(forbidden, source)
 
     def test_qoder_management_uses_only_fixed_subprocess_calls(self):
         source = (BACKEND_ROOT / "services" / "qoder_management.py").read_text(encoding="utf-8").lower()
-        self.assertIn('qoder_sdk_version = "1.0.14"', source)
+        self.assertIn('qodercn_sdk_version = "1.0.14"', source)
+        self.assertIn('"qoderclicn"', source)
         self.assertIn('"remote-control"', source)
         self.assertIn('"--capacity", "1"', source)
         for forbidden in ["shell=true", "os.system", "sbatch", "scancel", '"pip", "install"']:
