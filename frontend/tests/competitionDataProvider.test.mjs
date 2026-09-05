@@ -80,7 +80,7 @@ test('demo mutations reject before any supplied fetch implementation runs', asyn
   assert.equal(requestCount, 0);
 });
 
-test('live dashboard and workflow list request the exact competition routes', async () => {
+test('live dashboard, service health, and workflow list request the exact competition routes', async () => {
   const requests = [];
   const provider = createApiCompetitionDataProvider({
     authHeaders: () => ({}),
@@ -94,12 +94,34 @@ test('live dashboard and workflow list request the exact competition routes', as
   });
 
   await provider.getDashboard();
+  await provider.getServiceHealth();
   await provider.listWorkflows({ query: 'MoS2', status: 'running' });
 
   assert.deepEqual(requests.map(([path]) => path), [
     '/api/competition/dashboard',
+    '/api/health/live',
     '/api/competition/workflows?query=MoS2&status=running',
   ]);
+});
+
+test('demo service health is deterministic and never requests the network', async () => {
+  let requestCount = 0;
+  const provider = createDemoCompetitionDataProvider({
+    fetchImpl: async () => {
+      requestCount += 1;
+      throw new Error('demo health must not request the network');
+    },
+  });
+
+  assert.deepEqual(await provider.getServiceHealth(), {
+    status: 'ok',
+    job_id: 'DEMO-SERVICE',
+    node: 'anode18',
+    commit: '0000000000000000000000000000000000000000',
+    release_kind: 'preview',
+    data_mode: 'demo',
+  });
+  assert.equal(requestCount, 0);
 });
 
 test('live forbidden responses retain status and never fall back to demo data', async () => {

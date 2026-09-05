@@ -195,6 +195,14 @@ function competitionNavigationGroupsFor(agentEnabled = competitionAgentEnabled) 
         exact: true,
         description: '按元素检索竞赛结果',
       }),
+      Object.freeze({
+        key: 'competition-server',
+        label: '服务器',
+        path: '/dashboard/server',
+        icon: 'Server',
+        exact: true,
+        description: '107 集群与 Slurm 资源状态',
+      }),
   ];
   if (agentEnabled) {
     items.push(Object.freeze({

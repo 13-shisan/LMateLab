@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as navigation from '../src/config/appNavigation.js';
 
-test('107 cup edition exposes only the five focused competition entrances', () => {
+test('107 cup edition exposes the focused workflow and server entrances', () => {
   const groups = navigation.navigationGroupsForEdition('107cup');
   assert.deepEqual(groups.flatMap((group) => group.items.map((item) => [
     item.key,
@@ -15,6 +15,7 @@ test('107 cup edition exposes only the five focused competition entrances', () =
     ['competition-workflows', '/dashboard/workflows', 'Workflow'],
     ['competition-results', '/dashboard/results', 'ChartNoAxesCombined'],
     ['competition-vasp-db', '/dashboard/database/vasp', 'Database'],
+    ['competition-server', '/dashboard/server', 'Server'],
   ]);
 });
 

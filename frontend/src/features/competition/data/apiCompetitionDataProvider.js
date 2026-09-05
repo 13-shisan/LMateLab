@@ -199,6 +199,10 @@ export function createApiCompetitionDataProvider({
       return request('/api/competition/dashboard');
     },
 
+    getServiceHealth() {
+      return request('/api/health/live');
+    },
+
     listWorkflows({ query = '', status = '' } = {}) {
       return request(`/api/competition/workflows${queryString([
         ['query', query],
