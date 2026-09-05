@@ -155,7 +155,7 @@ class AgentDeploymentContractTests(unittest.TestCase):
             self.assertIn("proxy_pass http://127.0.0.1:18740", location)
             if path == "/api/competition/agent/settings":
                 self.assertIn(
-                    "proxy_set_header X-LMateLab-Gateway-Scheme $scheme", location
+                    "proxy_set_header X-LMateLab-Gateway-Scheme allowlisted-http", location
                 )
 
         uuid_pattern = (

@@ -253,5 +253,7 @@ test('Qoder CN settings expose fixed install, login, and service controls', () =
     assert.match(provider, new RegExp(route));
   }
   assert.match(page, /api_key_write_allowed/);
-  assert.match(page, /公网 HTTP 页面不传输密钥/);
+  assert.match(page, /api_key_write_transport/);
+  assert.match(page, /IP 白名单 HTTP 入口/);
+  assert.match(page, /传输未加密/);
 });

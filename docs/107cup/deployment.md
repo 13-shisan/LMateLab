@@ -122,7 +122,7 @@ cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
 
 控制器只在没有活动归属 Worker 时执行一次 `sbatch --parsable`。如果发现多个 Worker、同名但归属字段不匹配、调度查询失败或状态文件身份不一致，必须停止并保留证据，不能循环提交或自动取消。Worker 最长运行 4 天，读取 `config/runtime.env`，解析固定 `current` release 后进入无限空闲等待；它不是登录节点常驻进程。
 
-`LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 是当前默认生产路径，API Key 只写入 `config/secrets/llm-api-key` 且权限必须为 `0600`。公网 `http://222.195.94.37:18733` 没有 TLS，不允许提交 API Key；页面会禁用密钥输入并说明原因，但 API URL 和模型仍可单独保存。Operator 必须通过 HTTPS，或直达当前 107 计算节点 Web 服务的 Windows `127.0.0.1` SSH 隧道保存密钥。4090 Nginx 在设置路由覆盖写入实际入口 scheme，后端优先据此判定，不能用伪造 `Host: 127.0.0.1` 绕过。
+`LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 是当前默认生产路径，API Key 只写入 `config/secrets/llm-api-key` 且权限必须为 `0600`。公网 `http://222.195.94.37:18733` 没有 TLS，但经 4090 Nginx 的精确来源 IP 白名单后允许 Operator 保存 API Key；页面必须持续提示该链路传输未加密，只应在可信校园网中使用。Nginx 只在 `/api/competition/agent/settings` 精确路由完成 IP 放行后覆盖写入 `allowlisted-http` 可信标记，后端拒绝普通 HTTP 标记，不能用伪造 `Host: 127.0.0.1` 绕过。HTTPS 与直达当前 107 Web 服务的 Windows `127.0.0.1` SSH 隧道仍是更安全的密钥入口。
 
 Qoder 使用大陆版 `qodercn-agent-sdk==1.0.14` 和内置 `qoderclicn`；认证状态只保存在 `QODERCN_CONFIG_DIR` 指向的私有目录，PAT 环境变量名为 `QODERCN_PERSONAL_ACCESS_TOKEN`。网页“安装”动作只验证固定版本和 CLI；授权 URL 必须是 `qoder.cn` 或 `qoder.com.cn` 的带 challenge 设备授权页，全球版 `qoder.com` 链接会被拒绝。启用真实 Qoder 前，必须先在 107 计算节点验证外网、完成受控登录并把 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 显式改为 `1`。调度完成只能证明 Worker 运行，不能替代真实 Agent 响应、引用约束和 Viewer 只读验收。
 

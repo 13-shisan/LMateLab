@@ -260,6 +260,7 @@ export default function CompetitionAgent() {
   ));
   const selectedWorkflow = (workflows.data?.items || []).find((item) => item.id === workflowId) || null;
   const apiKeyWriteAllowed = settings.data?.api_key_write_allowed === true;
+  const apiKeyWriteTransport = settings.data?.api_key_write_transport || 'blocked';
   const selectedWorkflowResult = useCompetitionResource(useCallback(
     () => selectedWorkflow?.status === 'succeeded'
       ? provider.getResult(selectedWorkflow.id)
@@ -516,7 +517,7 @@ export default function CompetitionAgent() {
             <strong>普通问答接口</strong>
             <label>API URL<input value={settingsForm.api_url} onChange={(event) => setSettingsForm((value) => ({ ...value, api_url: event.target.value }))} /></label>
             <label>模型<input value={settingsForm.model} onChange={(event) => setSettingsForm((value) => ({ ...value, model: event.target.value }))} /></label>
-            <label>API Key<input type="password" autoComplete="new-password" value={settingsForm.api_key} disabled={!apiKeyWriteAllowed} placeholder={!apiKeyWriteAllowed ? '请通过安全入口配置' : settings.data?.api_key_configured ? '已配置，留空不修改' : '输入 API Key'} onChange={(event) => setSettingsForm((value) => ({ ...value, api_key: event.target.value }))} />{!apiKeyWriteAllowed ? <span className="competition-agent-secret-note">公网 HTTP 页面不传输密钥，请使用 HTTPS 或 127.0.0.1 SSH 隧道。</span> : null}</label>
+            <label>API Key<input type="password" autoComplete="new-password" value={settingsForm.api_key} disabled={!apiKeyWriteAllowed} placeholder={!apiKeyWriteAllowed ? '请通过安全入口配置' : settings.data?.api_key_configured ? '已配置，留空不修改' : '输入 API Key'} onChange={(event) => setSettingsForm((value) => ({ ...value, api_key: event.target.value }))} />{apiKeyWriteTransport === 'allowlisted_http' ? <span className="competition-agent-secret-note">当前为 IP 白名单 HTTP 入口，允许保存密钥，但传输未加密；请仅在可信校园网使用。</span> : !apiKeyWriteAllowed ? <span className="competition-agent-secret-note">此入口不允许传输密钥，请使用 HTTPS、IP 白名单入口或 127.0.0.1 SSH 隧道。</span> : null}</label>
             <button type="submit"><KeyRound size={16} />保存</button>
           </section>
           <aside className="competition-agent-qoder-settings" aria-label="Qoder 接口">
