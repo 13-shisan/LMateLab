@@ -372,6 +372,20 @@ def _health_matches(state: dict, live: dict, ready: dict) -> bool:
     }
 
 
+def verify_service_health(
+    state_payload: dict,
+    health_probe: Callable[[str, int], tuple[dict, dict]] = probe_health,
+) -> dict:
+    state = _validate_service_state(state_payload)
+    try:
+        live, ready = health_probe(state["node"], state["port"])
+    except HealthProbeError:
+        return {"status": "waiting", "reason": "service_not_ready"}
+    if not _health_matches(state, live, ready):
+        return {"status": "blocked", "reason": "service_identity_mismatch"}
+    return {"status": "ready"}
+
+
 class ServiceRecovery:
     def __init__(
         self,
@@ -591,10 +605,33 @@ def _publish_cli(arguments) -> int:
     return 0
 
 
+def _verify_health_cli(arguments) -> int:
+    result = verify_service_health(
+        {
+            "schema": SERVICE_STATE_SCHEMA,
+            "job_id": arguments.job_id,
+            "node": arguments.node,
+            "port": arguments.port,
+            "commit": arguments.commit,
+            "manifest_sha256": arguments.manifest_sha256,
+            "started_at": arguments.started_at,
+        }
+    )
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0 if result["status"] == "ready" else 2
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("recover")
+    verify = subparsers.add_parser("verify-health")
+    verify.add_argument("--job-id", required=True)
+    verify.add_argument("--node", required=True)
+    verify.add_argument("--port", required=True, type=int)
+    verify.add_argument("--commit", required=True)
+    verify.add_argument("--manifest-sha256", required=True)
+    verify.add_argument("--started-at", required=True)
     publish = subparsers.add_parser("publish")
     publish.add_argument("--job-id", required=True)
     publish.add_argument("--node", required=True)
@@ -606,6 +643,8 @@ def main(argv=None) -> int:
     try:
         if arguments.command == "recover":
             return _recover_cli()
+        if arguments.command == "verify-health":
+            return _verify_health_cli(arguments)
         return _publish_cli(arguments)
     except RecoveryError as exc:
         print(

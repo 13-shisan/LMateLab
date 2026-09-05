@@ -163,6 +163,46 @@ class ServiceRecoveryTests(unittest.TestCase):
         self.assertEqual("41001", result["job_id"])
         self.assertEqual([], scheduler.submit_calls)
 
+    def test_candidate_health_requires_its_own_runtime_identity(self):
+        state = self.state_payload(job_id="41003", node="anode17")
+
+        matching = self.module.verify_service_health(
+            state,
+            lambda _node, _port: (
+                {
+                    "status": "ok",
+                    "job_id": "41003",
+                    "node": "anode17",
+                    "commit": self.commit,
+                    "manifest_sha256": self.manifest,
+                    "release_kind": "stable",
+                    "data_mode": "live",
+                },
+                {"status": "ready"},
+            ),
+        )
+        stale_same_port = self.module.verify_service_health(
+            state,
+            lambda _node, _port: (
+                {
+                    "status": "ok",
+                    "job_id": "41001",
+                    "node": "anode17",
+                    "commit": "b" * 40,
+                    "manifest_sha256": "c" * 64,
+                    "release_kind": "stable",
+                    "data_mode": "live",
+                },
+                {"status": "ready"},
+            ),
+        )
+
+        self.assertEqual("ready", matching["status"])
+        self.assertEqual(
+            {"status": "blocked", "reason": "service_identity_mismatch"},
+            stale_same_port,
+        )
+
     def test_dead_service_submits_once_and_active_candidate_prevents_duplicate(self):
         self.write_json("service-state.json", self.state_payload(job_id="41000"))
         scheduler = FakeScheduler()
