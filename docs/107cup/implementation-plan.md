@@ -1119,4 +1119,15 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 在公网新身份和 Agent 空队列确认后，旧 Web `54304/54328/54393` 与旧 Worker `54395` 均经用户、JobName、账号、QOS、分区、节点、Command 和 WorkDir 核对后受控停止，Web 日志记录完整 Uvicorn shutdown。新 Worker Job `54612/P107-A100/anode18` 与 Web `54595` 的 commit/manifest 一致；最终队列只保留这一组 LMateLab Web/Worker，没有触及共享账号下其他作业。
 - [x] 本地 Stage 10、部署与安全合同 `16/16`、前端全量 `159/159` 通过；功能提交 `cec528f2487f474a9ebf996e40508c58cd95fbd3` 已由 PR #97 合并为 `f51122a7d42aa82d03b975f2bfdc09977ea8b0f6`。
 - [x] 107 Slurm 正式构建通过，新 Web/Worker 候选提交和 manifest 一致，`18733` relay 已切换，旧服务按归属核对后停止。
-- [ ] 已登录 Operator 在公网入口看到未加密警告并自行保存真实 API Key；自动化不得读取、回显、截图或把密钥写入 Git/日志。
+- [x] 已登录 Operator 在公网入口看到未加密警告并自行保存真实 API Key；页面返回“已配置，留空不修改”且运行状态为“LLM 可调用”。自动化没有读取、回显、截图或把密钥写入 Git/日志。
+
+### 17.34 Slurm 原始日志公开交付
+
+- 将本地冻结评审包 `lmatelab-107cup-compute-cluster-run-data-20260905.zip` 作为公开比赛附件提交到 `docs/107cup/artifacts/`，不重新打包或改写历史日志。ZIP SHA-256 固定为 `17db1b8646239cec4881a3e2ba93bca4b5acd7b51eeb89c7bd9b930dc36bf997`。
+- 包含 `563` 个实际文件、未压缩 `16,981,635` 字节，包内 `SHA256SUMS.txt` 的 `562` 条逐文件哈希全部通过。附件包含根 Slurm stdout/stderr、Stage 6 子作业证据和 VASP attempt 的受控运行文件；不包含数据库、密钥、密码、POTCAR、OUTCAR、WAVECAR 或 CHGCAR。
+- Stage 10 合同必须复核 ZIP 总哈希、文件数、未压缩字节数、包内逐文件哈希和禁入文件名。Gitea 与公开 GitHub 只接受同一个已合并 `main` 提交，任一端不同步都不算完成。
+
+### 17.35 107 集群动态占用（下一项核心功能）
+
+- [ ] 增加只读、超时受控的 Slurm 资源快照，只采集 `P107-RTX5090` 与 `P107-A100` 的允许节点；页面展示节点状态、CPU 分配/空闲和调度器实际提供的 GPU 分配数据。若 Slurm 不提供 GPU 动态占用则明确显示“不可用”，不得用配置总量或 LMateLab attempt 数推断。
+- [ ] 快照在 Slurm 计算节点执行固定参数命令并短时缓存，浏览器请求不在登录节点启动常驻采集。接口不得返回其他用户、其他账号、作业命令、工作目录或不属于竞赛分区的节点信息；采集失败时保留上次有效快照并标记过期，不显示为实时正常。

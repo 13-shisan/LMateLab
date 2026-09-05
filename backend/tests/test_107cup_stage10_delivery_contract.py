@@ -2,6 +2,7 @@ import csv
 import hashlib
 import re
 import unittest
+import zipfile
 from pathlib import Path, PurePosixPath
 
 
@@ -20,6 +21,17 @@ DELIVERY_DOCS = (
 )
 MANIFEST = ROOT / "docs" / "107cup" / "artifacts" / "manifest.sha256"
 SLURM_LEDGER = ROOT / "docs" / "107cup" / "artifacts" / "slurm-job-ledger.csv"
+SLURM_LOG_ARCHIVE = (
+    ROOT
+    / "docs"
+    / "107cup"
+    / "artifacts"
+    / "lmatelab-107cup-compute-cluster-run-data-20260905.zip"
+)
+SLURM_LOG_ARCHIVE_SHA256 = Path(f"{SLURM_LOG_ARCHIVE}.sha256")
+EXPECTED_SLURM_LOG_ARCHIVE_SHA256 = (
+    "17db1b8646239cec4881a3e2ba93bca4b5acd7b51eeb89c7bd9b930dc36bf997"
+)
 
 
 class Stage10DeliveryContractTests(unittest.TestCase):
@@ -136,6 +148,43 @@ class Stage10DeliveryContractTests(unittest.TestCase):
                 self.assertFalse(pure.is_absolute(), (row["job_id"], path))
                 self.assertNotIn("..", pure.parts, (row["job_id"], path))
                 self.assertNotIn("\\", path, (row["job_id"], path))
+
+    def test_slurm_log_archive_is_complete_and_hash_verified(self):
+        self.assertTrue(SLURM_LOG_ARCHIVE.is_file())
+        self.assertEqual(
+            SLURM_LOG_ARCHIVE_SHA256.read_text(encoding="ascii").strip(),
+            f"{EXPECTED_SLURM_LOG_ARCHIVE_SHA256}  {SLURM_LOG_ARCHIVE.name}",
+        )
+        self.assertEqual(
+            hashlib.sha256(SLURM_LOG_ARCHIVE.read_bytes()).hexdigest(),
+            EXPECTED_SLURM_LOG_ARCHIVE_SHA256,
+        )
+
+        with zipfile.ZipFile(SLURM_LOG_ARCHIVE) as archive:
+            files = [item for item in archive.infolist() if not item.is_dir()]
+            self.assertEqual(len(files), 563)
+            self.assertEqual(sum(item.file_size for item in files), 16_981_635)
+            names = {item.filename for item in files}
+            self.assertTrue(
+                all(name.startswith("submission-attachment/") for name in names)
+            )
+            forbidden = re.compile(
+                r"(^|/)(POTCAR|OUTCAR|WAVECAR|CHGCAR|\.env(?:\..*)?|"
+                r"[^/]+\.(?:db|sqlite|sqlite3|pem|key|p12|pfx))$",
+                re.IGNORECASE,
+            )
+            self.assertFalse([name for name in names if forbidden.search(name)])
+
+            checksum_member = "submission-attachment/SHA256SUMS.txt"
+            checksum_lines = archive.read(checksum_member).decode("ascii").splitlines()
+            self.assertEqual(len(checksum_lines), 562)
+            for line in checksum_lines:
+                match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_./-]+)", line)
+                self.assertIsNotNone(match, line)
+                digest, relative = match.groups()
+                member = f"submission-attachment/{relative}"
+                self.assertIn(member, names)
+                self.assertEqual(digest, hashlib.sha256(archive.read(member)).hexdigest())
 
 
 if __name__ == "__main__":

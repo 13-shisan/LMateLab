@@ -210,7 +210,12 @@ Job `40090` 在 runner 建立 `runtime-time.txt` 前失败，因此只有 Slurm 
 - `deploy/107cup/generate-slurm-job-ledger.py`，用于从冻结快照重建 CSV；
 - `artifacts/manifest.sha256`，固定上述交付件。
 
-Windows 本地另保存评审附件目录：
+仓库内同时提交了可直接下载的完整评审附件和独立哈希文件：
+
+- [`artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip`](./artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip)；
+- [`artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256`](./artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256)。
+
+原始组包目录仍保留在 Windows 本地：
 
 ```text
 D:/Documents/matflow项目/LMateLab-107Cup-evidence/
@@ -238,7 +243,7 @@ compute-cluster-run-data-20260905/submission-attachment
 | 压缩包大小 | `1,881,177 bytes` |
 | 压缩包 SHA-256 | `17db1b8646239cec4881a3e2ba93bca4b5acd7b51eeb89c7bd9b930dc36bf997` |
 
-压缩包自身哈希保存在同目录的 `lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256`，避免自引用；包内 `SHA256SUMS.txt` 用于逐文件复核。
+压缩包自身哈希保存在仓库同目录的 `lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256`，避免自引用；包内 `SHA256SUMS.txt` 用于逐文件复核。Gitea `main` 与公开 GitHub `main` 必须保持同一提交，不能只在其中一端更新附件。
 
 ## 10. 快照时运行服务
 
