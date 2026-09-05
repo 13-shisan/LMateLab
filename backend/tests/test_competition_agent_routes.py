@@ -472,7 +472,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
         self.assertEqual(403, denied.status_code)
 
     def test_operator_can_create_mock_run_and_viewer_cannot(self):
-        with mock.patch.dict("os.environ", {"LMATELAB_COMPETITION_AGENT_ENABLED": "1"}):
+        with mock.patch.dict("os.environ", {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "mock",
+        }):
             created = self.create_run()
             self.assertEqual("queued", created["status"])
             self.assertEqual("mock", created["provider"])
@@ -484,7 +487,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
         self.assertEqual(403, denied.status_code)
 
     def test_viewer_reads_only_approved_persisted_analysis(self):
-        with mock.patch.dict("os.environ", {"LMATELAB_COMPETITION_AGENT_ENABLED": "1"}):
+        with mock.patch.dict("os.environ", {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "mock",
+        }):
             created = self.create_run()
             self.identity_id = self.viewer_id
             hidden = self.client.get(f"/api/competition/agent/runs/{created['id']}")
@@ -503,7 +509,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
         self.assertEqual({}, visible.json()["input"])
 
     def test_create_worker_approve_viewer_flow_uses_persisted_mock_output(self):
-        with mock.patch.dict("os.environ", {"LMATELAB_COMPETITION_AGENT_ENABLED": "1"}):
+        with mock.patch.dict("os.environ", {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "mock",
+        }):
             created = self.create_run()
             with Session(self.engine) as session:
                 processed = process_next_run(session)
@@ -527,7 +536,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
             def run(self, **_kwargs):
                 raise TimeoutError("provider timed out")
 
-        with mock.patch.dict("os.environ", {"LMATELAB_COMPETITION_AGENT_ENABLED": "1"}):
+        with mock.patch.dict("os.environ", {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "mock",
+        }):
             created = self.client.post(
                 "/api/competition/agent/runs",
                 json={
@@ -545,7 +557,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
         self.assertEqual("failed", output["tool_calls"][-1]["status"])
 
     def test_non_mos2_sample_builds_a_workspace_without_an_executable_template(self):
-        with mock.patch.dict("os.environ", {"LMATELAB_COMPETITION_AGENT_ENABLED": "1"}):
+        with mock.patch.dict("os.environ", {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "mock",
+        }):
             response = self.client.post(
                 "/api/competition/agent/runs",
                 json={
@@ -573,7 +588,10 @@ class CompetitionAgentRouteTests(unittest.TestCase):
             "interlayer_spacing_angstrom": 6.2,
             "strain_percent": 0.0,
         }
-        with mock.patch.dict("os.environ", {"LMATELAB_COMPETITION_AGENT_ENABLED": "1"}):
+        with mock.patch.dict("os.environ", {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "mock",
+        }):
             catalog = self.client.get("/api/competition/agent/structures")
             self.assertEqual(200, catalog.status_code, catalog.text)
             self.assertEqual(6, len(catalog.json()["items"]))
