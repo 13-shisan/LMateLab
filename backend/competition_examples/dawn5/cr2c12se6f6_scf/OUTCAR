@@ -1,0 +1,5 @@
+Dawn5 VASP result excerpt
+SYSTEM = Cr2C12Se6F6 FM SCF
+------------------------ aborting loop because EDIFF is reached ----------------------------------------
+  free  energy   TOTEN  =      -169.84809903 eV
+ General timing and accounting informations for this job:

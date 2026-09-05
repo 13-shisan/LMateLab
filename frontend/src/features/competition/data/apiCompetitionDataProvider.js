@@ -227,6 +227,7 @@ export function createApiCompetitionDataProvider({
       elementMode = '',
       page,
       pageSize,
+      sourceScope = 'all',
     } = {}) {
       return request(`/api/competition/vasp/records${queryString([
         ['query', query],
@@ -234,6 +235,7 @@ export function createApiCompetitionDataProvider({
         ['element_mode', elementMode],
         ['page', page],
         ['page_size', pageSize],
+        ['source_scope', sourceScope],
       ])}`);
     },
 
@@ -243,6 +245,82 @@ export function createApiCompetitionDataProvider({
 
     listAgentTemplates() {
       return request('/api/competition/agent/templates');
+    },
+
+    getAgentRuntime() {
+      return request('/api/competition/agent/runtime');
+    },
+
+    installQoder() {
+      return request('/api/competition/agent/qoder/install', { method: 'POST' });
+    },
+
+    loginQoder() {
+      return request('/api/competition/agent/qoder/login', { method: 'POST' });
+    },
+
+    startQoderService() {
+      return request('/api/competition/agent/qoder/service/start', { method: 'POST' });
+    },
+
+    stopQoderService() {
+      return request('/api/competition/agent/qoder/service/stop', { method: 'POST' });
+    },
+
+    getAgentSettings() {
+      return request('/api/competition/agent/settings');
+    },
+
+    updateAgentSettings(payload) {
+      return request('/api/competition/agent/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    listAgentFiles() {
+      return request('/api/competition/agent/files');
+    },
+
+    listAgentExamples() {
+      return request('/api/competition/agent/examples');
+    },
+
+    async downloadAgentExample(id) {
+      const { blob, response } = await request(
+        `/api/competition/agent/examples/${encodeURIComponent(id)}/bundle`,
+        { responseType: 'blob' },
+      );
+      return {
+        blob,
+        filename: filenameFromDisposition(response.headers.get('content-disposition'), `${id}.zip`),
+      };
+    },
+
+    uploadAgentFile(file, category = 'result', libraryName = '我的文献库', options = {}) {
+      const body = new FormData();
+      body.append('file', file);
+      body.append('category', category);
+      body.append('library_name', libraryName);
+      if (options.calculationId) body.append('calculation_id', options.calculationId);
+      if (options.groupName) body.append('group_name', options.groupName);
+      return request('/api/competition/agent/files', { method: 'POST', body });
+    },
+
+    listAgentLiterature(query = '') {
+      return request(`/api/competition/agent/literature${queryString([['query', query]])}`);
+    },
+
+    searchAgentLiterature(query) {
+      return request(`/api/competition/agent/literature/search${queryString([['query', query]])}`);
+    },
+
+    indexAgentLiterature(payload) {
+      return jsonPost('/api/competition/agent/literature/index', payload);
+    },
+
+    searchAgentStructures(query = '') {
+      return request(`/api/competition/agent/library/structures${queryString([['query', query]])}`);
     },
 
     listAgentRuns() {
@@ -255,6 +333,12 @@ export function createApiCompetitionDataProvider({
 
     createAgentRun(payload) {
       return jsonPost('/api/competition/agent/runs', payload);
+    },
+
+    deleteAgentConversation(id) {
+      return request(`/api/competition/agent/runs/conversations/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
     },
 
     approveAgentRun(id) {

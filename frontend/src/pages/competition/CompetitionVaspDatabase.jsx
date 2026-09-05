@@ -62,6 +62,9 @@ function readDatabaseUrlState(searchParams) {
     elementMode,
     page,
     selectedRecordId: (searchParams.get('record') || '').trim(),
+    sourceScope: ['personal', 'public'].includes(searchParams.get('source_scope'))
+      ? searchParams.get('source_scope')
+      : 'all',
   };
 }
 
@@ -71,6 +74,7 @@ function writeDatabaseUrlState({
   elementMode,
   page,
   selectedRecordId,
+  sourceScope = 'all',
 }) {
   const params = new URLSearchParams();
   if (query) params.set('q', query);
@@ -78,6 +82,7 @@ function writeDatabaseUrlState({
   params.set('element_mode', elementMode === 'only' ? 'only' : 'at_least');
   params.set('page', String(Number.isSafeInteger(page) && page > 0 ? page : 1));
   if (selectedRecordId) params.set('record', selectedRecordId);
+  if (sourceScope !== 'all') params.set('source_scope', sourceScope);
   return params;
 }
 
@@ -471,6 +476,7 @@ function DatabaseInspector({ status, error, record }) {
         <div><dt>BAND 可用性</dt><dd>{capabilityState(record, ['band_plot', 'band_data'])}</dd></div>
         <div><dt>DOS 可用性</dt><dd>{capabilityState(record, ['dos_plot', 'dos_data'])}</dd></div>
         <div><dt>证据包状态</dt><dd>{record.artifacts.includes('evidence-bundle') ? '可用' : '未声明'}</dd></div>
+        {record.vasp_detail?.library ? <div><dt>结构库记录</dt><dd>{record.vasp_detail.library.name} · {record.vasp_detail.library.topology || '拓扑未知'} · {record.vasp_detail.library.natoms || '-'} atoms</dd></div> : null}
       </dl>
 
       <section className="competition-database-structure" aria-label="结构查看器">
@@ -500,6 +506,7 @@ export default function CompetitionVaspDatabase() {
     elementMode,
     page,
     selectedRecordId,
+    sourceScope,
   } = urlState;
 
   const listRequestKey = useMemo(() => JSON.stringify([
@@ -508,7 +515,8 @@ export default function CompetitionVaspDatabase() {
     selectedElements,
     elementMode,
     page,
-  ]), [elementMode, page, query, selectedElements]);
+    sourceScope,
+  ]), [elementMode, page, query, selectedElements, sourceScope]);
   const loadDatabase = useCallback(() => loadRequestEnvelope(
     listRequestKey,
     () => provider.listDatabase({
@@ -517,8 +525,9 @@ export default function CompetitionVaspDatabase() {
       elementMode,
       page,
       pageSize: 20,
+      sourceScope,
     }),
-  ), [elementMode, listRequestKey, page, provider, query, selectedElements]);
+  ), [elementMode, listRequestKey, page, provider, query, selectedElements, sourceScope]);
   const listResource = useCompetitionResource(loadDatabase);
   const listState = useMemo(
     () => selectRequestResource(listResource, listRequestKey),
@@ -573,12 +582,13 @@ export default function CompetitionVaspDatabase() {
       elementMode,
       page,
       selectedRecordId,
+      sourceScope,
       ...changes,
     };
     if (options.resetPage) next.page = 1;
     if (options.clearRecord) next.selectedRecordId = '';
     setSearchParams(writeDatabaseUrlState(next), { replace: true });
-  }, [elementMode, page, query, selectedElements, selectedRecordId, setSearchParams]);
+  }, [elementMode, page, query, selectedElements, selectedRecordId, setSearchParams, sourceScope]);
 
   const changeQuery = useCallback((event) => {
     updateUrlState(
@@ -645,13 +655,18 @@ export default function CompetitionVaspDatabase() {
 
       <header className="competition-database-header">
         <h1>VASP 数据库</h1>
-        <p>按元素、来源与工作流检索已记录的只读计算结果</p>
+        <p>统一检索平台计算结果与已收录的外部 VASP 结构数据库</p>
       </header>
 
       <section className="competition-database-filters" aria-labelledby="competition-database-filter-title">
         <div className="competition-database-section-heading">
           <h2 id="competition-database-filter-title">元素筛选</h2>
           {pageView.listStatus === 'ready' ? <span>{result.total} 条结果</span> : null}
+        </div>
+        <div className="competition-database-scope" role="group" aria-label="数据库来源">
+          {[['all', '全部'], ['personal', '个人计算库'], ['public', '公开结构库']].map(([value, label]) => (
+            <button key={value} type="button" className={sourceScope === value ? 'is-active' : ''} onClick={() => updateUrlState({ sourceScope: value }, { resetPage: true, clearRecord: true })}>{label}</button>
+          ))}
         </div>
         <PeriodicTableFilter
           availableElements={result.available_elements}

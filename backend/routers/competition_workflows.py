@@ -22,12 +22,13 @@ from competition_runtime import (
 )
 from database import get_db
 from models import User
-from models_workflow import WorkflowAttempt, WorkflowRun, WorkflowStep, canonical_json
+from models_workflow import PersonalVaspRecord, WorkflowAttempt, WorkflowRun, WorkflowStep, canonical_json
 from schemas_workflow import DraftCreateRequest, LogTailResponse
 from services.competition_coordinator import CompetitionCoordinator
 from services.competition_inputs import InputValidationError, MAX_STRUCTURE_BYTES
 from services.competition_reconcile import CompetitionReconciler, ReconcileError
 from services.competition_results import CompetitionResultService, ResultServiceError
+from services.competition_personal_results import personal_record_view
 from services.competition_slurm import SlurmClient, SlurmError
 from services.competition_vasp import AcceptanceReport, VaspPolicyError
 from services.competition_workflows import (
@@ -36,6 +37,7 @@ from services.competition_workflows import (
     create_draft,
     stage_structure,
 )
+from services.competition_agent.structure_library import vasp_library_record, vasp_library_records
 
 
 router = APIRouter(prefix="/competition", tags=["competition-workflows"])
@@ -996,6 +998,7 @@ def list_vasp_records(
     element_mode: str = Query("", max_length=20),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    source_scope: str = Query("all", pattern=r"^(all|personal|public)$"),
     current_user: User = Depends(require_viewer_or_operator),
     db: Session = Depends(get_db),
     service: CompetitionResultService = Depends(get_competition_result_service),
@@ -1019,7 +1022,21 @@ def list_vasp_records(
         )
         .order_by(WorkflowRun.updated_at.desc(), WorkflowRun.id)
     )
-    records = [service.database_record(run) for run in db.scalars(statement).unique().all()]
+    visible_runs = list(db.scalars(statement).unique().all())
+    indexed = {
+        row.workflow_id: row
+        for row in db.scalars(
+            select(PersonalVaspRecord).where(
+                PersonalVaspRecord.workflow_id.in_([run.id for run in visible_runs])
+            )
+        )
+    } if visible_runs else {}
+    records = [] if source_scope == "public" else [
+        personal_record_view(indexed[run.id])
+        if run.id in indexed
+        else service.database_record(run)
+        for run in visible_runs
+    ]
     available_elements = sorted(
         {element for record in records for element in record.get("elements", [])}
     )
@@ -1045,6 +1062,11 @@ def list_vasp_records(
                 else required.issubset(set(record.get("elements", [])))
             )
         ]
+    if source_scope != "personal":
+        records.extend(vasp_library_records(query.strip(), requested_elements, mode))
+    available_elements = sorted(set(available_elements).union(
+        element for record in records for element in record.get("elements", [])
+    ))
     total = len(records)
     start = (page - 1) * page_size
     return {
@@ -1077,4 +1099,9 @@ def get_vasp_record(
     db: Session = Depends(get_db),
     service: CompetitionResultService = Depends(get_competition_result_service),
 ):
-    return service.database_record(_result_run(db, current_user, workflow_id))
+    library_record = vasp_library_record(workflow_id)
+    if library_record is not None:
+        return library_record
+    run = _result_run(db, current_user, workflow_id)
+    indexed = db.get(PersonalVaspRecord, workflow_id)
+    return personal_record_view(indexed) if indexed is not None else service.database_record(run)

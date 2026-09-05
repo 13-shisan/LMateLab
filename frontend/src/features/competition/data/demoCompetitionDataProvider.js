@@ -153,6 +153,58 @@ export function createDemoCompetitionDataProvider() {
       return { items: [] };
     },
 
+    async getAgentRuntime() {
+      return {
+        provider: 'mock', connected: false, qoder_available: false,
+        qoder: { interface: 'qoder-agent-sdk', enabled: false, connected: false, auth_mode: 'pat', model: null },
+      };
+    },
+
+    async installQoder() { return rejectMutation('Qoder 安装'); },
+    async loginQoder() { return rejectMutation('Qoder 登录'); },
+    async startQoderService() { return rejectMutation('Qoder 服务启动'); },
+    async stopQoderService() { return rejectMutation('Qoder 服务停止'); },
+
+    async getAgentSettings() {
+      return { api_url: '', model: '', api_key_configured: false };
+    },
+
+    async updateAgentSettings() {
+      return rejectMutation('Agent 设置');
+    },
+
+    async listAgentFiles() {
+      return { items: [], calculations: [] };
+    },
+
+    async listAgentExamples() {
+      return { items: [] };
+    },
+
+    async downloadAgentExample() {
+      return rejectMutation('Agent 示例下载');
+    },
+
+    async uploadAgentFile() {
+      return rejectMutation('Agent 文件上传');
+    },
+
+    async listAgentLiterature() {
+      return { items: [], uploads: [] };
+    },
+
+    async searchAgentLiterature() {
+      return { items: [], source: 'OpenAlex' };
+    },
+
+    async indexAgentLiterature() {
+      return rejectMutation('文献索引');
+    },
+
+    async searchAgentStructures() {
+      return { items: [], total: 0, sources: [] };
+    },
+
     async listAgentRuns() {
       return { items: [] };
     },
@@ -163,6 +215,10 @@ export function createDemoCompetitionDataProvider() {
 
     async createAgentRun() {
       return rejectMutation('竞赛 Agent 请求');
+    },
+
+    async deleteAgentConversation() {
+      return rejectMutation('竞赛 Agent 对话删除');
     },
 
     async approveAgentRun() {

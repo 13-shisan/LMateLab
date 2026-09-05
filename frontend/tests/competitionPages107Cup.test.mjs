@@ -146,7 +146,7 @@ test('competition VASP database composes the extracted read-only units', () => {
   assert.match(source, /const\s+DATABASE_COLUMNS\s*=\s*Object\.freeze\(\[\s*['"]formula['"],\s*['"]source['"],\s*['"]workflow_id['"],\s*['"]status['"],\s*['"]bandgap_eV['"],\s*['"]energy['"],\s*['"]completed_at['"]\s*\]\)/);
   assert.match(
     source,
-    /provider\.listDatabase\(\{\s*query,\s*elements:\s*selectedElements,\s*elementMode,\s*page,\s*pageSize:\s*20,?\s*\}\)/,
+    /provider\.listDatabase\(\{\s*query,\s*elements:\s*selectedElements,\s*elementMode,\s*page,\s*pageSize:\s*20,\s*sourceScope,?\s*\}\)/,
   );
   assert.match(source, /_rowId:\s*item\.id/);
   assert.match(source, /detailPathForItem=\{databaseRecordUrl\}/);
@@ -194,6 +194,7 @@ test('competition database URL state normalizes invalid page mode and elements',
     elementMode: 'at_least',
     page: 1,
     selectedRecordId: 'db/1',
+    sourceScope: 'all',
   });
   assert.deepEqual(readDatabaseUrlState(new URLSearchParams(
     'elements=H&element_mode=only&page=3&record=%20',
@@ -203,6 +204,7 @@ test('competition database URL state normalizes invalid page mode and elements',
     elementMode: 'only',
     page: 3,
     selectedRecordId: '',
+    sourceScope: 'all',
   });
 });
 
@@ -223,6 +225,16 @@ test('competition database URL writer uses canonical query keys', () => {
   assert.equal(params.get('page'), '4');
   assert.equal(params.get('record'), 'db/demo 1');
   assert.deepEqual([...params.keys()], ['q', 'elements', 'element_mode', 'page', 'record']);
+
+  const publicParams = writeDatabaseUrlState({
+    query: '',
+    selectedElements: [],
+    elementMode: 'at_least',
+    page: 1,
+    selectedRecordId: '',
+    sourceScope: 'public',
+  });
+  assert.equal(publicParams.get('source_scope'), 'public');
 });
 
 test('competition database page normalization clamps once and preserves filters', () => {
@@ -905,7 +917,9 @@ test('new calculation workspace is syntax-valid, controlled-scope, and fail-clos
 
   assert.match(source, /import\s+['"]\.\.\/db\/vasp-detail\/VaspTaskDetail\.css['"];?/);
   assert.match(source, /import\s+['"]\.\/CompetitionPages\.css['"];?/);
-  assert.match(source, /useState\(['"]builtin['"]\)/);
+  assert.match(source, /useState\(\(\)\s*=>\s*agentHandoff\s*\?\s*['"]upload['"]\s*:\s*['"]builtin['"]\)/);
+  assert.match(source, /normalizedAgentHandoff/);
+  assert.match(source, /parametersWithAgentChanges/);
   assert.match(source, /handleSourceKindChange\(['"]builtin['"]\)/);
   assert.match(source, /handleSourceKindChange\(['"]upload['"]\)/);
   assert.match(source, /const\s*\{\s*provider,\s*mode\s*\}\s*=\s*useCompetitionData\(\);/);
@@ -933,7 +947,7 @@ test('new calculation workspace is syntax-valid, controlled-scope, and fail-clos
   assert.doesNotMatch(source, /已排队|运行中|Job ID/);
   assert.doesNotMatch(source, /alert\s*\([^)]*成功|toast\s*\([^)]*成功/i);
   assert.doesNotMatch(source, /\b(?:add|delete|drag|reorder)(?:Step)?\b|添加|删除|拖拽|重排/i);
-  assert.doesNotMatch(source, /Agent|Machine Learning|\bML\b|Quantum ESPRESSO|\bQE\b/);
+  assert.doesNotMatch(source, /Machine Learning|\bML\b|Quantum ESPRESSO|\bQE\b/);
   assert.doesNotMatch(source, /card/i);
 });
 

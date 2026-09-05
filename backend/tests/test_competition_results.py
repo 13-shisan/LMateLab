@@ -15,6 +15,7 @@ from database import Base
 from database import get_db
 from models import User
 from models_workflow import (
+    PersonalVaspRecord,
     WorkflowAttempt,
     WorkflowEvent,
     WorkflowFile,
@@ -23,6 +24,7 @@ from models_workflow import (
     WorkflowTemplate,
     canonical_json,
 )
+from services.competition_personal_results import PersonalResultIndex, personal_record_view, personal_records
 from services.competition_results import (
     CompetitionResultService,
     ExistingVaspScientificParser,
@@ -619,6 +621,114 @@ class CompetitionResultServiceTests(unittest.TestCase):
         self.assertEqual(400, invalid_elements.status_code, invalid_elements.text)
         self.assertEqual(400, invalid_artifact.status_code, invalid_artifact.text)
         self.assertEqual("artifact_kind_invalid", invalid_artifact.headers["x-error-code"])
+
+
+class PersonalResultIndexTests(unittest.TestCase):
+    class ResultService:
+        def __init__(self):
+            self.sha = "a" * 64
+            self.parse_ok = True
+            self.band_available = True
+
+        def detail(self, run):
+            if not self.parse_ok:
+                return {"id": run.id, "status": "parse-error"}
+            return {
+                "id": run.id,
+                "status": "succeeded",
+                "latest_job_id": "41004",
+                "artifacts": ["band-data", "dos-data"],
+                "vasp_detail": {
+                    "row": {"formula": "MoS2", "energy": -22.4, "natoms": 3},
+                    "properties": {
+                        "bandgap_eV": 1.8,
+                        "vbm_eV": -0.7,
+                        "cbm_eV": 1.1,
+                        "spacegroup": "P-6m2 (187)",
+                    },
+                    "structure": {
+                        "symbols": ["Mo", "S", "S"],
+                        "positions": [[0, 0, 0], [1, 1, 1], [2, 2, 2]],
+                        "cell": [[3.18, 0, 0], [0, 3.18, 0], [0, 0, 20]],
+                        "pbc": [True, True, True],
+                    },
+                    "crystal": {"dimensionality": 2},
+                    "capabilities": {
+                        "structure_export": True,
+                        "band_plot": self.band_available,
+                        "dos_plot": self.band_available,
+                        "band_data": self.band_available,
+                        "dos_data": self.band_available,
+                    },
+                    "provenance": {"band": {"sha256": self.sha}},
+                },
+            }
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.engine = create_engine(f"sqlite:///{Path(self.temp_dir.name) / 'personal.sqlite'}")
+        Base.metadata.create_all(self.engine)
+        self.addCleanup(self.engine.dispose)
+        with Session(self.engine) as session:
+            owner = User(
+                email="personal@example.com", password_hash="hash", name="Personal", alias="", role="operator"
+            )
+            other = User(
+                email="other-personal@example.com", password_hash="hash", name="Other", alias="", role="operator"
+            )
+            session.add_all([owner, other])
+            session.flush()
+            self.owner_id = owner.id
+            self.other_id = other.id
+            self.workflow_id = str(uuid.uuid4())
+            session.add(WorkflowRun(
+                id=self.workflow_id,
+                owner_id=owner.id,
+                template_version="mos2_v1",
+                material="MoS2",
+                source_kind="upload",
+                status="succeeded",
+                input_sha256="1" * 64,
+                release_commit="2" * 40,
+                metadata_json={},
+            ))
+            session.commit()
+        self.results = self.ResultService()
+        self.index = PersonalResultIndex(self.results)
+
+    def test_sync_is_idempotent_owner_scoped_and_updates_changed_artifacts(self):
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            first = self.index.sync(session, run)
+            session.commit()
+            first_fingerprint = first.artifact_fingerprint
+            self.assertIsNone(self.index.sync(session, run))
+            self.assertEqual(1, len(personal_records(session, self.owner_id)))
+            self.assertEqual([], personal_records(session, self.other_id))
+            self.results.sha = "b" * 64
+            changed = self.index.sync(session, run)
+            session.commit()
+            self.assertNotEqual(first_fingerprint, changed.artifact_fingerprint)
+            view = personal_record_view(session.get(PersonalVaspRecord, self.workflow_id))
+        self.assertEqual("qmof-compatible-v1", view["qmof_alignment"]["schema"])
+        self.assertEqual(1.8, view["bandgap_eV"])
+        self.assertEqual(-0.7, view["vasp_detail"]["properties"]["vbm_eV"])
+        self.assertEqual(1.1, view["vasp_detail"]["properties"]["cbm_eV"])
+
+    def test_parse_failure_does_not_publish_and_missing_band_dos_is_recorded(self):
+        with Session(self.engine) as session:
+            run = session.get(WorkflowRun, self.workflow_id)
+            self.results.parse_ok = False
+            self.assertIsNone(self.index.sync(session, run))
+            self.assertIsNone(session.get(PersonalVaspRecord, self.workflow_id))
+            self.results.parse_ok = True
+            self.results.band_available = False
+            indexed = self.index.sync(session, run)
+            session.commit()
+            view = personal_record_view(indexed)
+        self.assertFalse(view["vasp_detail"]["capabilities"]["band_plot"])
+        self.assertFalse(view["vasp_detail"]["capabilities"]["dos_plot"])
 
 
 if __name__ == "__main__":

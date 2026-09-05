@@ -14,6 +14,15 @@
   margin-bottom: 20px;
 }
 
+.competition-agent-handoff-notice {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 3px solid #28734b;
+  color: #24583b;
+  background: #edf8f1;
+  font-size: 12px;
+}
+
 .competition-calculation-header h1,
 .competition-calculation-header p,
 .competition-section-heading h2,
@@ -730,6 +739,10 @@
   font-size: 11px;
   font-weight: 800;
 }
+
+.competition-database-scope { width: fit-content; display: flex; gap: 3px; margin-bottom: 14px; padding: 3px; border: 1px solid #cfd7e4; border-radius: 7px; background: #e9edf3; }
+.competition-database-scope button { min-height: 34px; padding: 0 13px; border: 0; border-radius: 5px; color: #566379; background: transparent; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.competition-database-scope button.is-active { color: #172033; background: #fff; box-shadow: 0 1px 2px rgb(16 24 40 / 10%); }
 
 .competition-database-search > div {
   min-width: 0;
