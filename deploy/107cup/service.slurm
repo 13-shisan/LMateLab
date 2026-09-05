@@ -58,8 +58,19 @@ mkdir -p "$MPLCONFIGDIR" "$VASP_ELEMENTS_CACHE_DIR"
 
 source "$python_env/bin/activate"
 cd "$source_root/backend"
+database_label="${SLURM_JOB_ID}.${SLURM_RESTART_COUNT:-0}"
+python "$source_root/deploy/107cup/prepare-databases.py" backup \
+  --database "$root/data/db/eln.db" \
+  --database "$root/data/db/digests.db" \
+  --backup-dir "$root/backups/pre-migration" \
+  --label "$database_label"
 alembic -c alembic.ini upgrade head
 alembic -c alembic_digest.ini upgrade head
+alembic -c alembic.ini current --check-heads
+alembic -c alembic_digest.ini current --check-heads
+python "$source_root/deploy/107cup/prepare-databases.py" verify \
+  --database "$root/data/db/eln.db" \
+  --database "$root/data/db/digests.db"
 python "$source_root/deploy/107cup/migrate-competition-roles.py" \
   --database "$root/data/db/eln.db" \
   --backup-dir "$root/backups/competition-roles" \

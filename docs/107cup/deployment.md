@@ -1,6 +1,6 @@
 # 107 杯部署与恢复说明
 
-更新时间：`2026-08-31`
+更新时间：`2026-09-05`
 
 ## 1. 部署边界
 
@@ -10,7 +10,7 @@
 /home/scc/pb23030683/lmatelab-107cup
 ```
 
-4090 `222.195.94.37` 只提供用户态 SSH 转发、Nginx 受限入口和 IP 白名单，不保存竞赛业务数据库，不运行 FastAPI 或 VASP。公网代理默认只允许 GET，仅精确放行登录、修改本人密码以及固定竞赛工作流的结构上传、草稿、提交、启动、取消和重试 POST。后端继续强制 Operator 角色和任务归属；Viewer、Agent、数据库写入及其他变更接口不放行。Windows Operator SSH 隧道保留为受控备用入口。4090 入口失效只影响访问，不改变 107 内的数据和作业。
+4090 `222.195.94.37` 只提供用户态 SSH 转发、Nginx 受限入口和 IP 白名单，不保存竞赛业务数据库，不运行 FastAPI、Agent Worker 或 VASP。公网代理默认只允许 GET，仅精确放行登录、修改本人密码、固定竞赛工作流写操作和已列明的 Agent Operator 写接口。后端继续强制 Operator 角色和任务归属；Viewer 无法借助代理获得写权限，也没有整个 `/api/competition/agent/` 的通配写入口。Windows Operator SSH 隧道保留为受控备用入口。4090 入口失效只影响访问，不改变 107 内的数据和作业。
 
 ## 2. 固定目录
 
@@ -22,6 +22,8 @@
 | Python/Node 环境 | `/home/scc/pb23030683/lmatelab-107cup/envs` |
 | 正式数据库 | `/home/scc/pb23030683/lmatelab-107cup/data/db` |
 | 工作流和 attempt | `/home/scc/pb23030683/lmatelab-107cup/data/workflows` |
+| Agent 上传和文献库 | `/home/scc/pb23030683/lmatelab-107cup/data/agent` |
+| Qoder workspace | `/home/scc/pb23030683/lmatelab-107cup/data/qoder-workspace` |
 | Slurm 日志 | `/home/scc/pb23030683/lmatelab-107cup/logs` |
 | 验收证据 | `/home/scc/pb23030683/lmatelab-107cup/evidence` |
 | 私有配置 | `/home/scc/pb23030683/lmatelab-107cup/config` |
@@ -43,7 +45,7 @@ git rev-parse HEAD
 bash deploy/107cup/submit-build.sh
 ```
 
-`submit-build.sh` 只提交 `build.slurm`。依赖安装、后端回归、前端测试和 Vite 构建均在 `P107-RTX5090` 计算节点完成。构建失败不得切换 `current`；构建成功后形成不可变 `releases/<commit>`，校验 `manifest.txt` 和 `manifest.sha256` 后原子切换。
+`submit-build.sh` 只提交 `build.slurm`。依赖安装、后端回归、前端测试和 Vite 构建均在 `P107-RTX5090` 计算节点完成。`pypdf` 和 Qoder SDK 必须在这里按固定版本安装；网页和 Worker 运行时不得安装或更新包。构建失败不得切换 `current`；构建成功后形成不可变 `releases/<commit>`，校验 `manifest.txt` 和 `manifest.sha256` 后原子切换。
 
 查询明确的构建 Job：
 
@@ -104,15 +106,32 @@ bash deploy/107cup/submit-stage10-acceptance.sh
 - Viewer：使用同一公网地址查看；后端角色门禁使其无法调用任何工作流写操作。
 - 107 内部：服务状态记录的 `anodeXX:18731`，仅用于运行时核验，不作为公开地址。
 
-Viewer 必须无法提交、取消、重试或访问敏感文件；Operator 也只能操作本人工作流。已登录的 Operator 和 Viewer 都可以从右上角用户菜单修改自己的密码；必须输入当前密码，新密码必须通过服务器密码策略且两次一致。修改成功后全部旧 JWT 立即失效，当前浏览器清除登录态并返回登录页；不要在聊天、终端命令、截图、录屏或 Git 中记录密码。公网入口当前为 HTTP，没有 TLS 传输加密，只应在可信的白名单网络使用强密码访问；它不应被描述为互联网级安全入口。返回 `403` 时先检查来源 IP、账号角色和请求是否在精确写接口中；返回 `502` 时检查 4090 到 107 的 ControlMaster 和转发状态；不要把任一网络入口故障误判成数据丢失。
+Viewer 必须无法提交、取消、重试、创建 Agent 运行或访问敏感文件；Operator 也只能操作本人工作流和 Agent 数据。已登录的 Operator 和 Viewer 都可以从右上角用户菜单修改自己的密码；必须输入当前密码，新密码必须通过服务器密码策略且两次一致。修改成功后全部旧 JWT 立即失效，当前浏览器清除登录态并返回登录页；不要在聊天、终端命令、截图、录屏或 Git 中记录密码、LLM API Key 或 Qoder 凭据。公网入口当前为 HTTP，没有 TLS 传输加密，只应在可信的白名单网络使用强密码访问；它不应被描述为互联网级安全入口。返回 `403` 时先检查来源 IP、账号角色和请求是否在精确写接口中；返回 `502` 时检查 4090 到 107 的 ControlMaster 和转发状态；不要把任一网络入口故障误判成数据丢失。
 
-## 7. 回滚和恢复
+## 7. Agent/Qoder Worker
+
+Agent 页面和 API 由正式 Web 作业提供，排队中的 Agent 请求由独立 `P107-A100` Slurm Worker 处理。构建和候选 Web 服务通过后，在登录节点只运行短时提交/核对入口：
+
+```bash
+cd /home/scc/pb23030683/projects/LMateLab-107Cup
+bash deploy/107cup/submit-agent-worker.sh
+cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-recovery-state.json
+cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
+```
+
+控制器只在没有活动归属 Worker 时执行一次 `sbatch --parsable`。如果发现多个 Worker、同名但归属字段不匹配、调度查询失败或状态文件身份不一致，必须停止并保留证据，不能循环提交或自动取消。Worker 最长运行 4 天，读取 `config/runtime.env`，解析固定 `current` release 后进入无限空闲等待；它不是登录节点常驻进程。
+
+`LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 是当前默认生产路径，API Key 只写入 `config/secrets/llm-api-key` 且权限必须为 `0600`。Qoder SDK 同时随 release 构建，网页“安装”动作只验证 `1.0.14` 和 CLI；启用真实 Qoder 前，必须先在 107 计算节点验证外网、完成受控登录并把 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 显式改为 `1`。调度完成只能证明 Worker 运行，不能替代真实 Agent 响应、引用约束和 Viewer 只读验收。
+
+Web 服务启动会在 Alembic 迁移前把两套现有 SQLite 用 Online Backup API 复制到 `backups/pre-migration`，文件名包含 Job ID 和 restart count，且禁止覆盖；迁移后要求两个 Alembic 配置都位于 head，并再次执行 `integrity_check`。候选服务或 Worker 失败时保留旧 `18733` relay 和 `18755`，不得静默重试。只有新 `18733` 通过 Operator/Viewer 和 Agent/Qoder 全流程后，才由进程所有者 `Pzxp` 停止 `18755`。
+
+## 8. 回滚和恢复
 
 发布失败时保持上一版本 `current` 和服务不变。若新服务健康检查失败，恢复器保留旧转发；只有候选完全就绪后才切换正式目标。需要暂停自动恢复时使用运行手册规定的权限 `0600` maintenance 标记，处理完再移除。
 
 回滚只允许选择已存在且清单自检通过的 `releases/<commit>`，先运行隔离 `rollback-smoke.slurm`，不得直接用旧源码覆盖当前目录。服务停止或 `scancel` 前必须核对用户、JobName、Command、WorkDir、Account、Partition/QOS 和 LMateLab ledger，不能操作同一共享账号下的其他作业。完整恢复步骤见 [`service-recovery-runbook.md`](./service-recovery-runbook.md)。
 
-## 8. 通用二维 PBE 输入策略
+## 9. 通用二维 PBE 输入策略
 
 内置示例继续使用 `mos2_v1` 和既有 `Mo_sv/S` 固定哈希合同。Operator 上传的周期 POSCAR/CIF 使用 `pbe_2d_v1`：POSCAR 保留其元素头顺序，CIF 按 IUPAC 元素顺序确定性分组，服务把该规范顺序写入 `POTCAR.spec`；VASPKIT 103 在计算节点把实际推荐名写入 `POTCAR.resolved`。因此同一 CIF 的原子行顺序变化不会把 `MoS2` 显示为 `S2Mo`，也不会导致 POTCAR 顺序漂移。Git、数据库和 API 都不保存 POTCAR 内容或赝势源路径。
 

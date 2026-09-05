@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import importlib
 import importlib.util
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 import re
 import signal
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -107,20 +106,16 @@ def qoder_status() -> dict[str, object]:
 
 def install_qoder() -> dict[str, object]:
     _require_enabled()
+    try:
+        installed_version = version("qoder-agent-sdk")
+    except PackageNotFoundError as exc:
+        raise QoderManagementError("Qoder is not installed in this release") from exc
+    if installed_version != QODER_SDK_VERSION:
+        raise QoderManagementError(
+            f"Qoder release version mismatch: expected {QODER_SDK_VERSION}"
+        )
     if _cli_path() is None:
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", f"qoder-agent-sdk=={QODER_SDK_VERSION}"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            importlib.invalidate_caches()
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise QoderManagementError("Qoder installation failed") from exc
-    if _cli_path() is None:
-        raise QoderManagementError("Qoder CLI is unavailable after installation")
+        raise QoderManagementError("Qoder CLI is unavailable in this release")
     return qoder_status()
 
 
@@ -193,7 +188,7 @@ def start_service() -> dict[str, object]:
         try:
             process = subprocess.Popen(
                 [
-                    str(cli), "remote-control", "--name", "LMateLab-Dell",
+                    str(cli), "remote-control", "--name", "LMateLab-107Cup",
                     "--spawn", "same-dir", "--capacity", "1",
                     "--directory", str(_workspace_dir()),
                 ],

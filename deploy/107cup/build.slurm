@@ -12,6 +12,7 @@
 #SBATCH --error=/home/scc/pb23030683/lmatelab-107cup/logs/build-%j.err
 
 set -euo pipefail
+umask 077
 
 : "${SLURM_JOB_ID:?build.slurm must run through Slurm}"
 
@@ -40,13 +41,30 @@ mkdir -p \
   "$root/logs" \
   "$root/runtime" \
   "$root/runtime/cache/vasp-elements" \
+  "$root/runtime/qoder" \
+  "$root/config/agent" \
+  "$root/config/secrets" \
   "$root/data/db" \
   "$root/data/uploads" \
+  "$root/data/agent/uploads" \
+  "$root/data/agent/examples/dawn5" \
+  "$root/data/qoder-workspace" \
   "$root/data/custom/vasp" \
   "$root/data/custom/qe_epw" \
   "$root/data/vasp/personal" \
   "$root/data/issues" \
   "$root/backups"
+chmod 700 \
+  "$root/runtime/qoder" \
+  "$root/config/agent" \
+  "$root/config/secrets" \
+  "$root/data/agent" \
+  "$root/data/agent/uploads" \
+  "$root/data/agent/examples" \
+  "$root/data/agent/examples/dawn5" \
+  "$root/data/qoder-workspace"
+cp -an "$project/backend/competition_examples/dawn5/." \
+  "$root/data/agent/examples/dawn5/"
 
 module_python_base=$(python -c 'import os, sys; print(os.path.realpath(sys.base_prefix))')
 
@@ -107,6 +125,8 @@ python -m pip install --requirement "$project/backend/requirements-107cup.txt"
 cd "$project/backend"
 python -m unittest \
   tests.test_107cup_authz \
+  tests.test_107cup_agent_deploy_contract \
+  tests.test_107cup_agent_deploy_runtime \
   tests.test_107cup_runtime \
   tests.test_107cup_deploy_contract \
   tests.test_107cup_service_recovery \
@@ -126,6 +146,16 @@ python -m unittest \
   tests.test_competition_results \
   tests.test_competition_recovery \
   tests.test_competition_security \
+  tests.test_competition_agent_catalog \
+  tests.test_competition_agent_fake_slurm \
+  tests.test_competition_agent_literature \
+  tests.test_competition_agent_migration \
+  tests.test_competition_agent_registration \
+  tests.test_competition_agent_routes \
+  tests.test_competition_agent_runtime \
+  tests.test_competition_agent_security \
+  tests.test_competition_agent_structures \
+  tests.test_competition_agent_tools \
   tests.test_107cup_stage8_acceptance_contract \
   tests.test_107cup_stage10_delivery_contract \
   -v
@@ -137,7 +167,7 @@ VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=live npm run build
 
 export LMATELAB_FRONTEND_DIST="$project/frontend/dist"
 cd "$project/backend"
-python -c "from main_107cup import app; paths={route.path for route in app.routes}; assert '/api/health/live' in paths; assert '/api/agents' not in paths"
+python -c "from main_107cup import app; paths={route.path for route in app.routes}; assert '/api/health/live' in paths; assert '/api/competition/agent/runs' in paths; assert '/api/agents' not in paths"
 
 rm -rf "$staging"
 mkdir -p "$staging/source" "$staging/frontend-dist" "$staging/deploy/107cup"

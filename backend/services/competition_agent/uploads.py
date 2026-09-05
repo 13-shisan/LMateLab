@@ -143,10 +143,34 @@ def store_upload(
 
 def list_uploads(session: Session, owner_id: int) -> list[WorkflowFile]:
     _ensure_builtin_examples(session, owner_id)
-    return list(session.scalars(select(WorkflowFile).where(
+    rows = list(session.scalars(select(WorkflowFile).where(
         WorkflowFile.owner_id == owner_id,
         WorkflowFile.source_kind.in_(("agent-upload", "agent-example")),
-    ).order_by(WorkflowFile.created_at.desc())))
+    ).order_by(WorkflowFile.created_at.desc(), WorkflowFile.id.asc())))
+    uploads = [row for row in rows if row.source_kind == "agent-upload"]
+    examples = [row for row in rows if row.source_kind == "agent-example"]
+    # Built-in examples retain the API's newest-first display semantics while
+    # avoiding timestamp and UUID tie-breaking differences across databases.
+    case_order = {
+        case_id: index
+        for index, case_id in enumerate(reversed(tuple(EXAMPLE_GROUPS)))
+    }
+    file_order = {
+        name: index
+        for index, name in enumerate(("OUTCAR", "OSZICAR", "POSCAR", "INCAR", "KPOINTS"))
+    }
+
+    def example_order(row: WorkflowFile) -> tuple[int, int, str]:
+        metadata = _metadata(row)
+        example_key = str(metadata.get("example_key") or "")
+        case_id, _, filename = example_key.partition("/")
+        return (
+            case_order.get(case_id, len(case_order)),
+            file_order.get(filename, len(file_order)),
+            row.id,
+        )
+
+    return uploads + sorted(examples, key=example_order)
 
 
 def _ensure_builtin_examples(session: Session, owner_id: int) -> None:
