@@ -9,6 +9,12 @@ LMateLab 生产环境不属于本项目运行边界。
 [`TEAMMATE_AI_START.md`](TEAMMATE_AI_START.md) 这一个文件；阶段状态和下一门禁只以
 [`docs/107cup/implementation-plan.md`](docs/107cup/implementation-plan.md) 为准。
 
+比赛交付证据：
+
+- [`docs/107cup/compute-cluster-run-data.md`](docs/107cup/compute-cluster-run-data.md)：Slurm 作业、资源、排队和运行时间说明；
+- [`docs/107cup/artifacts/slurm-job-ledger.csv`](docs/107cup/artifacts/slurm-job-ledger.csv)：逐 Job 总账；
+- [`docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip`](docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip)：经逐文件哈希验证的脱敏原始日志附件。
+
 ## Agent、Qoder 与演示数据库
 
 本分支新增的 Agent 工作区包含普通问答、文献检索与 PDF 索引、VASP 计算目录分析、
@@ -40,8 +46,9 @@ Qoder CN 是可选能力。Linux 发布在构建阶段固定安装大陆版 SDK�
 python -m pip install qodercn-agent-sdk==1.0.14
 ```
 
-LLM API Key 不允许经比赛期间的公网 HTTP 入口提交。Operator 必须通过 HTTPS 或直达 107
-计算节点 Web 服务的 `127.0.0.1` SSH 隧道保存；API URL 和模型不含密钥，仍可从公网入口更新。
+LLM API Key 优先通过 HTTPS 或直达 107 计算节点 Web 服务的 `127.0.0.1` SSH 隧道保存。比赛期间的
+公网 HTTP 入口仅在 4090 Nginx 精确来源 IP 白名单和 Operator 应用权限同时通过时允许保存，并持续提示
+传输未加密；普通公网来源仍被拒绝。API URL 和模型不含密钥，可从已授权入口更新。
 
 公开 QMOF 全量结构和 CIF 文件体积较大，不随 Git 仓库分发。请从
 [QMOF 官方仓库](https://github.com/arosen93/QMOF) 下载数据集，使用仓库提供的 CSV 导入脚本建立只读索引：

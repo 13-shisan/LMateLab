@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 
 STAGE10_MANIFEST_PATHS = (
     ".gitattributes",
+    "README.md",
     "backend/alembic/versions/107c0ffee002_add_competition_agent_runs.py",
     "backend/alembic/versions/107c0ffee003_add_personal_vasp_records.py",
     "backend/auth.py",
@@ -92,6 +93,7 @@ STAGE10_MANIFEST_PATHS = (
     "docs/107cup/deployment.md",
     "docs/107cup/final-acceptance.md",
     "docs/107cup/implementation-plan.md",
+    "docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256",
     "docs/107cup/artifacts/slurm-job-ledger.csv",
     "docs/107cup/service-recovery-runbook.md",
     "docs/107cup/stage3-service-recovery-evidence.md",
