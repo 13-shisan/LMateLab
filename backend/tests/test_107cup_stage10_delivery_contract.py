@@ -1,7 +1,8 @@
+import csv
 import hashlib
 import re
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,7 @@ DELIVERY_DOCS = (
     ROOT / "docs" / "107cup" / "final-acceptance.md",
 )
 MANIFEST = ROOT / "docs" / "107cup" / "artifacts" / "manifest.sha256"
+SLURM_LEDGER = ROOT / "docs" / "107cup" / "artifacts" / "slurm-job-ledger.csv"
 
 
 class Stage10DeliveryContractTests(unittest.TestCase):
@@ -110,6 +112,30 @@ class Stage10DeliveryContractTests(unittest.TestCase):
             path = ROOT / relative
             self.assertTrue(path.is_file(), relative)
             self.assertEqual(digest, self.canonical_text_digest(path), relative)
+
+    def test_slurm_ledger_has_remote_absolute_and_portable_attachment_paths(self):
+        with SLURM_LEDGER.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(rows), 218)
+        self.assertEqual(len({row["job_id"] for row in rows}), 218)
+        for row in rows:
+            remote_paths = row["remote_evidence_files"].split(";")
+            self.assertTrue(remote_paths, row["job_id"])
+            for path in remote_paths:
+                self.assertTrue(
+                    path.startswith("/home/scc/pb23030683/lmatelab-107cup/"),
+                    (row["job_id"], path),
+                )
+
+            attachment_paths = row["attachment_files"].split(";")
+            for path in attachment_paths:
+                if path == "unavailable":
+                    continue
+                pure = PurePosixPath(path)
+                self.assertFalse(pure.is_absolute(), (row["job_id"], path))
+                self.assertNotIn("..", pure.parts, (row["job_id"], path))
+                self.assertNotIn("\\", path, (row["job_id"], path))
 
 
 if __name__ == "__main__":
