@@ -80,7 +80,7 @@ test('demo mutations reject before any supplied fetch implementation runs', asyn
   assert.equal(requestCount, 0);
 });
 
-test('live dashboard, service health, and workflow list request the exact competition routes', async () => {
+test('live dashboard, service health, cluster resources, and workflow list request exact routes', async () => {
   const requests = [];
   const provider = createApiCompetitionDataProvider({
     authHeaders: () => ({}),
@@ -95,12 +95,28 @@ test('live dashboard, service health, and workflow list request the exact compet
 
   await provider.getDashboard();
   await provider.getServiceHealth();
+  await provider.getClusterResources();
   await provider.listWorkflows({ query: 'MoS2', status: 'running' });
 
   assert.deepEqual(requests.map(([path]) => path), [
     '/api/competition/dashboard',
     '/api/health/live',
+    '/api/competition/cluster-resources',
     '/api/competition/workflows?query=MoS2&status=running',
+  ]);
+});
+
+test('demo cluster resources provide a deterministic read-only snapshot', async () => {
+  const provider = createDemoCompetitionDataProvider();
+  const snapshot = await provider.getClusterResources();
+
+  assert.equal(snapshot.status, 'fresh');
+  assert.equal(snapshot.stale, false);
+  assert.equal(snapshot.summary.node_total, 26);
+  assert.equal(snapshot.nodes.length, 26);
+  assert.deepEqual(snapshot.partitions.map(({ name }) => name), [
+    'P107-RTX5090',
+    'P107-A100',
   ]);
 });
 

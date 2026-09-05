@@ -45,10 +45,6 @@ const PARTITIONS = Object.freeze([
   }),
 ]);
 
-const TOTAL_NODES = PARTITIONS.reduce((total, partition) => total + partition.nodeCount, 0);
-const TOTAL_GPUS = PARTITIONS.reduce((total, partition) => total + partition.gpuCount, 0);
-
-
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object') return false;
   const prototype = Object.getPrototypeOf(value);
@@ -63,6 +59,131 @@ function safeText(value, fallback = '-') {
 
 function safeCount(value) {
   return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+
+function normalizeClusterResources(value) {
+  const unavailable = {
+    status: 'unavailable',
+    stale: false,
+    collectedAt: '',
+    schedulerUpdatedAt: '',
+    summary: {
+      nodeTotal: 0,
+      availableNodes: 0,
+      gpuTotal: null,
+      gpuAllocated: null,
+      gpuFree: null,
+      gpuAvailable: false,
+    },
+    partitions: [],
+    nodes: [],
+  };
+  if (!isPlainObject(value) || !['fresh', 'stale'].includes(value.status)) {
+    return unavailable;
+  }
+  if (!isPlainObject(value.summary) || !Array.isArray(value.partitions) || !Array.isArray(value.nodes)) {
+    return unavailable;
+  }
+
+  const normalizeTriple = (resource) => {
+    if (!isPlainObject(resource)) return null;
+    const normalized = {
+      total: safeCount(resource.total),
+      allocated: safeCount(resource.allocated),
+      free: safeCount(resource.free),
+    };
+    return Object.values(normalized).every((item) => item !== null) ? normalized : null;
+  };
+  const normalizeGpu = (resource) => {
+    if (!isPlainObject(resource) || typeof resource.available !== 'boolean') return null;
+    if (!resource.available) {
+      return { total: null, allocated: null, free: null, available: false };
+    }
+    const counts = normalizeTriple(resource);
+    return counts ? { ...counts, available: true } : null;
+  };
+  const allowedPartitions = new Set(['P107-RTX5090', 'P107-A100']);
+  const partitionForNode = (name) => {
+    const match = /^anode(0[1-9]|1[0-9]|2[0-6])$/.exec(name);
+    if (!match) return '';
+    return Number(match[1]) <= 15 ? 'P107-RTX5090' : 'P107-A100';
+  };
+
+  const partitions = value.partitions.flatMap((item) => {
+    if (!isPlainObject(item) || !allowedPartitions.has(item.name)) return [];
+    const cpu = normalizeTriple(item.cpu);
+    const memory = normalizeTriple(item.memory_mib);
+    const gpu = normalizeGpu(item.gpu);
+    const nodeTotal = safeCount(item.node_total);
+    const availableNodes = safeCount(item.available_nodes);
+    if (!cpu || !memory || !gpu || nodeTotal === null || availableNodes === null) return [];
+    return [{
+      name: item.name,
+      gpuModel: safeText(item.gpu_model),
+      nodeTotal,
+      availableNodes,
+      cpu,
+      memory,
+      gpu,
+    }];
+  });
+  const nodes = value.nodes.flatMap((item) => {
+    if (!isPlainObject(item)) return [];
+    const name = safeText(item.name, '');
+    const partition = safeText(item.partition, '');
+    const expectedPartition = partitionForNode(name);
+    const availability = safeText(item.availability, '');
+    const cpu = normalizeTriple(item.cpu);
+    const memory = normalizeTriple(item.memory_mib);
+    const gpu = normalizeGpu(item.gpu);
+    if (
+      !expectedPartition
+      || partition !== expectedPartition
+      || !['available', 'busy', 'unavailable', 'unknown'].includes(availability)
+      || !cpu
+      || !memory
+      || !gpu
+    ) return [];
+    return [{
+      name,
+      partition,
+      gpuModel: safeText(item.gpu_model),
+      state: safeText(item.state, 'unknown'),
+      availability,
+      cpu,
+      memory,
+      gpu,
+    }];
+  });
+  const summary = {
+    nodeTotal: safeCount(value.summary.node_total),
+    availableNodes: safeCount(value.summary.available_nodes),
+    gpuTotal: safeCount(value.summary.gpu_total),
+    gpuAllocated: safeCount(value.summary.gpu_allocated),
+    gpuFree: safeCount(value.summary.gpu_free),
+    gpuAvailable: value.summary.gpu_available === true,
+  };
+  if (summary.nodeTotal === null || summary.availableNodes === null) return unavailable;
+  if (
+    summary.gpuAvailable
+    && [summary.gpuTotal, summary.gpuAllocated, summary.gpuFree].some((item) => item === null)
+  ) return unavailable;
+  if (!summary.gpuAvailable) {
+    summary.gpuTotal = null;
+    summary.gpuAllocated = null;
+    summary.gpuFree = null;
+  }
+
+  return {
+    status: value.status,
+    stale: value.status === 'stale',
+    collectedAt: safeText(value.collected_at, ''),
+    schedulerUpdatedAt: safeText(value.scheduler_updated_at, ''),
+    summary,
+    partitions,
+    nodes,
+  };
 }
 
 
@@ -89,6 +210,7 @@ function normalizeCompetitionServerData(value) {
       releaseKind: safeText(service.release_kind),
       dataMode: safeText(service.data_mode),
     },
+    cluster: normalizeClusterResources(payload.cluster),
   };
 }
 
@@ -109,11 +231,42 @@ function displayCount(value) {
 }
 
 
-function displayTime(value) {
-  if (!value) return '暂无作业更新时间';
+function displayTime(value, fallback = '暂无更新时间') {
+  if (!value) return fallback;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString('zh-CN', { hour12: false });
+}
+
+
+function displayRatio(free, total, suffix = '') {
+  if (free === null || total === null) return '不可用';
+  return `${free} / ${total}${suffix}`;
+}
+
+
+function displayMemoryRatio(free, total) {
+  if (free === null || total === null) return '不可用';
+  return `${Math.round(free / 1024)} / ${Math.round(total / 1024)} GiB`;
+}
+
+
+function clusterStatusLabel(status) {
+  return ({
+    fresh: '实时快照',
+    stale: '上次有效快照',
+    unavailable: '数据不可用',
+  })[status] || '数据不可用';
+}
+
+
+function availabilityLabel(availability) {
+  return ({
+    available: '可用',
+    busy: '已占用',
+    unavailable: '不可调度',
+    unknown: '待确认',
+  })[availability] || '待确认';
 }
 
 
@@ -137,7 +290,11 @@ function OverviewItem({ icon, label, value, note, tone }) {
 }
 
 
-function PartitionCard({ partition }) {
+function PartitionCard({ partition, snapshot, clusterStatus, collectedAt }) {
+  const hasSnapshot = snapshot !== undefined;
+  const footerLabel = clusterStatus === 'unavailable'
+    ? '资源快照暂不可用'
+    : `${clusterStatusLabel(clusterStatus)} · ${displayTime(collectedAt)}`;
   return (
     <article className={`competition-partition-card is-${partition.accent}`}>
       <header>
@@ -150,13 +307,13 @@ function PartitionCard({ partition }) {
       </header>
       <dl>
         <div><dt>节点范围</dt><dd>{partition.nodes}</dd></div>
-        <div><dt>配置节点</dt><dd>{partition.nodeCount}</dd></div>
-        <div><dt>配置 GPU</dt><dd>{partition.gpuCount}</dd></div>
-        <div><dt>QoS</dt><dd>{partition.qos}</dd></div>
+        <div><dt>当前可用节点</dt><dd>{hasSnapshot ? displayRatio(snapshot.availableNodes, snapshot.nodeTotal) : '不可用'}</dd></div>
+        <div><dt>空闲 CPU</dt><dd>{hasSnapshot ? displayRatio(snapshot.cpu.free, snapshot.cpu.total) : '不可用'}</dd></div>
+        <div><dt>空闲 GPU</dt><dd>{hasSnapshot ? displayRatio(snapshot.gpu.free, snapshot.gpu.total) : '不可用'}</dd></div>
       </dl>
-      <footer>
-        <span className="competition-server-status-dot is-muted" />
-        动态占用数据待接入
+      <footer className={`is-${clusterStatus}`} title={`QoS: ${partition.qos}`}>
+        <span className="competition-server-status-dot" />
+        {footerLabel}
       </footer>
     </article>
   );
@@ -166,11 +323,12 @@ function PartitionCard({ partition }) {
 export default function CompetitionServer() {
   const { provider, mode } = useCompetitionData();
   const loadServer = useCallback(async () => {
-    const [dashboard, service] = await Promise.all([
+    const [dashboard, service, cluster] = await Promise.all([
       provider.getDashboard(),
       provider.getServiceHealth(),
+      provider.getClusterResources(),
     ]);
-    return { dashboard, service };
+    return { dashboard, service, cluster };
   }, [provider]);
   const state = useCompetitionPollingResource(loadServer, {
     enabled: true,
@@ -186,8 +344,12 @@ export default function CompetitionServer() {
     );
   }
 
-  const { slurm, service } = normalizeCompetitionServerData(state.data);
+  const { slurm, service, cluster } = normalizeCompetitionServerData(state.data);
   const serviceReady = service.status === 'ok';
+  const partitionSnapshots = new Map(cluster.partitions.map((partition) => [partition.name, partition]));
+  const clusterNote = cluster.status === 'unavailable'
+    ? '无法读取当前调度器快照'
+    : clusterStatusLabel(cluster.status);
 
   return (
     <main className="competition-server-page">
@@ -220,8 +382,20 @@ export default function CompetitionServer() {
       </header>
 
       <section className="competition-server-overview" aria-label="107 集群概览">
-        <OverviewItem icon={Boxes} label="配置节点" value={TOTAL_NODES} note="两个竞赛分区" tone="blue" />
-        <OverviewItem icon={Cpu} label="配置 GPU" value={TOTAL_GPUS} note="RTX 5090 与 A100" tone="teal" />
+        <OverviewItem
+          icon={Boxes}
+          label="当前可用节点"
+          value={cluster.status === 'unavailable' ? '不可用' : displayRatio(cluster.summary.availableNodes, cluster.summary.nodeTotal)}
+          note={clusterNote}
+          tone="blue"
+        />
+        <OverviewItem
+          icon={Cpu}
+          label="空闲 GPU"
+          value={displayRatio(cluster.summary.gpuFree, cluster.summary.gpuTotal)}
+          note={cluster.summary.gpuAvailable ? '调度器实际 GRES 占用' : '调度器未提供可用数据'}
+          tone="teal"
+        />
         <OverviewItem icon={Activity} label="LMateLab 运行" value={displayCount(slurm.running)} note="当前账号可见 attempt" tone="green" />
         <OverviewItem icon={Clock3} label="LMateLab 排队" value={displayCount(slurm.queued)} note="当前账号可见 attempt" tone="amber" />
       </section>
@@ -231,13 +405,19 @@ export default function CompetitionServer() {
           <div className="competition-server-section-heading">
             <div>
               <h2 id="competition-partitions-title">竞赛分区</h2>
-              <p>固定资源配置</p>
+              <p>当前节点、CPU 与 GPU 调度快照</p>
             </div>
             <span className="competition-server-section-icon"><Gauge size={18} aria-hidden="true" /></span>
           </div>
           <div className="competition-partition-grid">
             {PARTITIONS.map((partition) => (
-              <PartitionCard key={partition.name} partition={partition} />
+              <PartitionCard
+                key={partition.name}
+                partition={partition}
+                snapshot={partitionSnapshots.get(partition.name)}
+                clusterStatus={cluster.status}
+                collectedAt={cluster.collectedAt}
+              />
             ))}
           </div>
         </section>
@@ -276,7 +456,7 @@ export default function CompetitionServer() {
           </div>
           <div className="competition-job-state-row">
             <span className={`competition-job-state is-${slurm.state}`}>{stateLabel(slurm.state)}</span>
-            <time dateTime={slurm.updatedAt || undefined}>{displayTime(slurm.updatedAt)}</time>
+            <time dateTime={slurm.updatedAt || undefined}>{displayTime(slurm.updatedAt, '暂无作业更新时间')}</time>
           </div>
         </section>
 
@@ -284,10 +464,22 @@ export default function CompetitionServer() {
           <div className="competition-server-section-heading">
             <div>
               <h2 id="competition-nodes-title">节点与 GPU 明细</h2>
-              <p>集群级实时采集接口</p>
+              <p>仅显示 P107 竞赛分区允许节点</p>
             </div>
             <span className="competition-server-section-icon"><Cpu size={18} aria-hidden="true" /></span>
           </div>
+          <div className={`competition-cluster-freshness is-${cluster.status}`} role="status">
+            <span className="competition-server-status-dot" />
+            <strong>{clusterStatusLabel(cluster.status)}</strong>
+            <span>
+              {cluster.status === 'unavailable'
+                ? '当前没有可显示的调度器数据'
+                : `采集于 ${displayTime(cluster.collectedAt)}`}
+            </span>
+          </div>
+          <p className="competition-cluster-note">
+            空闲节点表示当前快照有可分配 CPU 与 GPU；实际启动仍受 QoS、资源请求与排队优先级影响。
+          </p>
           <div className="competition-node-table-scroll">
             <table className="competition-node-table">
               <thead>
@@ -301,15 +493,39 @@ export default function CompetitionServer() {
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td colSpan="6">
-                    <div className="competition-node-empty">
-                      <Cpu size={20} aria-hidden="true" />
-                      <strong>实时节点数据待接入</strong>
-                      <span>当前页面未将工作流统计冒充为集群资源占用</span>
-                    </div>
-                  </td>
-                </tr>
+                {cluster.nodes.length ? cluster.nodes.map((node) => (
+                  <tr key={node.name}>
+                    <td>{node.partition}</td>
+                    <td><strong className="competition-node-name">{node.name}</strong></td>
+                    <td>
+                      <strong>{displayRatio(node.gpu.free, node.gpu.total)}</strong>
+                      <small>{node.gpuModel} 空闲 / 总量</small>
+                    </td>
+                    <td>
+                      <span className={`competition-node-state is-${node.availability}`}>
+                        {availabilityLabel(node.availability)}
+                      </span>
+                      <small>{node.state.toUpperCase()}</small>
+                    </td>
+                    <td>
+                      <strong>{displayRatio(node.cpu.free, node.cpu.total)}</strong>
+                      <small>CPU 空闲 / 总量</small>
+                      <strong>{displayMemoryRatio(node.memory.free, node.memory.total)}</strong>
+                      <small>内存空闲 / 总量</small>
+                    </td>
+                    <td><time dateTime={cluster.collectedAt || undefined}>{displayTime(cluster.collectedAt)}</time></td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan="6">
+                      <div className="competition-node-empty">
+                        <Cpu size={20} aria-hidden="true" />
+                        <strong>集群资源暂不可用</strong>
+                        <span>请稍后刷新；页面不会用配置总量推断实时空闲资源</span>
+                      </div>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

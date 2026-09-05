@@ -140,6 +140,7 @@ python -m unittest \
   tests.test_competition_inputs \
   tests.test_competition_workflow_service \
   tests.test_competition_workflow_routes \
+  tests.test_competition_cluster_resources \
   tests.test_competition_slurm \
   tests.test_competition_slurm_linux \
   tests.test_competition_attempt_inputs \
@@ -173,7 +174,7 @@ npm run build
 
 export LMATELAB_FRONTEND_DIST="$project/frontend/dist"
 cd "$project/backend"
-python -c "from main_107cup import app; paths={route.path for route in app.routes}; assert '/api/health/live' in paths; assert '/api/competition/agent/runs' in paths; assert '/api/agents' not in paths"
+python -c "from main_107cup import app; paths={route.path for route in app.routes}; assert '/api/health/live' in paths; assert '/api/competition/cluster-resources' in paths; assert '/api/competition/agent/runs' in paths; assert '/api/agents' not in paths"
 
 rm -rf "$staging"
 mkdir -p "$staging/source" "$staging/frontend-dist" "$staging/deploy/107cup"

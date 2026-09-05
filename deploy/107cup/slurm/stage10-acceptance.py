@@ -16,7 +16,10 @@ FAILURE_WORKFLOW_ID = "db9c793d-cf8f-4207-823b-5943d825f21d"
 SUCCESS_BUNDLE_SHA256 = "a99e338c6a00fa2d1129bf9fbbe910a959f3c419955370f995da8242850ba8b4"
 FAILURE_BUNDLE_SHA256 = "7addf0ede65844a211e1460d0e53fc4f88792e7928c0af2541bc791e7595ae0e"
 EXPECTED_CORE_ROUTERS = (("auth", "competition_router"), ("routers.health", "router"))
-EXPECTED_BUSINESS_ROUTERS = (("routers.competition_workflows", "router"),)
+EXPECTED_BUSINESS_ROUTERS = (
+    ("routers.competition_workflows", "router"),
+    ("routers.competition_cluster", "router"),
+)
 FORBIDDEN_ROUTE_PREFIXES = (
     "/api/agents",
     "/api/qe",
@@ -180,6 +183,8 @@ def _verify_route_scope() -> dict:
     ]
     if forbidden:
         raise RuntimeError(f"forbidden business routes entered the release: {forbidden}")
+    if "/api/competition/cluster-resources" not in routes:
+        raise RuntimeError("cluster resource route is missing")
     return {
         "route_count": len(routes),
         "core_routers": [list(item) for item in CORE_ROUTER_IMPORTS],

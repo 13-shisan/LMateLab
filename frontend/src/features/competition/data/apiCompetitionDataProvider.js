@@ -212,6 +212,10 @@ export function createApiCompetitionDataProvider({
       return request('/api/health/live');
     },
 
+    getClusterResources() {
+      return request('/api/competition/cluster-resources');
+    },
+
     listWorkflows({ query = '', status = '' } = {}) {
       return request(`/api/competition/workflows${queryString([
         ['query', query],
