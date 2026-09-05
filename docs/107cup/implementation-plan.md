@@ -1111,6 +1111,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 按用户后续决定，`http://222.195.94.37:18733` 在完整来源 IP 白名单和 Operator 应用权限同时通过后，开放 Agent API Key 保存。该决定只改变 `/api/competition/agent/settings` 的密钥传输门禁，不扩大账号、任务、文件或其他 Agent 路由权限。
 - IP 白名单属于访问控制，不提供 TLS 加密。公网页面必须显示“允许保存但传输未加密”的持续提示；HTTPS 和 `127.0.0.1` SSH 隧道仍是更安全入口，不得把白名单 HTTP 描述为加密或互联网级安全。
 - 4090 Nginx 在精确设置路由完成 `allow/deny` 判定后，把客户端可伪造的同名请求头覆盖为固定 `allowlisted-http`。后端只接受 `https`、`loopback` 或该固定白名单状态，并在设置响应中返回实际传输类型供前端显示。
-- [ ] 本地前后端与 Nginx 合同测试通过，功能分支经 PR 合并到 `main`。
+- 首次正式构建 Job `54561/P107-RTX5090/anode01` 在 Stage 10 清单合同处失败：`backend/routers/competition_agent.py` 的源码哈希已经变化，但提交中的确定性交付清单仍是旧值。该作业共运行 `602` 项后端测试，结果为 `1` 项清单失败、`4` 项环境跳过，其余通过；失败发生在新 release 生成和 `current` 切换之前。正式 Web 继续为 Job `54393/anode18`、提交 `de612a8314cdd2b5acdda72b726e3cbc211a85e9`，数据库、Agent Worker、4090 relay 和其他 Slurm 作业均未因该失败修改。
+- [x] 本地 Stage 10、部署与安全合同 `16/16`、前端全量 `159/159` 通过；功能提交 `cec528f2487f474a9ebf996e40508c58cd95fbd3` 已由 PR #97 合并为 `f51122a7d42aa82d03b975f2bfdc09977ea8b0f6`。
 - [ ] 107 Slurm 正式构建通过，新 Web/Worker 候选提交和 manifest 一致，`18733` relay 原子切换且旧服务按归属核对后停止。
 - [ ] 已登录 Operator 在公网入口看到未加密警告并自行保存真实 API Key；自动化不得读取、回显、截图或把密钥写入 Git/日志。
