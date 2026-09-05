@@ -1075,3 +1075,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 4090 Nginx 仍以 IP 白名单和应用角色双重限制访问。Agent 的 Qoder 管理、设置、文件上传、文献索引、结构包、运行创建、会话删除和批准接口按实际 HTTP 方法逐条精确放行；不存在整个 `/api/competition/agent/` 的通配写权限。PDF 上限为应用限制 `20 MiB`，代理请求体上限相应设为 `21 MiB`。
 - 本地正式门禁已通过：后端 `594` 项全部通过（`28` 项只因 Windows 不具备 POSIX 能力而按设计跳过），前端 `157/157` 通过，107 生产构建转换 `1871` 个模块；Shell 语法、Python 编译、清单和 diff 检查均通过。功能提交 `48b9e825fc3f846ff57555b0ce0a26ccde1f70df` 已通过 PR #88 合并为 `1311e2997b17317132a59207d4953755bc279b08`。
 - 107 计算节点网络探测、正式 Slurm 构建、候选 Web/Worker、真实 Operator/Viewer Agent/Qoder 验收、`18733` 原子切换和 `18755` 停止仍未完成；在全部门禁通过前两个入口继续保留。
+
+### 17.31 Agent 107 计算节点预检与构建失败边界
+
+- 网络探测 Job `54298` 因 `sbatch --wrap` 的 `/bin/sh` 不支持 `pipefail` 而在请求前失败；日志保留且没有被覆盖。修正后的新 Job `54299` 在 `P107-A100` 计算节点取得 DeepSeek HTTP `401` 和 Qoder HTTP `200`，证明两个站点的 DNS、TLS 和 HTTP 通路可用；未携带 API Key，也未产生模型调用。
+- 首次正式构建 Job `54300` 在安装固定 Qoder/PDF 依赖、通过后端 `594` 项与前端 `157` 项测试并完成 Vite 构建后，被最终 Agent 路由门禁拒绝；原因是生产 `runtime.env` 尚未显式启用 Agent。旧配置已以 `0600` 备份，新增键按合并模板原子写入，不包含 API Key。
+- 第二次正式构建 Job `54301` 显示 4 个路由测试泄漏了生产 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm`：测试只启用功能开关，却未显式固定自己的 `mock` provider。这不能通过把生产 provider 降级为 mock 规避；当前修复将所有相关测试的 provider 显式固定为 `mock`，再在同样的真实生产环境下复跑。
+- `54300` 和 `54301` 都在发布目录生成和 `current` 切换前终止，正式 Web Job `54176`、`18733` 和 `18755` 均未改变。
