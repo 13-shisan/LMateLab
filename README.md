@@ -2,8 +2,8 @@
 
 107杯参赛项目
 
-本仓库是独立的 107 杯项目；应用、环境和运行数据部署在 107，原 4090
-LMateLab 生产环境不属于本项目运行边界。
+本仓库是独立的 107 杯参赛项目；源码、应用环境、运行数据和 Slurm 计算工作流均部署在
+107 算力平台。
 
 团队成员请从 [`docs/107cup/team-guide.md`](docs/107cup/team-guide.md) 开始；需要把项目交给各自 AI 时，只发送
 [`TEAMMATE_AI_START.md`](TEAMMATE_AI_START.md) 这一个文件；阶段状态和下一门禁只以
@@ -13,7 +13,8 @@ LMateLab 生产环境不属于本项目运行边界。
 
 - [`docs/107cup/compute-cluster-run-data.md`](docs/107cup/compute-cluster-run-data.md)：Slurm 作业、资源、排队和运行时间说明；
 - [`docs/107cup/artifacts/slurm-job-ledger.csv`](docs/107cup/artifacts/slurm-job-ledger.csv)：逐 Job 总账；
-- [`docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip`](docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip)：经逐文件哈希验证的脱敏原始日志附件。
+- [`docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip`](docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip)：经逐文件哈希验证的原始 Slurm stdout/stderr 日志 ZIP；解压后根作业日志位于 `submission-attachment/root-logs/`，Stage 6 和 VASP attempt 证据分别位于 `submission-attachment/stage6/` 与 `submission-attachment/vasp-runtime/`；
+- [`docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256`](docs/107cup/artifacts/lmatelab-107cup-compute-cluster-run-data-20260905.zip.sha256)：上述日志 ZIP 的 SHA-256 校验文件。
 
 ## Agent、Qoder 与演示数据库
 
