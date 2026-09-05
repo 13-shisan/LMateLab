@@ -1126,6 +1126,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 将本地冻结评审包 `lmatelab-107cup-compute-cluster-run-data-20260905.zip` 作为公开比赛附件提交到 `docs/107cup/artifacts/`，不重新打包或改写历史日志。ZIP SHA-256 固定为 `17db1b8646239cec4881a3e2ba93bca4b5acd7b51eeb89c7bd9b930dc36bf997`。
 - 包含 `563` 个实际文件、未压缩 `16,981,635` 字节，包内 `SHA256SUMS.txt` 的 `562` 条逐文件哈希全部通过。附件包含根 Slurm stdout/stderr、Stage 6 子作业证据和 VASP attempt 的受控运行文件；不包含数据库、密钥、密码、POTCAR、OUTCAR、WAVECAR 或 CHGCAR。
 - Stage 10 合同必须复核 ZIP 总哈希、文件数、未压缩字节数、包内逐文件哈希和禁入文件名。Gitea 与公开 GitHub 只接受同一个已合并 `main` 提交，任一端不同步都不算完成。
+- 原始日志公开交付通过 Gitea PR #100 进入 `main`；合并后必须把该合并提交原样推送到 `https://github.com/13-shisan/LMateLab`，不得在两个远端分别重写附件或文档。
 
 ### 17.35 107 集群动态占用（下一项核心功能）
 
