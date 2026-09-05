@@ -3,6 +3,7 @@ import { CompetitionRequestError, PreviewReadOnlyError } from './competitionErro
 import {
   DEMO_BAND_DATA,
   DEMO_CIF,
+  DEMO_CLUSTER_RESOURCES,
   DEMO_DASHBOARD,
   DEMO_DATABASE_METADATA,
   DEMO_DATABASE_ROWS,
@@ -93,6 +94,10 @@ export function createDemoCompetitionDataProvider() {
         release_kind: 'preview',
         data_mode: 'demo',
       };
+    },
+
+    async getClusterResources() {
+      return clone(DEMO_CLUSTER_RESOURCES);
     },
 
     async listWorkflows({ query = '', status = '' } = {}) {

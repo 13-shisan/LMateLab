@@ -70,6 +70,7 @@ class Stage10DeliveryContractTests(unittest.TestCase):
             self.assertIn(required, harness)
         for forbidden in ("session.commit", "subprocess", "sbatch", "scancel"):
             self.assertNotIn(forbidden, harness)
+        self.assertIn('"/api/competition/cluster-resources"', harness)
 
     def test_submit_helper_pins_clean_merged_main_and_only_submits_acceptance(self):
         source = SUBMIT.read_text(encoding="utf-8")

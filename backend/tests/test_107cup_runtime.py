@@ -116,11 +116,14 @@ class CompetitionRuntimeContractTests(unittest.TestCase):
         ):
             self.assertFalse(any(disabled in module_name for module_name in modules))
 
-    def test_workflow_router_is_the_only_business_router(self):
+    def test_only_competition_workflow_and_cluster_routers_are_enabled(self):
         runtime = self.require_runtime()
 
         self.assertEqual(
-            (("routers.competition_workflows", "router"),),
+            (
+                ("routers.competition_workflows", "router"),
+                ("routers.competition_cluster", "router"),
+            ),
             runtime.BUSINESS_ROUTER_IMPORTS,
         )
 

@@ -14,6 +14,7 @@ CORE_ROUTER_IMPORTS = (
 
 BUSINESS_ROUTER_IMPORTS = (
     ("routers.competition_workflows", "router"),
+    ("routers.competition_cluster", "router"),
 )
 
 

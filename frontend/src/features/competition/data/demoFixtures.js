@@ -207,6 +207,66 @@ export const DEMO_DASHBOARD = deepFreeze({
   },
 });
 
+const DEMO_CLUSTER_NODES = Array.from({ length: 26 }, (_, index) => {
+  const number = index + 1;
+  const rtx = number <= 15;
+  const busy = number <= 4 || number === 16 || number === 17;
+  const memoryTotal = rtx ? 512000 : 1024000;
+  return {
+    name: `anode${String(number).padStart(2, '0')}`,
+    partition: rtx ? 'P107-RTX5090' : 'P107-A100',
+    gpu_model: rtx ? 'RTX 5090' : 'A100',
+    state: busy ? 'allocated' : 'idle',
+    states: [busy ? 'allocated' : 'idle'],
+    availability: busy ? 'busy' : 'available',
+    cpu: { total: 128, allocated: busy ? 64 : 0, free: busy ? 64 : 128 },
+    memory_mib: {
+      total: memoryTotal,
+      allocated: busy ? 128000 : 0,
+      free: busy ? memoryTotal - 128000 : memoryTotal - 16000,
+    },
+    gpu: { total: 8, allocated: busy ? 8 : 0, free: busy ? 0 : 8, available: true },
+  };
+});
+
+export const DEMO_CLUSTER_RESOURCES = deepFreeze({
+  status: 'fresh',
+  stale: false,
+  collected_at: '2026-09-05T12:00:00+08:00',
+  scheduler_updated_at: '2026-09-05T12:00:00+08:00',
+  error_code: null,
+  summary: {
+    node_total: 26,
+    available_nodes: 20,
+    gpu_total: 208,
+    gpu_allocated: 48,
+    gpu_free: 160,
+    gpu_available: true,
+  },
+  partitions: [
+    {
+      name: 'P107-RTX5090',
+      gpu_model: 'RTX 5090',
+      node_total: 15,
+      available_nodes: 11,
+      cpu: { total: 1920, allocated: 256, free: 1664 },
+      memory_mib: { total: 7680000, allocated: 512000, free: 6992000 },
+      gpu: { total: 120, allocated: 32, free: 88, available: true },
+    },
+    {
+      name: 'P107-A100',
+      gpu_model: 'A100',
+      node_total: 11,
+      available_nodes: 9,
+      cpu: { total: 1408, allocated: 128, free: 1280 },
+      memory_mib: { total: 11264000, allocated: 256000, free: 10864000 },
+      gpu: { total: 88, allocated: 16, free: 72, available: true },
+    },
+  ],
+  nodes: DEMO_CLUSTER_NODES,
+  data_kind: DATA_KIND,
+});
+
 export const DEMO_RESULTS_BY_ID = deepFreeze(markDemoCollection({
   [successfulWorkflow.id]: {
     ...successfulWorkflow,

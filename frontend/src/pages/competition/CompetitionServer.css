@@ -26,6 +26,7 @@
 .competition-partition-icon,
 .competition-partition-card footer,
 .competition-job-state-row,
+.competition-cluster-freshness,
 .competition-node-empty {
   display: flex;
   align-items: center;
@@ -108,6 +109,22 @@
 }
 
 .competition-server-status-dot.is-muted {
+  background: #a4afb2;
+}
+
+.competition-cluster-freshness.is-fresh .competition-server-status-dot,
+.competition-partition-card footer.is-fresh .competition-server-status-dot {
+  background: #21a363;
+  box-shadow: 0 0 0 3px rgb(33 163 99 / 12%);
+}
+
+.competition-cluster-freshness.is-stale .competition-server-status-dot,
+.competition-partition-card footer.is-stale .competition-server-status-dot {
+  background: #bf7d20;
+}
+
+.competition-cluster-freshness.is-unavailable .competition-server-status-dot,
+.competition-partition-card footer.is-unavailable .competition-server-status-dot {
   background: #a4afb2;
 }
 
@@ -393,6 +410,15 @@
   font-size: 11px;
 }
 
+.competition-partition-card footer.is-stale {
+  color: #815619;
+  background: #faf4e9;
+}
+
+.competition-partition-card footer.is-unavailable {
+  color: #66777b;
+}
+
 .competition-service-details {
   padding-top: 6px;
 }
@@ -501,8 +527,9 @@
 
 .competition-node-table-scroll {
   width: 100%;
+  max-height: 560px;
   min-width: 0;
-  overflow-x: auto;
+  overflow: auto;
   padding-top: 14px;
 }
 
@@ -521,6 +548,9 @@
 }
 
 .competition-node-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   color: #40565b;
   background: #eef3f2;
   font-size: 11px;
@@ -528,8 +558,107 @@
 }
 
 .competition-node-table td {
-  height: 118px;
+  height: 78px;
   background: #ffffff;
+  color: var(--lm-workbench-ink);
+  font-size: 12px;
+  line-height: 1.45;
+  vertical-align: middle;
+}
+
+.competition-node-table td:nth-child(1) { width: 19%; }
+.competition-node-table td:nth-child(2) { width: 12%; }
+.competition-node-table td:nth-child(3) { width: 16%; }
+.competition-node-table td:nth-child(4) { width: 13%; }
+.competition-node-table td:nth-child(5) { width: 23%; }
+.competition-node-table td:nth-child(6) { width: 17%; }
+
+.competition-node-table td strong,
+.competition-node-table td small {
+  display: block;
+}
+
+.competition-node-table td small {
+  margin-top: 2px;
+  color: var(--lm-workbench-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.competition-node-table td strong + small + strong {
+  margin-top: 7px;
+}
+
+.competition-node-name {
+  color: var(--lm-workbench-accent-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+.competition-node-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid #ccd6d8;
+  border-radius: 5px;
+  color: #52666b;
+  background: #f2f5f5;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.competition-node-state.is-available {
+  border-color: #b9dec9;
+  color: #276443;
+  background: #edf7f1;
+}
+
+.competition-node-state.is-busy {
+  border-color: #c8d8e6;
+  color: #315f88;
+  background: #edf3f8;
+}
+
+.competition-node-state.is-unavailable {
+  border-color: #e0c1c1;
+  color: #8b3c3c;
+  background: #fbefef;
+}
+
+.competition-cluster-freshness {
+  gap: 7px;
+  min-height: 32px;
+  margin-top: 13px;
+  padding: 6px 10px;
+  border: 1px solid #d8e0e1;
+  border-radius: 6px;
+  color: #52666b;
+  background: #f6f8f8;
+  font-size: 11px;
+}
+
+.competition-cluster-freshness.is-stale {
+  border-color: #ead4ae;
+  color: #815619;
+  background: #faf4e9;
+}
+
+.competition-cluster-freshness.is-unavailable {
+  border-color: #e0c1c1;
+  color: #7c4444;
+  background: #fbefef;
+}
+
+.competition-cluster-freshness > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.competition-cluster-note {
+  margin-top: 10px !important;
+  color: #52666b !important;
 }
 
 .competition-node-empty {
@@ -626,6 +755,17 @@
     width: calc(100vw - 82px);
     align-items: flex-start;
     text-align: left;
+  }
+
+  .competition-cluster-freshness {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .competition-cluster-freshness > span:last-child {
+    width: 100%;
+    padding-left: 14px;
+    white-space: normal;
   }
 }
 

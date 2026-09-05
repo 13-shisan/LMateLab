@@ -843,11 +843,18 @@ test('competition server page is 107-scoped and read-only', () => {
     '节点与 GPU 明细',
     'provider.getDashboard()',
     'provider.getServiceHealth()',
+    'provider.getClusterResources()',
     'useCompetitionPollingResource',
+    '当前可用节点',
+    '空闲 GPU',
+    '上次有效快照',
+    '集群资源暂不可用',
+    '实际启动仍受 QoS、资源请求与排队优先级影响',
   ]) {
     assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
   assert.doesNotMatch(source, /server-monitor\/servers|Dell|Dawn|4090服务器|用户使用总览/);
+  assert.doesNotMatch(source, /动态占用数据待接入|实时节点数据待接入/);
   assert.doesNotMatch(source, /fetch\s*\(|axios|method:\s*['"](?:POST|PUT|PATCH|DELETE)/);
   assert.match(styles, /\.competition-server-page\s*\{/);
   assert.match(
@@ -859,9 +866,70 @@ test('competition server page is 107-scoped and read-only', () => {
     /\.competition-server-primary-grid\s*>\s*\.competition-server-section,[\s\S]*?height:\s*100%/,
   );
   assert.match(styles, /@media\s*\(max-width:\s*700px\)/);
+  assert.match(styles, /\.competition-node-table-scroll\s*\{[^}]*overflow:\s*auto/s);
   assert.doesNotMatch(styles, /font-size:\s*[^;]*vw|letter-spacing:\s*-/);
   for (const radius of styles.matchAll(/border-radius:\s*(\d+)px/g)) {
     assert.ok(Number(radius[1]) <= 8, `border radius exceeds 8px: ${radius[0]}`);
+  }
+});
+
+test('competition server normalizes fresh, stale, and unavailable cluster snapshots', () => {
+  const source = read('../src/pages/competition/CompetitionServer.jsx');
+  const helpers = loadFunctions(source, [
+    'isPlainObject',
+    'safeText',
+    'safeCount',
+    'normalizeClusterResources',
+  ]);
+  const node = {
+    name: 'anode03',
+    partition: 'P107-RTX5090',
+    state: 'idle',
+    availability: 'available',
+    cpu: { total: 128, allocated: 0, free: 128 },
+    memory_mib: { total: 512000, allocated: 0, free: 400000 },
+    gpu: { total: 8, allocated: 0, free: 8, available: true },
+  };
+  const partition = {
+    name: 'P107-RTX5090',
+    node_total: 15,
+    available_nodes: 12,
+    cpu: { total: 1920, allocated: 256, free: 1664 },
+    memory_mib: { total: 7680000, allocated: 0, free: 6200000 },
+    gpu: { total: 120, allocated: 24, free: 96, available: true },
+  };
+
+  for (const status of ['fresh', 'stale']) {
+    const normalized = helpers.normalizeClusterResources({
+      status,
+      stale: status === 'stale',
+      collected_at: '2026-09-05T12:00:00+08:00',
+      summary: {
+        node_total: 26,
+        available_nodes: 20,
+        gpu_total: 208,
+        gpu_allocated: 32,
+        gpu_free: 176,
+        gpu_available: true,
+      },
+      partitions: [partition],
+      nodes: [node],
+    });
+    assert.equal(normalized.status, status);
+    assert.equal(normalized.nodes.length, 1);
+    assert.equal(normalized.partitions.length, 1);
+    assert.equal(normalized.summary.availableNodes, 20);
+    assert.equal(normalized.summary.gpuFree, 176);
+  }
+
+  for (const payload of [null, {}, { status: 'unexpected' }, {
+    status: 'unavailable', nodes: [node], partitions: [partition],
+  }]) {
+    const normalized = helpers.normalizeClusterResources(payload);
+    assert.equal(normalized.status, 'unavailable');
+    assert.deepEqual(normalized.nodes, []);
+    assert.deepEqual(normalized.partitions, []);
+    assert.equal(normalized.summary.gpuAvailable, false);
   }
 });
 
