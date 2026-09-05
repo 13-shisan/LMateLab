@@ -1025,6 +1025,41 @@ class CompetitionWorkflowRouteTests(unittest.TestCase):
         )
         self.assertEqual("live", body["data_kind"])
 
+    def test_vasp_database_separates_personal_and_public_sources(self):
+        public_record = {
+            "id": "qmof:qmof-test",
+            "formula": "Zn4O",
+            "elements": ["O", "Zn"],
+            "source": "QMOF",
+            "workflow_id": "qmof-test",
+            "status": "succeeded",
+            "bandgap_eV": 2.1,
+            "energy": -12.0,
+            "completed_at": None,
+            "data_kind": "live",
+        }
+        with mock.patch(
+            "routers.competition_workflows.vasp_library_records",
+            return_value=[public_record],
+        ) as public_records:
+            personal = self.client.get(
+                "/api/competition/vasp/records", params={"source_scope": "personal"}
+            )
+            public_records.assert_not_called()
+            public = self.client.get(
+                "/api/competition/vasp/records", params={"source_scope": "public"}
+            )
+            combined = self.client.get(
+                "/api/competition/vasp/records", params={"source_scope": "all"}
+            )
+        self.assertEqual([], personal.json()["items"])
+        self.assertEqual([public_record], public.json()["items"])
+        self.assertEqual([public_record], combined.json()["items"])
+        invalid = self.client.get(
+            "/api/competition/vasp/records", params={"source_scope": "private"}
+        )
+        self.assertEqual(422, invalid.status_code)
+
     def test_invalid_upload_and_payload_are_4xx_without_internal_paths(self):
         upload = self.client.post(
             "/api/competition/structures",

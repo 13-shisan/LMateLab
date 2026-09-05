@@ -11,6 +11,8 @@ export default function VaspElectronicProperties({
   capabilities,
   fetchJson,
   downloadFile,
+  loadPlot,
+  downloadArtifact,
 }) {
   const bandAvailable = Boolean(capabilities?.band_plot);
   const dosAvailable = Boolean(capabilities?.dos_plot);
@@ -38,15 +40,17 @@ export default function VaspElectronicProperties({
       requestGenerationRef.current,
       requestGeneration,
     );
-    const encodedId = encodeURIComponent(rowId);
-    const encodedDb = encodeURIComponent(dbKey);
-    const path = activeTab === 'band'
-      ? `/api/db/vasp/task/${encodedId}/band-plot?db=${encodedDb}`
-      : `/api/db/vasp/task/${encodedId}/dos-plot?db=${encodedDb}&emin=-3&emax=3`;
-
     setLoadingTab(activeTab);
     setErrors((current) => ({ ...current, [activeTab]: '' }));
-    fetchJson(path, { signal: controller.signal })
+    const request = loadPlot
+      ? loadPlot(rowId, activeTab)
+      : fetchJson(
+        activeTab === 'band'
+          ? `/api/db/vasp/task/${encodeURIComponent(rowId)}/band-plot?db=${encodeURIComponent(dbKey)}`
+          : `/api/db/vasp/task/${encodeURIComponent(rowId)}/dos-plot?db=${encodeURIComponent(dbKey)}&emin=-3&emax=3`,
+        { signal: controller.signal },
+      );
+    request
       .then((data) => {
         if (!isCurrentRequest()) return;
         const imageSource = data?.image_url
@@ -68,7 +72,7 @@ export default function VaspElectronicProperties({
       if (isCurrentRequest()) requestGenerationRef.current += 1;
       controller.abort();
     };
-  }, [activeTab, bandAvailable, dbKey, dosAvailable, fetchJson, plotCache, rowId]);
+  }, [activeTab, bandAvailable, dbKey, dosAvailable, fetchJson, loadPlot, plotCache, rowId]);
 
   const activeAvailable = activeTab === 'band' ? bandAvailable : dosAvailable;
   const activeImage = plotCache[activeTab];
@@ -89,7 +93,11 @@ export default function VaspElectronicProperties({
     setDownloading(true);
     setErrors((current) => ({ ...current, download: '' }));
     try {
-      await downloadFile(downloadSpec.path, downloadSpec.filename);
+      if (downloadArtifact) {
+        await downloadArtifact(rowId, activeTab === 'band' ? 'band-data' : 'dos-data');
+      } else {
+        await downloadFile(downloadSpec.path, downloadSpec.filename);
+      }
     } catch (error) {
       setErrors((current) => ({ ...current, download: String(error?.message || error) }));
     } finally {

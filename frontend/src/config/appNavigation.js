@@ -199,11 +199,11 @@ function competitionNavigationGroupsFor(agentEnabled = competitionAgentEnabled) 
   if (agentEnabled) {
     items.push(Object.freeze({
       key: 'competition-agent',
-      label: 'Qoder Agent',
+      label: 'Agent',
       path: '/dashboard/agent',
       icon: 'Bot',
       exact: true,
-      description: '模板建议与既有结果分析',
+      description: '科研问答、计算规划与结果分析',
     }));
   }
   return Object.freeze([

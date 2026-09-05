@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from database import Base
 from models import User
 from models_workflow import (
+    PersonalVaspRecord,
     WorkflowAttempt,
     WorkflowEvent,
     WorkflowFile,
@@ -34,6 +35,7 @@ ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 CURRENT_HEAD = "2f694f47e108"
 WORKFLOW_HEAD = "107c0ffee001"
 AGENT_HEAD = "107c0ffee002"
+PERSONAL_RESULTS_HEAD = "107c0ffee003"
 WORKFLOW_TABLES = {
     "workflow_runs",
     "workflow_steps",
@@ -41,6 +43,7 @@ WORKFLOW_TABLES = {
     "workflow_events",
     "workflow_files",
     "workflow_templates",
+    "personal_vasp_records",
 }
 
 
@@ -78,7 +81,8 @@ class CompetitionWorkflowMigrationTests(unittest.TestCase):
         config = Config(str(ALEMBIC_INI))
         script = ScriptDirectory.from_config(config)
 
-        self.assertEqual(script.get_heads(), [AGENT_HEAD])
+        self.assertEqual(script.get_heads(), [PERSONAL_RESULTS_HEAD])
+        self.assertEqual(script.get_revision(PERSONAL_RESULTS_HEAD).down_revision, AGENT_HEAD)
         self.assertEqual(script.get_revision(AGENT_HEAD).down_revision, WORKFLOW_HEAD)
         self.assertEqual(script.get_revision(WORKFLOW_HEAD).down_revision, CURRENT_HEAD)
         self.assertIn(
@@ -91,6 +95,7 @@ class CompetitionWorkflowMigrationTests(unittest.TestCase):
         )
         self.assertTrue(WORKFLOW_TABLES.issubset(Base.metadata.tables))
         self.assertIn(AgentRun.__tablename__, Base.metadata.tables)
+        self.assertIn(PersonalVaspRecord.__tablename__, Base.metadata.tables)
 
     def test_fresh_database_upgrades_to_empty_workflow_schema(self):
         database_path = self.database_path("fresh.sqlite")
@@ -141,6 +146,8 @@ class CompetitionWorkflowMigrationTests(unittest.TestCase):
             ("workflow_files", "workflow_id", "workflow_runs", "id", "CASCADE"),
             ("workflow_files", "attempt_id", "workflow_attempts", "id", "CASCADE"),
             ("workflow_files", "owner_id", "users", "id", ""),
+            ("personal_vasp_records", "workflow_id", "workflow_runs", "id", "CASCADE"),
+            ("personal_vasp_records", "owner_id", "users", "id", ""),
         }
         actual_foreign_keys = set()
         for table_name in WORKFLOW_TABLES:

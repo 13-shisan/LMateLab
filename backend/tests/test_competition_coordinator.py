@@ -323,7 +323,7 @@ class CoordinatorTestCase(unittest.TestCase):
             values["workflow_id"], values["attempt_id"]
         )
 
-    def new_coordinator(self, *, acceptance=None, prepare_inputs=None):
+    def new_coordinator(self, *, acceptance=None, prepare_inputs=None, personal_result_index=None):
         return CompetitionCoordinator(
             session_factory=self.SessionLocal,
             reconciler=self.reconciler,
@@ -331,6 +331,7 @@ class CoordinatorTestCase(unittest.TestCase):
             vasp_script=self.vasp_script,
             prepare_inputs=prepare_inputs or self.prepare_inputs,
             accept_attempt=acceptance or self.acceptance,
+            personal_result_index=personal_result_index,
             batch_limit=16,
         )
 
@@ -441,6 +442,24 @@ class CoordinatorTestCase(unittest.TestCase):
 
 
 class CompetitionCoordinatorTests(CoordinatorTestCase):
+
+    def test_success_terminal_transition_triggers_personal_result_index_once(self):
+        class TrackingIndex:
+            def __init__(self):
+                self.calls = []
+
+            def sync(self, _session, run):
+                self.calls.append((run.id, run.status))
+                return None
+
+        index = TrackingIndex()
+        self.coordinator = self.new_coordinator(personal_result_index=index)
+        self.start()
+        for step in FIXED_STEPS:
+            self.complete(step)
+        self.coordinator.tick_once()
+
+        self.assertEqual([(self.workflow_id, "succeeded")], index.calls)
 
     def test_next_eligible_step_is_the_fixed_branch_policy(self):
         states = {step: "waiting" for step in FIXED_STEPS}

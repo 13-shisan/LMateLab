@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     String,
@@ -303,4 +304,39 @@ class WorkflowFile(Base):
         Index("ix_workflow_files_attempt_id", "attempt_id"),
         Index("ix_workflow_files_owner_id", "owner_id"),
         Index("ix_workflow_files_sha256", "sha256"),
+    )
+
+
+class PersonalVaspRecord(Base):
+    __tablename__ = "personal_vasp_records"
+
+    workflow_id = Column(
+        String(36),
+        ForeignKey("workflow_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    artifact_fingerprint = Column(String(64), nullable=False)
+    formula = Column(String(100), nullable=False)
+    elements_json = Column(CanonicalJSONText(), nullable=False)
+    energy = Column(Float, nullable=True)
+    bandgap_eV = Column(Float, nullable=True)
+    vbm_eV = Column(Float, nullable=True)
+    cbm_eV = Column(Float, nullable=True)
+    record_json = Column(CanonicalJSONText(), nullable=False)
+    created_at = Column(UTCDateTime(), nullable=False, default=_utc_now)
+    updated_at = Column(
+        UTCDateTime(),
+        nullable=False,
+        default=_utc_now,
+        onupdate=_utc_now,
+    )
+
+    workflow = relationship("WorkflowRun")
+    owner = relationship("User")
+
+    __table_args__ = (
+        Index("ix_personal_vasp_records_owner_id", "owner_id"),
+        Index("ix_personal_vasp_records_formula", "formula"),
+        Index("ix_personal_vasp_records_bandgap", "bandgap_eV"),
     )

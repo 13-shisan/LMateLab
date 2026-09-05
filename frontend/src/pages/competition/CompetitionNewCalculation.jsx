@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Save, Send, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { canWriteCompetitionData } from '../../config/competitionAccess';
 import {
@@ -58,6 +58,44 @@ const PARAMETER_LIMITS = {
   SIGMA: { min: 0.01, max: 0.2, step: 0.01 },
   NEDOS: { min: 100, max: 10000, step: 100 },
 };
+
+const AGENT_TEMPLATE_STEPS = {
+  '17_2d_material_relax': 'relax',
+  '13_band_scf': 'scf',
+  '06_band_nscf': 'band',
+  '05_dos': 'dos',
+};
+
+function normalizedAgentHandoff(value) {
+  if (!value || value.version !== 1 || typeof value.structure?.content !== 'string') return null;
+  const content = value.structure.content;
+  if (!content || content.length > 1024 * 1024 || content.includes('\0')) return null;
+  const filename = typeof value.structure.filename === 'string'
+    ? value.structure.filename.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)
+    : 'POSCAR';
+  return {
+    filename: filename || 'POSCAR',
+    content,
+    sourceRunId: typeof value.source_run_id === 'string' ? value.source_run_id : '',
+    parameterChanges: Array.isArray(value.parameter_changes) ? value.parameter_changes.slice(0, 24) : [],
+  };
+}
+
+function parametersWithAgentChanges(handoff) {
+  const parameters = structuredClone(DEFAULT_PARAMETERS);
+  for (const change of handoff?.parameterChanges || []) {
+    const step = AGENT_TEMPLATE_STEPS[change?.template_id];
+    const key = typeof change?.parameter === 'string' ? change.parameter.toUpperCase() : '';
+    const numeric = Number(change?.value);
+    const limit = PARAMETER_LIMITS[key];
+    if (
+      !step || !Object.hasOwn(parameters[step], key) || !limit || !Number.isFinite(numeric)
+      || numeric < limit.min || numeric > limit.max
+    ) continue;
+    parameters[step][key] = numeric;
+  }
+  return parameters;
+}
 
 function readStoredUser(storage) {
   try {
@@ -205,10 +243,15 @@ function failClosedAfterUncertainWrite(sourceKind, serverState, errorMessage) {
 export default function CompetitionNewCalculation() {
   const { provider, mode } = useCompetitionData();
   const navigate = useNavigate();
-  const [sourceKind, setSourceKind] = useState('builtin');
+  const location = useLocation();
+  const agentHandoff = useMemo(
+    () => normalizedAgentHandoff(location.state?.agentHandoff),
+    [location.state],
+  );
+  const [sourceKind, setSourceKind] = useState(() => agentHandoff ? 'upload' : 'builtin');
   const [selectedStep, setSelectedStep] = useState('relax');
-  const [parameters, setParameters] = useState(() => structuredClone(DEFAULT_PARAMETERS));
-  const [originalFileName, setOriginalFileName] = useState('');
+  const [parameters, setParameters] = useState(() => parametersWithAgentChanges(agentHandoff));
+  const [originalFileName, setOriginalFileName] = useState(() => agentHandoff?.filename || '');
   const [fileInputKey, setFileInputKey] = useState(0);
   const [serverState, setServerState] = useState(() => invalidateServerState());
   const [uploadPending, setUploadPending] = useState(false);
@@ -221,6 +264,7 @@ export default function CompetitionNewCalculation() {
   const confirmLock = useRef(false);
   const startLock = useRef(false);
   const inputVersion = useRef(0);
+  const handoffStarted = useRef(false);
   const user = readStoredUser();
   const readOnly = mode === 'demo' || !canWriteCompetitionData(user);
   const canWrite = isBusinessWriteAllowed(mode, user);
@@ -244,6 +288,36 @@ export default function CompetitionNewCalculation() {
     confirmLocked: confirmLock.current,
     startLocked: startLock.current,
   });
+  const uploadStructureFile = useCallback((file) => provider.uploadStructure(file), [provider]);
+
+  useEffect(() => {
+    if (!agentHandoff || !canWrite || handoffStarted.current) return undefined;
+    handoffStarted.current = true;
+    const requestVersion = inputVersion.current + 1;
+    inputVersion.current = requestVersion;
+    const file = new File([agentHandoff.content], agentHandoff.filename, { type: 'text/plain' });
+    let active = true;
+    uploadLock.current = true;
+    setUploadPending(true);
+    uploadStructureFile(file)
+      .then((result) => {
+        if (!active || inputVersion.current !== requestVersion) return;
+        setServerState((current) => ({ ...current, structureUpload: result, error: '' }));
+        navigate(location.pathname, { replace: true, state: null });
+      })
+      .catch((error) => {
+        if (!active || inputVersion.current !== requestVersion) return;
+        setServerState((current) => ({
+          ...invalidateServerState(current, { clearUpload: true }),
+          error: error?.message || 'Agent 结构导入失败',
+        }));
+      })
+      .finally(() => {
+        uploadLock.current = false;
+        if (active) setUploadPending(false);
+      });
+    return () => { active = false; };
+  }, [agentHandoff, canWrite, location.pathname, navigate, uploadStructureFile]);
 
   function inputMutationLockedNow() {
     return isInputMutationLocked({
@@ -288,7 +362,7 @@ export default function CompetitionNewCalculation() {
       const result = await runLockedWrite(
         uploadLock,
         canWrite,
-        () => provider.uploadStructure(file),
+        () => uploadStructureFile(file),
       );
       if (result && inputVersion.current === requestVersion) {
         setServerState((current) => ({ ...current, structureUpload: result, error: '' }));
@@ -449,6 +523,12 @@ export default function CompetitionNewCalculation() {
         </div>
         {readOnly ? <PreviewReadOnlyNotice /> : null}
       </header>
+
+      {agentHandoff ? (
+        <div className="competition-agent-handoff-notice">
+          已从 Agent 带入结构和允许修改的计算参数，请继续使用原有保存、校验与启动流程。
+        </div>
+      ) : null}
 
       <section className="competition-work-section" aria-labelledby="competition-source-title">
         <div className="competition-section-heading">

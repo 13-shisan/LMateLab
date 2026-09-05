@@ -35,6 +35,8 @@ from database import SessionLocal
 from route_integrity import assert_unique_routes
 from services.competition_coordinator import CompetitionCoordinator
 from services.competition_reconcile import CompetitionReconciler
+from services.competition_personal_results import PersonalResultIndex
+from services.competition_results import CompetitionResultService
 from services.competition_slurm import SlurmClient
 
 
@@ -71,6 +73,9 @@ def build_production_coordinator(
         reconciler=reconciler,
         workflow_root=root,
         vasp_script=stage_script,
+        personal_result_index=PersonalResultIndex(
+            CompetitionResultService(workflow_root=root)
+        ),
         batch_limit=coordinator_batch_limit(environ),
     )
 

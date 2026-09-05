@@ -30,6 +30,14 @@ class CompetitionAgentSecurityTests(unittest.TestCase):
         for forbidden in ["sbatch ", "scancel ", "vasp_std", "POTCAR"]:
             self.assertNotIn(forbidden, source)
 
+    def test_qoder_management_uses_only_fixed_subprocess_calls(self):
+        source = (BACKEND_ROOT / "services" / "qoder_management.py").read_text(encoding="utf-8").lower()
+        self.assertIn('qoder_sdk_version = "1.0.14"', source)
+        self.assertIn('"remote-control"', source)
+        self.assertIn('"--capacity", "1"', source)
+        for forbidden in ["shell=true", "os.system", "sbatch", "scancel"]:
+            self.assertNotIn(forbidden, source)
+
 
 if __name__ == "__main__":
     unittest.main()

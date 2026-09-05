@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -35,6 +36,9 @@ from services.competition_vasp import (
     accept_vasp_attempt,
 )
 from services.competition_workflows import append_workflow_event
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 ACTIVE_ATTEMPT_STATUSES: Final = frozenset(
@@ -117,6 +121,7 @@ class CompetitionCoordinator:
         vasp_script: str | Path,
         prepare_inputs: Callable[..., object] = prepare_attempt_inputs,
         accept_attempt: Callable[..., AcceptanceReport] = accept_vasp_attempt,
+        personal_result_index: object | None = None,
         batch_limit: int = 8,
     ) -> None:
         if isinstance(batch_limit, bool) or not 1 <= batch_limit <= 32:
@@ -127,6 +132,7 @@ class CompetitionCoordinator:
         self.vasp_script = Path(vasp_script).resolve()
         self._prepare_inputs = prepare_inputs
         self._accept_attempt = accept_attempt
+        self._personal_result_index = personal_result_index
         self.batch_limit = batch_limit
 
     @staticmethod
@@ -1148,4 +1154,23 @@ class CompetitionCoordinator:
                     payload={"status": aggregate},
                 )
             session.commit()
+            if aggregate == "succeeded" and self._personal_result_index is not None:
+                try:
+                    session.expire_all()
+                    run = session.get(WorkflowRun, workflow_id)
+                    indexed = self._personal_result_index.sync(session, run)
+                    if indexed is not None:
+                        append_workflow_event(
+                            session,
+                            workflow_id=workflow_id,
+                            event_type="personal_result_indexed",
+                            payload={
+                                "artifact_fingerprint": indexed.artifact_fingerprint,
+                                "schema": "qmof-compatible-v1",
+                            },
+                        )
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    LOGGER.exception("personal VASP result indexing failed for %s", workflow_id)
             return aggregate

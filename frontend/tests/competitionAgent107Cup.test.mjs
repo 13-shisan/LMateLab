@@ -13,6 +13,8 @@ test('competition Agent has a dedicated protected page and navigation item', () 
   assert.match(app, /path="\/dashboard\/agent"/);
   assert.match(navigation, /competition-agent/);
   assert.match(navigation, /\/dashboard\/agent/);
+  assert.match(navigation, /label: 'Agent'/);
+  assert.doesNotMatch(navigation, /Qoder Agent/);
 });
 
 
@@ -25,7 +27,7 @@ test('Agent page polls structured runs and keeps viewer submission disabled', ()
   assert.match(source, /useCompetitionPollingResource/);
   assert.match(source, /canWriteCompetitionData/);
   assert.match(source, /createAgentRun/);
-  assert.match(source, /listAgentTemplates/);
+  assert.match(source, /listAgentRuns/);
   assert.match(source, /Viewer/);
   assert.match(source, /succeeded:\s*'已完成'/);
   assert.doesNotMatch(source, /StatusBadge/);
@@ -92,7 +94,7 @@ test('structure builder verifies editable inputs before app-owned queue handoff'
   assert.doesNotMatch(builder, /sbatch|scancel|Bash|WebFetch/);
 });
 
-test('successful template conversation can fill a missing structure once and exposes kz', () => {
+test('successful calculation conversation can fill a missing structure once and exposes kz', () => {
   const page = readFileSync(
     new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
     'utf8',
@@ -102,7 +104,7 @@ test('successful template conversation can fill a missing structure once and exp
     'utf8',
   );
 
-  assert.match(page, /run\.output\?\.workspace\?\.structure/);
+  assert.match(page, /run\?\.output\?\.workspace\?\.structure/);
   assert.match(builder, /useEffect/);
   assert.match(builder, /preparedStructure/);
   assert.match(builder, /autoBuildHandled/);
@@ -110,48 +112,144 @@ test('successful template conversation can fill a missing structure once and exp
   assert.match(builder, /\['kx', 'ky', 'kz'\]/);
 });
 
-test('Agent initial surface is a compact backend-tool console linked to existing features', () => {
+test('Agent initial surface is a compact three-pane workspace linked to existing features', () => {
   const page = readFileSync(
     new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
     'utf8',
   );
 
-  assert.match(page, /后端受控工具/);
+  assert.match(page, /competition-agent-history/);
+  assert.match(page, /competition-agent-resources/);
   assert.match(page, /tool_calls/);
   assert.match(page, /\/dashboard\/workflows/);
   assert.match(page, /\/dashboard\/database\/vasp/);
   assert.doesNotMatch(page, /competition-agent-catalog/);
 });
 
-test('Agent selects a curated structure instead of treating MoS2 as a built-in material', () => {
+test('Agent mounts selected public structures without hard-coding a material', () => {
   const page = readFileSync(
     new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
     'utf8',
   );
 
-  assert.match(page, /listCuratedStructures/);
-  assert.match(page, /materialId/);
-  assert.match(page, /material_id:\s*materialId/);
+  assert.match(page, /searchAgentStructures/);
+  assert.match(page, /selectedStructureIds/);
+  assert.match(page, /structure_ids:\s*selectedStructureIds/);
   assert.doesNotMatch(page, /material_id:\s*'MoS2_monolayer'/);
-  assert.match(page, /受控样例结构/);
-  assert.match(page, /请选择样例结构/);
+  assert.match(page, /公开结构库/);
 });
 
-test('Qoder Linux distribution link is repository-owned and authentication stays external', () => {
+test('Agent exposes server-backed LLM settings, file upload, and structure search', () => {
   const page = readFileSync(
     new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
     'utf8',
   );
-  const distribution = readFileSync(
-    new URL('../src/config/qoderDistribution.js', import.meta.url),
+  assert.match(page, /getAgentSettings/);
+  assert.match(page, /updateAgentSettings/);
+  assert.match(page, /uploadAgentFile/);
+  assert.match(page, /searchAgentStructures/);
+  assert.match(page, /Agent 设置/);
+  assert.doesNotMatch(page, /QODER_LINUX_DISTRIBUTION/);
+});
+
+test('Agent renders calculation plans and predefined file analyzer facts', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+  for (const token of [
+    'CalculationPlanResult',
+    'plan.needs_upload',
+    'template.rendered_content',
+    'parameter_changes',
+    'AnalysisFacts',
+    'analysis_results',
+    '预置分析器结果',
+  ]) {
+    assert.match(page, new RegExp(token.replace('.', '\\.')));
+  }
+  assert.doesNotMatch(page, /eval\(|new Function|child_process/);
+});
+
+test('Agent workspace persists history, merges QA and file analysis, and removes template recommendation UI', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+  for (const token of ['对话与任务历史', '已挂载', '提交新建计算', '上传结构并重新规划']) {
+    assert.match(page, new RegExp(token));
+  }
+  assert.match(page, /request_kind:\s*'auto'/);
+  assert.match(page, /取消挂载文献/);
+  assert.doesNotMatch(page, /setRequestKind|role="tablist"|competition-agent-segment/);
+  assert.doesNotMatch(page, />模板建议</);
+  assert.doesNotMatch(page, /批准为只读分析/);
+});
+
+test('Agent exposes categorized uploads and a real literature indexing surface', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+  for (const token of [
+    'INCAR 模板', '结构文件', '计算结果', '文献 PDF', 'searchAgentLiterature',
+    'indexAgentLiterature', 'OpenAlex', '联网检索文献',
+  ]) assert.match(page, new RegExp(token));
+});
+
+test('Agent groups deletable conversations, mounts workflows, and hands plans to new calculation', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+  const provider = readFileSync(
+    new URL('../src/features/competition/data/apiCompetitionDataProvider.js', import.meta.url),
     'utf8',
   );
 
-  assert.match(distribution, /https:\/\/qoder\.com\/download/);
-  assert.match(distribution, /authenticationOwner:\s*'user'/);
-  assert.match(page, /QODER_LINUX_DISTRIBUTION/);
-  assert.match(page, /Qoder Linux/);
-  assert.match(page, /登录由用户/);
-  assert.match(page, /target="_blank"/);
-  assert.match(page, /noopener noreferrer/);
+  for (const token of [
+    'conversationGroups', 'turnCount', 'deleteAgentConversation', 'Trash2',
+    'listWorkflows', 'type="radio"', 'VaspElectronicProperties',
+    "navigate('/dashboard/calculations/new'", 'agentHandoff',
+    'literatureLibrary.data?.uploads', 'CitationList',
+  ]) assert.match(page, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(provider, /method:\s*['"]DELETE['"]/);
+  assert.match(page, /getRandomValues/);
+  assert.doesNotMatch(page, /00000000-0000-4000-8000-000000000000/);
+});
+
+test('Agent mounts complete VASP calculation directories and exposes the optional Qoder interface', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+  const provider = readFileSync(
+    new URL('../src/features/competition/data/apiCompetitionDataProvider.js', import.meta.url),
+    'utf8',
+  );
+
+  for (const token of [
+    'CalculationDirectoryTree', 'selectedCalculationIds', 'calculation_ids',
+    'VASP 计算目录', 'webkitdirectory', 'Qoder 接口', 'qoder-agent-sdk',
+  ]) assert.match(page, new RegExp(token));
+  assert.match(provider, /calculation_id/);
+  assert.match(provider, /group_name/);
+  assert.doesNotMatch(page, /category === 'result'.*type="checkbox"/s);
+});
+
+test('Qoder settings expose fixed install, login, and service controls', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+  const provider = readFileSync(
+    new URL('../src/features/competition/data/apiCompetitionDataProvider.js', import.meta.url),
+    'utf8',
+  );
+  for (const token of ['一键安装', '一键登录', '启动服务', '停止 Qoder 服务', '打开 Qoder 授权页']) {
+    assert.match(page, new RegExp(token));
+  }
+  for (const route of ['/qoder/install', '/qoder/login', '/qoder/service/start', '/qoder/service/stop']) {
+    assert.match(provider, new RegExp(route));
+  }
 });
