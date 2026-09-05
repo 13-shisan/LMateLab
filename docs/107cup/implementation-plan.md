@@ -1074,7 +1074,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Web 服务每次迁移前使用 SQLite Online Backup API 生成不可覆盖的 `0600` 一致性备份，迁移后同时执行 Alembic head 与两套数据库 `integrity_check`。该机制不等于数据库回滚；候选失败时保留备份、旧服务和旧 relay，由人工确认迁移兼容性后处理。
 - 4090 Nginx 仍以 IP 白名单和应用角色双重限制访问。Agent 的 Qoder 管理、设置、文件上传、文献索引、结构包、运行创建、会话删除和批准接口按实际 HTTP 方法逐条精确放行；不存在整个 `/api/competition/agent/` 的通配写权限。PDF 上限为应用限制 `20 MiB`，代理请求体上限相应设为 `21 MiB`。
 - 本地正式门禁已通过：后端 `594` 项全部通过（`28` 项只因 Windows 不具备 POSIX 能力而按设计跳过），前端 `157/157` 通过，107 生产构建转换 `1871` 个模块；Shell 语法、Python 编译、清单和 diff 检查均通过。功能提交 `48b9e825fc3f846ff57555b0ce0a26ccde1f70df` 已通过 PR #88 合并为 `1311e2997b17317132a59207d4953755bc279b08`。
-- 107 计算节点网络探测、正式 Slurm 构建、候选 Web/Worker、真实 Operator/Viewer Agent/Qoder 验收、`18733` 原子切换和 `18755` 停止仍未完成；在全部门禁通过前两个入口继续保留。
+- 107 计算节点预检、正式 Slurm 构建、候选 Web/Worker 和 `18733` 切换已于 17.31 完成；真实 Operator/Viewer Agent 复核、LLM 密钥、Qoder 登录与 `18755` 停止仍是外部门禁。
 
 ### 17.31 Agent 107 计算节点预检与构建失败边界
 
@@ -1082,3 +1082,8 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 首次正式构建 Job `54300` 在安装固定 Qoder/PDF 依赖、通过后端 `594` 项与前端 `157` 项测试并完成 Vite 构建后，被最终 Agent 路由门禁拒绝；原因是生产 `runtime.env` 尚未显式启用 Agent。旧配置已以 `0600` 备份，新增键按合并模板原子写入，不包含 API Key。
 - 第二次正式构建 Job `54301` 显示 4 个路由测试泄漏了生产 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm`：测试只启用功能开关，却未显式固定自己的 `mock` provider。这不能通过把生产 provider 降级为 mock 规避；当前修复将所有相关测试的 provider 显式固定为 `mock`，再在同样的真实生产环境下复跑。
 - `54300` 和 `54301` 都在发布目录生成和 `current` 切换前终止，正式 Web Job `54176`、`18733` 和 `18755` 均未改变。
+- 环境隔离修复提交 `df0515600bcd29c54f39f4595463e2b631feb6e0` 已通过 PR #90 合并为 `64e9d20a494d13a280cbaac1fc32e7e8b5556768`。第三次正式构建 Job `54302/P107-RTX5090/anode03` 在生产 `provider=llm` 环境下通过后端 `594` 项（Linux 条件跳过 `4`）、前端 `157/157`、Vite 构建、Agent 路由和双重清单门禁，原子生成新 release；manifest SHA-256 为 `39c529774070b8b052bcba4535e7ef481ea69408bd275b0da11ff3d4923c45f0`。
+- Qoder 计算节点探测 Job `54303/P107-A100` 确认 SDK 版本 `1.0.14`、CLI 可执行且 stderr 为空；`authenticated=false` 是当前真实状态，不得写成 Qoder 已可用。
+- 候选 Web Job `54304/P107-A100/anode16` 在迁移前为两套 SQLite 生成不可覆盖备份，迁移后同时通过两套 Alembic head、`integrity_check`、live 和 ready；Agent Worker Job `54305/P107-A100/anode16` 作为唯一归属 Worker 发布了与 Web 相同的 commit 和 manifest。
+- 4090 Nginx 活动配置在保留全部 IP 白名单的前提下，已更新为 `21m` 请求体上限和逐条 Agent 写路由，源模板 SHA-256 为 `298b1cb799fba9c44a6638b3711733b67c0fdc57e329a67ebe1a135a61d5ce34`，旧配置备份为 `nginx.conf.before-agent.54304`。切换前公网仍返回旧 Job `54176`；取消临时 `18742` 后，恢复器原子把 `18740/18733` 切换为 Job `54304`，4090 内部、Windows 公网的 live/ready、首页、服务器页和 Agent 页均通过，未登录 Agent 读写返回 `401`。
+- 旧 107 Web Job `54176` 与 `Pzxp` 所有的 4090 `18755` 仍保留作为回退边界。下一门禁是使用真实 Operator 与 Viewer 复核 Agent 权限，由 Operator 在网页写入 LLM API Key 并完成 Qoder 登录；这些通过前不停止两个旧服务，`18755` 最终只能由其进程所有者 `Pzxp` 停止。
