@@ -127,6 +127,7 @@ python -m unittest \
   tests.test_107cup_authz \
   tests.test_107cup_agent_deploy_contract \
   tests.test_107cup_agent_deploy_runtime \
+  tests.test_107cup_agent_history_migration \
   tests.test_107cup_runtime \
   tests.test_107cup_deploy_contract \
   tests.test_107cup_service_recovery \
@@ -163,7 +164,10 @@ python -m unittest \
 cd "$project/frontend"
 npm ci
 npm test
-VITE_LMATELAB_EDITION=107cup VITE_COMPETITION_DATA_MODE=live npm run build
+VITE_LMATELAB_EDITION=107cup \
+VITE_COMPETITION_DATA_MODE=live \
+VITE_COMPETITION_AGENT_ENABLED=1 \
+npm run build
 
 export LMATELAB_FRONTEND_DIST="$project/frontend/dist"
 cd "$project/backend"

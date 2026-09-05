@@ -35,6 +35,7 @@ class AgentDeploymentContractTests(unittest.TestCase):
             '"$root/config/secrets"',
             "tests.test_107cup_agent_deploy_contract",
             "tests.test_107cup_agent_deploy_runtime",
+            "tests.test_107cup_agent_history_migration",
             "tests.test_competition_agent_catalog",
             "tests.test_competition_agent_fake_slurm",
             "tests.test_competition_agent_literature",
@@ -47,6 +48,10 @@ class AgentDeploymentContractTests(unittest.TestCase):
             "tests.test_competition_agent_tools",
         ):
             self.assertIn(required, source)
+        self.assertRegex(
+            source,
+            r"VITE_COMPETITION_AGENT_ENABLED=1\s+\\\s+npm run build",
+        )
 
     def test_runtime_keeps_agent_writes_under_the_private_107_root(self):
         source = self.read(DEPLOY / "runtime.env.example")

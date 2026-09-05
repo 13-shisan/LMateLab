@@ -19,6 +19,20 @@ test('107 cup edition exposes the focused workflow and server entrances', () => 
   ]);
 });
 
+test('107 cup edition exposes Agent when the release build enables it', () => {
+  const items = navigation.navigationGroupsForEdition('107cup', true)
+    .flatMap((group) => group.items);
+
+  assert.deepEqual(items.at(-1), {
+    key: 'competition-agent',
+    label: 'Agent',
+    path: '/dashboard/agent',
+    icon: 'Bot',
+    exact: true,
+    description: '科研问答、计算规划与结果分析',
+  });
+});
+
 test('107 cup navigation keeps detail routes owned by their list entries', () => {
   const items = navigation.navigationGroupsForEdition('107cup')
     .flatMap((group) => group.items);

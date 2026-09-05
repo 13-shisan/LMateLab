@@ -222,13 +222,18 @@
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.75fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   margin-bottom: 16px;
 }
 
 .competition-server-secondary-grid {
   grid-template-columns: minmax(300px, 0.75fr) minmax(0, 1.65fr);
   margin-bottom: 0;
+}
+
+.competition-server-primary-grid > .competition-server-section,
+.competition-server-secondary-grid > .competition-server-section {
+  height: 100%;
 }
 
 .competition-server-section {
