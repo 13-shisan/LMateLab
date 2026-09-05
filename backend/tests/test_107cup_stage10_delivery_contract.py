@@ -13,6 +13,7 @@ RUNTIME_VERIFY = ROOT / "deploy" / "107cup" / "verify-runtime.sh"
 DELIVERY_DOCS = (
     ROOT / "docs" / "107cup" / "deployment.md",
     ROOT / "docs" / "107cup" / "data-and-provenance.md",
+    ROOT / "docs" / "107cup" / "compute-cluster-run-data.md",
     ROOT / "docs" / "107cup" / "demo-script.md",
     ROOT / "docs" / "107cup" / "final-acceptance.md",
 )
