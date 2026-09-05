@@ -15,6 +15,7 @@
 | 工作流输入和 attempt | `data/workflows/<workflow-id>` | 文件账本、attempt、Job ID 和 SHA-256 |
 | VASP 原始输出 | 各 attempt 的固定输出目录 | OUTCAR/vasprun.xml、正常结束和科学门禁 |
 | 结果与证据包 | 数据库记录、attempt、`evidence` | 确定性导出及清单 |
+| Slurm 运行总账 | `docs/107cup/artifacts/slurm-job-ledger.csv` | 218 个真实 Job ID 去重、分类、日志 SHA-256 与证据等级 |
 | 服务身份 | `runtime/service-state.json` | Job、node、port、commit、manifest 原子一致 |
 
 路径存在本身不代表计算成功。成功必须同时满足调度终态、VASP 正常结束、阶段科学检查、必要文件和哈希；失败必须保留原因和阻断证据。
@@ -67,7 +68,13 @@ Stage 7 证据记录 VASP 四步科学门禁；Stage 8 证据记录结构/BAND/D
 
 发布仓库仍保留原项目的部分源码作为历史开发基座，但竞赛运行面由 `competition_runtime.py` 中的固定 router allowlist 和 `main_107cup.py` 构建。Stage 10 会验证只挂载认证、健康检查和竞赛工作流路由；Agent、机器学习、QE/EPW、跨服务器迁移、监控、报告等不得出现在可访问 API 或前端导航中。这里的“未进入发布”指未进入竞赛可执行/可访问业务面，而不是重写 Git 历史删除所有旧文件。
 
-## 6. 隐私和复核
+## 6. 算力集群运行数据
+
+[`compute-cluster-run-data.md`](./compute-cluster-run-data.md) 和 [`artifacts/slurm-job-ledger.csv`](./artifacts/slurm-job-ledger.csv) 固定 `2026-09-05` 快照时确认的全部 `218` 个真实 Slurm 作业。统计把调度终态、功能验收和 VASP 科学验收分开；`sbatch --test-only`、Fake Slurm ID、调度前拒绝和无 Job ID 的取消不计入。
+
+原始 stdout/stderr 因体积和隐私边界不提交 Git，保存在 Windows 独立评审附件包。附件逐文件哈希，排除正式数据库、认证材料、VASP 大文件和 POTCAR；历史 `sacct` 无法恢复的字段保持 `unavailable`，不估算。
+
+## 7. 隐私和复核
 
 交付清单和证据文档可以提交 Git；JWT、密码、Gitea Token、SSH key、二次验证码、完整私有数据库、运行环境文件和未裁剪日志不能提交。Viewer 下载只包含固定白名单工件和受限日志。
 

@@ -1046,3 +1046,11 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Stage 10 只读 Job `50526/anode16` 输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节；数据库 `integrity_check=ok`、workflow 数为 `6`，release `653` 项清单和既有成功/失败证据复核通过，没有运行 VASP。证据 manifest 与 summary 的 SHA-256 分别为 `1400e577a7e142429f9440171575d635e6cedb03d150491e94b5a636a4232bf9` 和 `53bbdc6d96801d5b20fce58b6fb58e9f8d59065763f3176a5fcd4690dab8b456`。
 - 首次真实取消验收 Job `50529` 因验收包装遗漏 `LMATELAB_FRONTEND_DIST` 而在导入应用时失败，随后只读复核确认目标仍为 `validated` 且 attempt 为 `0`；该失败发生在协调器和数据库修改前，原始 stderr 保留。补齐正式服务环境后的 Job `50530` 返回 `status=cancelled`、`result=cancelled_before_start`、`attempt_id=null` 和 `job_id=null`，stderr 为 0 字节。
 - 正式数据库随后只读确认工作流 `6f02776d-d59c-4755-94b5-1e391ba9dcf2` 及 `relax/scf/band/dos` 四步均为 `cancelled`，attempt 数仍为 `0`，事件序列新增 `workflow_cancelled_before_start` 与 `workflow_status_changed`。取消前后队列都没有 VASP 作业，最终只保留服务 Job `50521`，因此本次没有调用 `scancel` 或创建 VASP Job。全新认证态浏览器刷新和三名成员复核仍为 Stage 10 外部门禁，Stage 10 保持 `PARTIAL`。
+
+### 17.28 算力集群运行数据交付
+
+- 按“取得真实 Slurm Job ID 即计入”的统一口径，从项目根日志、Stage 6 子作业证据、正式工作流数据库和 Stage 7 专属证据目录完成去重；快照共 `218` 个作业，分为 `138 completed / 32 failed / 47 cancelled / 1 running`。
+- `sbatch --test-only` 的 `38285`、Fake Slurm 的 `73001`、无关 `sacct` 作业 `30121/30147`、调度前 422/403 和没有 Job ID 的 `cancelled_before_start` 均明确排除。
+- 26 个 VASP Job 单独保留 Slurm 终态和科学终态：`25` 个 Slurm completed、`1` 个 Slurm failed；其中 `21` 个科学通过、`4` 个科学拒绝、`1` 个未进入科学验收。排队、运行、VASP wall time 和峰值 RSS 均来自数据库事件、保存的 `scontrol` 与 `runtime-time.txt`，不从文件时间或 Job ID 推算。
+- 新增 `compute-cluster-run-data.md`、218 行 `slurm-job-ledger.csv` 和确定性生成器；Stage 10 交付清单覆盖这三项。完整日志使用 Windows 独立附件包交付，不提交 Git，且排除正式数据库、凭据、VASP 大文件和 POTCAR。
+- 本次只执行短时只读查询和日志打包，没有提交新的 Slurm 作业。快照时服务恢复 Job `54176/P107-A100/anode18` 健康运行，未被取消或修改。
