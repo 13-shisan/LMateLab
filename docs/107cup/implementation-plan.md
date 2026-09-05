@@ -1105,3 +1105,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 新 Agent Worker Job `54395/P107-A100/anode18` 与 Web `54393` 同时运行，提交和 manifest 完全一致。独立真实登录探测 Job `54397/P107-RTX5090/anode03` 为 `COMPLETED/0:0`，耗时 10 秒，实际取得 `qoder.cn/device/selectAccounts` 且 challenge 存在；没有输出 challenge 或修改生产认证目录。stdout/stderr 为 `0600`，SHA-256 分别为 `2f063e7d87b38fbf400cf5c9e000e6936d7e52f9094bf06a964053972f852f62` 和空文件哈希 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`。
 - [ ] 仍需真实 Operator 登录后完成两种浏览器入口复核：公网 `18733` 必须禁用 API Key 输入并允许单独保存 URL/模型；Windows 回环隧道必须允许用户自行输入并保存真实 Key。随后再完成 Qoder CN 用户授权。自动化不得读取、回显或截图真实密码、API Key、JWT、Cookie 或 challenge。
 - [ ] `18755` 的页面功能源码已进入 `18733`，但历史数据尚未迁移。旧服务由 `Pzxp` 运行且 `/api/competition/agent/runs` 需要认证；当前仓库没有能够证明完整性的导出接口。必须由历史所有者生成 `complete=true`、来源邮箱匹配、最多 1000 条且仅含终态记录的私有导出，再经 `agent-history-migration.slurm` 备份、完整性检查和幂等导入。在此之前不得停止 `18755` 或宣称两端数据完全一致。
+
+### 17.33 IP 白名单公网入口保存 API Key
+
+- 按用户后续决定，`http://222.195.94.37:18733` 在完整来源 IP 白名单和 Operator 应用权限同时通过后，开放 Agent API Key 保存。该决定只改变 `/api/competition/agent/settings` 的密钥传输门禁，不扩大账号、任务、文件或其他 Agent 路由权限。
+- IP 白名单属于访问控制，不提供 TLS 加密。公网页面必须显示“允许保存但传输未加密”的持续提示；HTTPS 和 `127.0.0.1` SSH 隧道仍是更安全入口，不得把白名单 HTTP 描述为加密或互联网级安全。
+- 4090 Nginx 在精确设置路由完成 `allow/deny` 判定后，把客户端可伪造的同名请求头覆盖为固定 `allowlisted-http`。后端只接受 `https`、`loopback` 或该固定白名单状态，并在设置响应中返回实际传输类型供前端显示。
+- [ ] 本地前后端与 Nginx 合同测试通过，功能分支经 PR 合并到 `main`。
+- [ ] 107 Slurm 正式构建通过，新 Web/Worker 候选提交和 manifest 一致，`18733` relay 原子切换且旧服务按归属核对后停止。
+- [ ] 已登录 Operator 在公网入口看到未加密警告并自行保存真实 API Key；自动化不得读取、回显、截图或把密钥写入 Git/日志。

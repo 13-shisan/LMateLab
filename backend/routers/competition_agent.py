@@ -59,18 +59,28 @@ from services.competition_agent.uploads import (
 router = APIRouter(prefix="/competition/agent", tags=["competition-agent"])
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _GATEWAY_SCHEME_HEADER = "x-lmatelab-gateway-scheme"
+_ALLOWLISTED_HTTP_GATEWAY = "allowlisted-http"
+
+
+def _api_key_write_transport(request: Request) -> str:
+    gateway_scheme = request.headers.get(_GATEWAY_SCHEME_HEADER)
+    if gateway_scheme is not None:
+        normalized = gateway_scheme.strip().lower()
+        if normalized == "https":
+            return "https"
+        if normalized == _ALLOWLISTED_HTTP_GATEWAY:
+            return "allowlisted_http"
+        return "blocked"
+    client_host = request.client.host if request.client else ""
+    if request.url.scheme == "https":
+        return "https"
+    if client_host in _LOOPBACK_HOSTS or request.url.hostname in _LOOPBACK_HOSTS:
+        return "loopback"
+    return "blocked"
 
 
 def _api_key_write_allowed(request: Request) -> bool:
-    gateway_scheme = request.headers.get(_GATEWAY_SCHEME_HEADER)
-    if gateway_scheme is not None:
-        return gateway_scheme == "https"
-    client_host = request.client.host if request.client else ""
-    return (
-        request.url.scheme == "https"
-        or client_host in _LOOPBACK_HOSTS
-        or request.url.hostname in _LOOPBACK_HOSTS
-    )
+    return _api_key_write_transport(request) != "blocked"
 
 
 def require_agent_enabled() -> None:
@@ -140,6 +150,7 @@ def agent_settings(request: Request, _user: User = Depends(require_operator)):
         **read_settings(),
         "api_key_configured": llm_configured(),
         "api_key_write_allowed": _api_key_write_allowed(request),
+        "api_key_write_transport": _api_key_write_transport(request),
     }
 
 
@@ -165,6 +176,7 @@ def update_agent_settings(
         **read_settings(),
         "api_key_configured": llm_configured(),
         "api_key_write_allowed": _api_key_write_allowed(request),
+        "api_key_write_transport": _api_key_write_transport(request),
     }
 
 

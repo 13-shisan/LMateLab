@@ -153,7 +153,7 @@ class CompetitionAgentRouteTests(unittest.TestCase):
             response = self.client.post("/api/competition/agent/qoder/service/start")
         self.assertEqual(403, response.status_code)
 
-    def test_agent_api_key_requires_https_or_loopback_destination(self):
+    def test_agent_api_key_accepts_only_secure_loopback_or_allowlisted_gateway(self):
         settings_file = Path(self.temp_dir.name) / "config" / "settings.json"
         key_file = Path(self.temp_dir.name) / "secrets" / "llm-api-key"
         environment = {
@@ -182,6 +182,21 @@ class CompetitionAgentRouteTests(unittest.TestCase):
                     "x-lmatelab-gateway-scheme": "http",
                 },
             )
+            allowlisted_status = self.client.get(
+                "/api/competition/agent/settings",
+                headers={
+                    "host": "222.195.94.37:18733",
+                    "x-lmatelab-gateway-scheme": "allowlisted-http",
+                },
+            )
+            allowlisted_write = self.client.put(
+                "/api/competition/agent/settings",
+                json=payload,
+                headers={
+                    "host": "222.195.94.37:18733",
+                    "x-lmatelab-gateway-scheme": "allowlisted-http",
+                },
+            )
             loopback_write = self.client.put(
                 "/api/competition/agent/settings",
                 json=payload,
@@ -190,13 +205,22 @@ class CompetitionAgentRouteTests(unittest.TestCase):
 
         self.assertEqual(200, public_status.status_code, public_status.text)
         self.assertFalse(public_status.json()["api_key_write_allowed"])
+        self.assertEqual("blocked", public_status.json()["api_key_write_transport"])
         self.assertEqual(400, public_write.status_code, public_write.text)
         self.assertEqual(
             "agent_api_key_secure_transport_required",
             public_write.headers.get("x-error-code"),
         )
+        self.assertEqual(200, allowlisted_status.status_code, allowlisted_status.text)
+        self.assertTrue(allowlisted_status.json()["api_key_write_allowed"])
+        self.assertEqual(
+            "allowlisted_http", allowlisted_status.json()["api_key_write_transport"]
+        )
+        self.assertEqual(200, allowlisted_write.status_code, allowlisted_write.text)
+        self.assertTrue(allowlisted_write.json()["api_key_configured"])
         self.assertEqual(200, loopback_write.status_code, loopback_write.text)
         self.assertTrue(loopback_write.json()["api_key_write_allowed"])
+        self.assertEqual("loopback", loopback_write.json()["api_key_write_transport"])
         self.assertTrue(loopback_write.json()["api_key_configured"])
         self.assertEqual("synthetic-test-key", key_file.read_text(encoding="utf-8"))
 
