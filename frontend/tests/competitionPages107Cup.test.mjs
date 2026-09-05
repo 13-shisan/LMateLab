@@ -850,6 +850,14 @@ test('competition server page is 107-scoped and read-only', () => {
   assert.doesNotMatch(source, /server-monitor\/servers|Dell|Dawn|4090服务器|用户使用总览/);
   assert.doesNotMatch(source, /fetch\s*\(|axios|method:\s*['"](?:POST|PUT|PATCH|DELETE)/);
   assert.match(styles, /\.competition-server-page\s*\{/);
+  assert.match(
+    styles,
+    /\.competition-server-primary-grid,[\s\S]*?\.competition-server-secondary-grid\s*\{[\s\S]*?align-items:\s*stretch/,
+  );
+  assert.match(
+    styles,
+    /\.competition-server-primary-grid\s*>\s*\.competition-server-section,[\s\S]*?height:\s*100%/,
+  );
   assert.match(styles, /@media\s*\(max-width:\s*700px\)/);
   assert.doesNotMatch(styles, /font-size:\s*[^;]*vw|letter-spacing:\s*-/);
   for (const radius of styles.matchAll(/border-radius:\s*(\d+)px/g)) {
