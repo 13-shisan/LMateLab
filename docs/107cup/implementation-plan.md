@@ -1065,7 +1065,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - PR #87 已把功能提交 `6ee01f2110ef197fec484c66d710eeb32cea567f` 合并为 `4eca4f39cae9dc67a553489d573a8811cb5947cb`。当前完成的是源码、测试和本地真实浏览器验收；107 Slurm 构建、候选服务、`18733` 切换和真实账号浏览器复核尚未执行，因此不能把该页面写成已经上线。
 - `18733` 与 `18755` 均未因本节工作停止或修改。下一步进入 Agent/Qoder 的 `18755 -> 18733` 生产化迁移；集群级实时资源采集是独立后续项，不阻塞 Agent 迁移，也不能用工作流数量代替。
 
-### 17.30 Agent/Qoder 107 生产合同候选
+### 17.30 Agent/Qoder 107 生产合同合并
 
 - 分支 `codex/107cup-agent-production` 基于服务器页面合并提交建立。`18755` 的 Agent、Qoder、文献/PDF、结构构建、计算规划和个人结果源码已经由 PR #83 进入 `main`；本节不再次复制页面或业务代码，只补齐其在 107 上运行并由 `18733` 访问所需的生产合同。
 - 107 专用依赖固定加入 `pypdf==5.9.0` 与 `qoder-agent-sdk==1.0.14`。Qoder 的“安装”接口改为只校验构建时安装的固定版本和 CLI，不得在网页或 Worker 运行时执行 `pip install`，从而保持 `releases/<commit>` 不可变。
@@ -1073,4 +1073,5 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Agent Worker 改为 `P107-A100` 上最长 4 天的 Slurm 服务作业，读取与 Web 服务相同的 `runtime.env` 和不可变 release。`agent_worker_control.py` 在登录节点只执行短时 `squeue/scontrol/sbatch`，逐项核对用户、JobName、Command、WorkDir、Account、Partition 和 QOS；已有唯一归属 Worker 时复用，存在重复或归属不符时失败关闭，绝不自动 `scancel`。
 - Web 服务每次迁移前使用 SQLite Online Backup API 生成不可覆盖的 `0600` 一致性备份，迁移后同时执行 Alembic head 与两套数据库 `integrity_check`。该机制不等于数据库回滚；候选失败时保留备份、旧服务和旧 relay，由人工确认迁移兼容性后处理。
 - 4090 Nginx 仍以 IP 白名单和应用角色双重限制访问。Agent 的 Qoder 管理、设置、文件上传、文献索引、结构包、运行创建、会话删除和批准接口按实际 HTTP 方法逐条精确放行；不存在整个 `/api/competition/agent/` 的通配写权限。PDF 上限为应用限制 `20 MiB`，代理请求体上限相应设为 `21 MiB`。
-- 当前本地部署合同与行为测试已覆盖固定依赖、无运行时安装、私有路径、SQLite 备份、Worker 防重复提交和精确代理规则。PR、107 计算节点网络探测、正式 Slurm 构建、候选 Web/Worker、真实 Operator/Viewer Agent/Qoder 验收、`18733` 原子切换和 `18755` 停止均尚未完成；在全部门禁通过前两个入口继续保留。
+- 本地正式门禁已通过：后端 `594` 项全部通过（`28` 项只因 Windows 不具备 POSIX 能力而按设计跳过），前端 `157/157` 通过，107 生产构建转换 `1871` 个模块；Shell 语法、Python 编译、清单和 diff 检查均通过。功能提交 `48b9e825fc3f846ff57555b0ce0a26ccde1f70df` 已通过 PR #88 合并为 `1311e2997b17317132a59207d4953755bc279b08`。
+- 107 计算节点网络探测、正式 Slurm 构建、候选 Web/Worker、真实 Operator/Viewer Agent/Qoder 验收、`18733` 原子切换和 `18755` 停止仍未完成；在全部门禁通过前两个入口继续保留。
