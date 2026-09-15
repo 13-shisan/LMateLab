@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import math
 import re
 from pathlib import Path
 
@@ -21,9 +22,11 @@ STEP_TEMPLATES = {
 }
 MAX_AGENT_STRUCTURE_ATOMS = 2000
 
-EDITABLE_PARAMETERS = {
-    "SYSTEM", "ENCUT", "ISPIN", "ISMEAR", "SIGMA", "ISYM", "NBANDS",
+EDITABLE_PARAMETER_LIMITS = {
+    "ENCUT": (400.0, 700.0),
+    "SIGMA": (0.01, 0.2),
 }
+EDITABLE_PARAMETERS = frozenset(EDITABLE_PARAMETER_LIMITS)
 
 
 def _formula(prompt: str) -> str | None:
@@ -44,7 +47,7 @@ def _template_root() -> Path:
     return Path(__file__).resolve().parents[2] / "competition_templates" / "vasp-incar-library" / "templates"
 
 
-def _uploaded_structure(file: dict[str, object]) -> tuple[dict[str, object], dict[str, object]] | None:
+def uploaded_structure(file: dict[str, object]) -> tuple[dict[str, object], dict[str, object]] | None:
     if file.get("category") != "structure":
         return None
     name = str(file.get("name") or "")
@@ -107,11 +110,20 @@ def _structure_identity(value: object) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
 
 
-def calculation_plan(prompt: str, uploaded_files: list[dict[str, object]] | None = None) -> dict[str, object]:
+def calculation_plan(
+    prompt: str,
+    uploaded_files: list[dict[str, object]] | None = None,
+    selected_structure_ids: list[str] | None = None,
+) -> dict[str, object]:
+    from services.competition_agent.structure_library import selected_structures
+
     formula = _formula(prompt)
-    uploaded = [candidate for file in (uploaded_files or []) if (candidate := _uploaded_structure(file))]
+    uploaded = [candidate for file in (uploaded_files or []) if (candidate := uploaded_structure(file))]
+    selected = selected_structures(selected_structure_ids or [])
     if not formula and uploaded:
         formula = str(uploaded[0][0]["formula"])
+    if not formula and selected:
+        formula = str(selected[0]["formula"])
     if not formula:
         return {"needs_upload": True, "reason": "material-not-identified", "structures": [], "templates": [], "steps": _steps(prompt)}
     if len(uploaded) > 1:
@@ -124,12 +136,22 @@ def calculation_plan(prompt: str, uploaded_files: list[dict[str, object]] | None
         uploaded = matched
     # A single explicitly mounted structure is authoritative. Its normalized
     # chemical formula may differ from a material nickname used in the prompt.
+    if selected and len(uploaded) == 0:
+        formula = str(selected[0]["formula"])
     curated = [item for item in list_structure_catalog() if item["formula"].casefold() == formula.casefold()]
     public = [item for item in search_structures(formula, 20)["items"] if str(item["formula"]).casefold() == formula.casefold()]
-    structures = [item for item, _workspace in uploaded] + [
+    structures = [item for item, _workspace in uploaded] + selected + [
         {"kind": "structure", "id": item["id"], "source": "curated", "formula": item["formula"], "name": item["name"]}
         for item in curated
     ] + [{"kind": "structure", **item} for item in public]
+    deduplicated = []
+    seen = set()
+    for item in structures:
+        key = str(item.get("id") or "")
+        if key and key not in seen:
+            deduplicated.append(item)
+            seen.add(key)
+    structures = deduplicated
     steps = _steps(prompt)
     templates = []
     root = _template_root()
@@ -168,13 +190,55 @@ def prepare_calculation_workspace(plan: dict[str, object]) -> dict[str, object] 
     selected = structures[0]
     if isinstance(selected, dict) and selected.get("source") == "curated":
         return prepared_structure_workspace(str(selected["id"]))
+    if isinstance(selected, dict) and str(selected.get("source") or "").casefold() == "qmof":
+        return _library_structure_workspace(str(selected.get("id") or ""))
     return None
 
 
-def apply_parameter_changes(plan: dict[str, object], changes: object) -> dict[str, object]:
+def _library_structure_workspace(structure_id: str) -> dict[str, object] | None:
+    from ase import Atoms
+    from services.competition_agent.structure_library import vasp_library_record
+
+    try:
+        record = vasp_library_record(f"qmof:{structure_id}")
+    except Exception:
+        return None
+    structure = record.get("vasp_detail", {}).get("structure") if record else None
+    if not isinstance(structure, dict):
+        return None
+    try:
+        atoms = Atoms(
+            symbols=structure["symbols"],
+            positions=structure["positions"],
+            cell=structure["cell"],
+            pbc=structure.get("pbc", [True, True, True]),
+        )
+        output = io.StringIO()
+        ase_write(output, atoms, format="vasp", direct=True, vasp5=True, sort=False)
+        content = output.getvalue()
+    except (KeyError, TypeError, ValueError):
+        return None
+    parsed = uploaded_structure({
+        "id": structure_id,
+        "name": f"{structure_id}.vasp",
+        "category": "structure",
+        "content": content,
+    })
+    if parsed is None:
+        return None
+    _item, workspace = parsed
+    workspace["source"] = "QMOF"
+    workspace["material_id"] = structure_id
+    return workspace
+
+
+def validated_parameter_changes(
+    plan: dict[str, object],
+    changes: object,
+) -> list[dict[str, str]]:
     templates = plan.get("templates")
     if not isinstance(templates, list) or not isinstance(changes, list):
-        return plan
+        return []
     by_id = {str(item.get("id")): item for item in templates if isinstance(item, dict)}
     accepted = []
     for change in changes[:24]:
@@ -184,14 +248,42 @@ def apply_parameter_changes(plan: dict[str, object], changes: object) -> dict[st
         parameter = str(change.get("parameter") or "").upper()
         value = str(change.get("value") or "").strip()
         reason = str(change.get("reason") or "").strip()
+        bounds = EDITABLE_PARAMETER_LIMITS.get(parameter)
+        try:
+            numeric_value = float(value)
+        except ValueError:
+            numeric_value = math.nan
         if (
             template is None
             or parameter not in template.get("editable_parameters", [])
+            or bounds is None
             or not value
             or len(value) > 120
             or any(char in value for char in "\r\n;`$")
+            or not re.fullmatch(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", value)
+            or not math.isfinite(numeric_value)
+            or not bounds[0] <= numeric_value <= bounds[1]
         ):
             continue
+        accepted.append({
+            "template_id": str(template["id"]),
+            "parameter": parameter,
+            "value": value,
+            "reason": reason[:500],
+        })
+    return accepted
+
+
+def apply_parameter_changes(plan: dict[str, object], changes: object) -> dict[str, object]:
+    templates = plan.get("templates")
+    if not isinstance(templates, list):
+        return plan
+    by_id = {str(item.get("id")): item for item in templates if isinstance(item, dict)}
+    accepted = validated_parameter_changes(plan, changes)
+    for change in accepted:
+        template = by_id[change["template_id"]]
+        parameter = change["parameter"]
+        value = change["value"]
         content = str(template.get("rendered_content") or template.get("content") or "")
         template["rendered_content"] = re.sub(
             rf"(?m)^(\s*{re.escape(parameter)}\s*=\s*).*$",
@@ -199,12 +291,6 @@ def apply_parameter_changes(plan: dict[str, object], changes: object) -> dict[st
             content,
             count=1,
         )
-        accepted.append({
-            "template_id": template["id"],
-            "parameter": parameter,
-            "value": value,
-            "reason": reason[:500],
-        })
     plan["parameter_changes"] = accepted
     return plan
 

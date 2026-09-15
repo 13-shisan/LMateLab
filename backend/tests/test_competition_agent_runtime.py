@@ -7,6 +7,7 @@ from services.competition_agent.qoder_runtime import (
     MockQoderRuntime,
     QoderRuntimeConfig,
     RealQoderRuntime,
+    qoder_engine_status,
 )
 from services.competition_agent.llm_runtime import LLMRuntimeConfig, OpenAICompatibleRuntime, llm_configured
 from services.competition_agent.planning import apply_parameter_changes, calculation_plan, prepare_calculation_workspace
@@ -118,6 +119,12 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
         self.assertIn("ENCUT  = 520", plan["templates"][0]["rendered_content"])
         self.assertIn("NSW    = 160", plan["templates"][0]["rendered_content"])
 
+    def test_agent_exposes_only_parameters_supported_by_the_workflow_handoff(self):
+        plan = calculation_plan("计算一下 MoS2 体系的能带")
+        self.assertEqual({"ENCUT", "SIGMA"}, set(plan["templates"][0]["editable_parameters"]))
+        self.assertEqual({"ENCUT", "SIGMA"}, set(plan["templates"][1]["editable_parameters"]))
+        self.assertEqual({"ENCUT"}, set(plan["templates"][2]["editable_parameters"]))
+
     def test_predefined_vasp_analyzers_extract_result_facts(self):
         results = analyze_vasp_files([
             {
@@ -187,6 +194,7 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
             {"Bash", "Write", "Edit", "Read", "Glob", "WebFetch"},
             set(config.disabled_builtin_tools),
         )
+        self.assertEqual(8, config.max_turns)
 
     def test_mock_runtime_never_reads_personal_access_token(self):
         with mock.patch.dict(os.environ, {"QODERCN_PERSONAL_ACCESS_TOKEN": "must-not-be-read"}):
@@ -222,6 +230,21 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
         })
         self.assertEqual("cli", runtime.config.auth_mode)
 
+    def test_qoder_engine_readiness_does_not_require_remote_control_service(self):
+        status = qoder_engine_status(
+            {
+                "LMATELAB_QODER_AUTH_MODE": "cli",
+                "LMATELAB_QODER_REAL_NETWORK_AUTHORIZED": "1",
+            },
+            managed_status={
+                "installed": True,
+                "authenticated": True,
+                "service_running": False,
+            },
+        )
+        self.assertTrue(status["engine_available"])
+        self.assertNotIn("service_running", status)
+
     def test_real_runtime_validates_advisory_json_and_citations(self):
         output = RealQoderRuntime._validated_output(
             json.dumps({
@@ -235,6 +258,72 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
             {"templates": [{"id": "2d_relax"}]},
         )
         self.assertEqual("qoder", output["provider"])
+
+    def test_real_runtime_uses_server_recorded_tool_calls_not_model_claims(self):
+        plan = calculation_plan("计算一下 MoS2 体系的能带")
+        output = RealQoderRuntime._validated_output(
+            json.dumps({
+                "summary": "Prepared a bounded draft.",
+                "citations": [{"kind": "structure", "id": "MoS2_monolayer"}],
+                "tool_calls": [{"name": "Bash", "status": "succeeded"}],
+                "parameter_changes": [],
+                "advisory_only": True,
+            }),
+            "calculation_planning",
+            {"plan": plan},
+            allowed_ids={("structure", "MoS2_monolayer")},
+            tool_calls=[
+                {"name": "search_structure_library", "status": "succeeded"},
+                {"name": "prepare_workflow_draft", "status": "succeeded"},
+            ],
+        )
+        self.assertEqual(
+            ["search_structure_library", "prepare_workflow_draft"],
+            [item["name"] for item in output["tool_calls"]],
+        )
+        self.assertNotIn("Bash", repr(output))
+
+    def test_real_runtime_requires_controlled_tools_for_a_calculation_draft(self):
+        plan = calculation_plan("计算一下 MoS2 体系的能带")
+        with self.assertRaisesRegex(RuntimeError, "required controlled tools"):
+            RealQoderRuntime._validated_output(
+                json.dumps({"summary": "Unverified draft", "advisory_only": True}),
+                "calculation_planning",
+                {"plan": plan},
+                allowed_ids=set(),
+                tool_calls=[],
+            )
+
+    def test_real_runtime_rejects_out_of_range_or_non_numeric_parameter_changes(self):
+        plan = calculation_plan("计算一下 MoS2 体系的能带")
+        output = RealQoderRuntime._validated_output(
+            json.dumps({
+                "summary": "Prepared a bounded draft.",
+                "parameter_changes": [
+                    {"template_id": "17_2d_material_relax", "parameter": "ENCUT", "value": "520", "reason": "baseline"},
+                    {"template_id": "17_2d_material_relax", "parameter": "ENCUT", "value": "999", "reason": "too high"},
+                    {"template_id": "17_2d_material_relax", "parameter": "SIGMA", "value": "not-a-number", "reason": "invalid"},
+                    {"template_id": "17_2d_material_relax", "parameter": "ISPIN", "value": "2", "reason": "not in handoff"},
+                ],
+                "advisory_only": True,
+            }),
+            "calculation_planning",
+            {"plan": plan},
+            allowed_ids=set(),
+            tool_calls=[
+                {"name": "search_structure_library", "status": "succeeded"},
+                {"name": "prepare_workflow_draft", "status": "succeeded"},
+            ],
+        )
+        self.assertEqual(
+            [{
+                "template_id": "17_2d_material_relax",
+                "parameter": "ENCUT",
+                "value": "520",
+                "reason": "baseline",
+            }],
+            output["parameter_changes"],
+        )
 
     def test_real_runtime_rejects_unauthorized_citation(self):
         with self.assertRaisesRegex(RuntimeError, "unauthorized data"):

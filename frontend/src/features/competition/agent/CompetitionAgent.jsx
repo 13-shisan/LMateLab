@@ -63,6 +63,7 @@ const CALCULATION_FILE_NAMES = new Set([
   'EIGENVAL', 'IBZKPT', 'XDATCAR', 'REPORT', 'VASPRUN.XML',
 ]);
 const STEP_LABELS = { relax: '结构优化', scf: '自洽计算', band: '能带计算', dos: '态密度计算' };
+const ENGINE_LABELS = { llm: 'DeepSeek', qoder: '受控 Qoder', application: 'LMateLab 回退' };
 
 
 function CalculationPlanResult({ plan, canSubmit, onMissingUpload, onSubmit }) {
@@ -226,6 +227,7 @@ export default function CompetitionAgent() {
   const [downloadingExample, setDownloadingExample] = useState('');
   const [deletingConversation, setDeletingConversation] = useState('');
   const [qoderAction, setQoderAction] = useState('');
+  const [agentProvider, setAgentProvider] = useState('llm');
 
   const histories = useCompetitionResource(useCallback(() => provider.listAgentRuns(historyRefresh), [provider, historyRefresh]));
   const runtime = useCompetitionResource(useCallback(() => provider.getAgentRuntime(runtimeRefresh), [provider, runtimeRefresh]));
@@ -261,6 +263,9 @@ export default function CompetitionAgent() {
   const selectedWorkflow = (workflows.data?.items || []).find((item) => item.id === workflowId) || null;
   const apiKeyWriteAllowed = settings.data?.api_key_write_allowed === true;
   const apiKeyWriteTransport = settings.data?.api_key_write_transport || 'blocked';
+  const selectedEngineAvailable = agentProvider === 'qoder'
+    ? runtime.data?.qoder?.engine_available === true
+    : runtime.data?.llm_available === true;
   const selectedWorkflowResult = useCompetitionResource(useCallback(
     () => selectedWorkflow?.status === 'succeeded'
       ? provider.getResult(selectedWorkflow.id)
@@ -309,6 +314,7 @@ export default function CompetitionAgent() {
     try {
       const fileIds = extraFileIds || selectedFileIds;
       const payload = {
+        provider: agentProvider,
         request_kind: 'auto',
         prompt: prompt.trim(),
         file_ids: fileIds,
@@ -498,8 +504,8 @@ export default function CompetitionAgent() {
       <header className="competition-agent-header">
         <div><span className="competition-agent-kicker"><Bot size={15} /> Agent</span><h1>计算与数据 Agent</h1></div>
         <div className="competition-agent-header-actions">
-          <span className={`competition-agent-status is-${runtime.data?.connected ? 'succeeded' : 'failed'}`}>LLM {runtime.data?.connected ? '可调用' : '未配置'}</span>
-          <span className={`competition-agent-status is-${runtime.data?.qoder?.connected ? 'succeeded' : 'failed'}`}>Qoder {runtime.data?.qoder?.connected ? '已连接' : '未连接'}</span>
+          <span className={`competition-agent-status is-${runtime.data?.llm_available ? 'succeeded' : 'failed'}`}>DeepSeek {runtime.data?.llm_available ? '可调用' : '未配置'}</span>
+          <span className={`competition-agent-status is-${runtime.data?.qoder?.engine_available ? 'succeeded' : 'failed'}`}>受控 Qoder {runtime.data?.qoder?.engine_available ? '可调用' : '未就绪'}</span>
           {operator ? <button type="button" title="Agent 设置" onClick={() => setShowSettings((value) => !value)}><Settings2 size={17} /></button> : null}
         </div>
       </header>
@@ -521,14 +527,14 @@ export default function CompetitionAgent() {
             <button type="submit"><KeyRound size={16} />保存</button>
           </section>
           <aside className="competition-agent-qoder-settings" aria-label="Qoder 接口">
-            <div><Cpu size={16} /><strong>Qoder CN 接口</strong><span className={`competition-agent-status is-${runtime.data?.qoder?.connected ? 'succeeded' : 'failed'}`}>{runtime.data?.qoder?.connected ? '已连接' : '未连接'}</span></div>
+            <div><Cpu size={16} /><strong>Qoder CN 接口</strong><span className={`competition-agent-status is-${runtime.data?.qoder?.engine_available ? 'succeeded' : 'failed'}`}>{runtime.data?.qoder?.engine_available ? '引擎可用' : '引擎未就绪'}</span></div>
             <dl>
               <div><dt>接口</dt><dd>{runtime.data?.qoder?.interface || 'qodercn-agent-sdk'}</dd></div>
-              <div><dt>用途</dt><dd>计算处理（可选）</dd></div>
+              <div><dt>用途</dt><dd>受控计算规划</dd></div>
               <div><dt>认证</dt><dd>{runtime.data?.qoder?.auth_mode || '未配置'}</dd></div>
               <div><dt>模型</dt><dd>{runtime.data?.qoder?.model || '默认'}</dd></div>
               <div><dt>CLI</dt><dd>{runtime.data?.qoder?.installed ? `已安装 ${runtime.data.qoder.version || ''}` : '未安装'}</dd></div>
-              <div><dt>服务</dt><dd>{runtime.data?.qoder?.service_running ? '运行中' : '未启动'}</dd></div>
+              <div><dt>远程控制服务</dt><dd>{runtime.data?.qoder?.service_running ? '运行中（独立）' : '未启动（不影响引擎）'}</dd></div>
             </dl>
             <div className="competition-agent-qoder-actions">
               <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.manageable || runtime.data?.qoder?.installed} onClick={() => manageQoder('install', provider.installQoder)}><Download size={14} />一键安装</button>
@@ -566,7 +572,7 @@ export default function CompetitionAgent() {
               <article key={item.id} className="competition-agent-turn">
                 <div className="competition-agent-user-message"><strong>你</strong><p>{item.prompt}</p></div>
                 <div className="competition-agent-response">
-                  <div className="competition-agent-response-meta"><strong>Agent</strong><span className={`competition-agent-status is-${item.status}`}>{STATUS_LABELS[item.status] || item.status}</span></div>
+                  <div className="competition-agent-response-meta"><strong>Agent</strong><small>{ENGINE_LABELS[item.output?.provider || item.provider] || item.output?.provider || item.provider}</small><span className={`competition-agent-status is-${item.status}`}>{STATUS_LABELS[item.status] || item.status}</span></div>
                   {item.output?.summary ? <p>{item.output.summary}</p> : item.status === 'failed' ? <p>{ERROR_LABELS[item.error_code] || 'Agent 调用失败。'}</p> : <CompetitionState status={item.status} />}
                   {item.id === run?.id ? <>
                     <CalculationPlanResult plan={calculationPlan} canSubmit={Boolean(preparedStructure?.workflow_compatible)} onMissingUpload={(event) => uploadFiles(event, 'structure', true)} onSubmit={submitPlanToCalculation} />
@@ -589,9 +595,16 @@ export default function CompetitionAgent() {
                 {mountedLiterature.map((item) => <span key={item.id}>{item.title || item.id}<button type="button" title="取消挂载文献" onClick={() => toggle(setSelectedLiteratureIds, item.id)}><X size={12} /></button></span>)}
               </div>
             ) : null}
+            <div className="competition-agent-engine-picker">
+              <span>当前引擎</span>
+              <div role="group" aria-label="Agent 引擎">
+                <button type="button" className={agentProvider === 'llm' ? 'is-active' : ''} disabled={!runtime.data?.llm_available} onClick={() => setAgentProvider('llm')}>DeepSeek</button>
+                <button type="button" className={agentProvider === 'qoder' ? 'is-active' : ''} disabled={!runtime.data?.qoder?.engine_available} onClick={() => setAgentProvider('qoder')}>受控 Qoder</button>
+              </div>
+            </div>
             <div className="competition-agent-prompt-row">
               <textarea value={prompt} maxLength={2000} placeholder="输入问题或计算要求" onChange={(event) => setPrompt(event.target.value)} />
-              <button type="submit" title="发送" disabled={!operator || submitting || !prompt.trim() || !runtime.data?.connected}><Send size={18} /></button>
+              <button type="submit" title="发送" disabled={!operator || submitting || !prompt.trim() || !selectedEngineAvailable}><Send size={18} /></button>
             </div>
             <label className="competition-agent-literature-toggle"><input type="checkbox" checked={searchLiterature} onChange={(event) => setSearchLiterature(event.target.checked)} />联网检索文献</label>
             {!operator ? <p className="competition-agent-error">Viewer 只能查看已发布的分析。</p> : null}

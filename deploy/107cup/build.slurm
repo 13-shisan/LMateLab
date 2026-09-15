@@ -151,6 +151,7 @@ python -m unittest \
   tests.test_competition_recovery \
   tests.test_competition_security \
   tests.test_competition_agent_catalog \
+  tests.test_competition_agent_qoder_tools \
   tests.test_competition_agent_fake_slurm \
   tests.test_competition_agent_literature \
   tests.test_competition_agent_migration \

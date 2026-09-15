@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AgentRunCreate(BaseModel):
+    provider: Literal["llm", "qoder"] | None = None
     request_kind: Literal[
         "auto", "calculation_planning", "general_qa", "file_analysis", "template_recommendation", "result_analysis"
     ]

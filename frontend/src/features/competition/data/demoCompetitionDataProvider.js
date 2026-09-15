@@ -171,8 +171,8 @@ export function createDemoCompetitionDataProvider() {
 
     async getAgentRuntime() {
       return {
-        provider: 'mock', connected: false, qoder_available: false,
-        qoder: { interface: 'qodercn-agent-sdk', enabled: false, connected: false, auth_mode: 'pat', model: null },
+        provider: 'mock', connected: false, llm_available: false, qoder_available: false,
+        qoder: { interface: 'qodercn-agent-sdk', enabled: false, connected: false, engine_available: false, service_running: false, auth_mode: 'pat', model: null },
       };
     },
 

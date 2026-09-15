@@ -40,6 +40,22 @@ class CompetitionAgentSecurityTests(unittest.TestCase):
         for forbidden in ["shell=true", "os.system", "sbatch", "scancel", '"pip", "install"']:
             self.assertNotIn(forbidden, source)
 
+    def test_controlled_qoder_exposes_only_the_five_read_only_tools(self):
+        source = (BACKEND_ROOT / "services" / "competition_agent" / "controlled_qoder_tools.py").read_text(encoding="utf-8")
+        runtime = (BACKEND_ROOT / "services" / "competition_agent" / "qoder_runtime.py").read_text(encoding="utf-8")
+        for tool in [
+            "search_structure_library",
+            "inspect_uploaded_structures",
+            "analyze_vasp_results",
+            "read_workflow_summary",
+            "prepare_workflow_draft",
+        ]:
+            self.assertIn(f'"{tool}"', source)
+        for forbidden in ["subprocess", "sbatch", "scancel", "vasp_std", "webfetch"]:
+            self.assertNotIn(forbidden, source.casefold())
+        self.assertIn("readOnlyHint=True", source)
+        self.assertIn("strict_mcp_config=True", runtime)
+
 
 if __name__ == "__main__":
     unittest.main()

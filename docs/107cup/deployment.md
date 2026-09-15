@@ -158,7 +158,9 @@ cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
 
 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 是当前默认生产路径，API Key 只写入 `config/secrets/llm-api-key` 且权限必须为 `0600`。公网 `http://222.195.94.37:18733` 没有 TLS，但经 4090 Nginx 的精确来源 IP 白名单后允许 Operator 保存 API Key；页面必须持续提示该链路传输未加密，只应在可信校园网中使用。Nginx 只在 `/api/competition/agent/settings` 精确路由完成 IP 放行后覆盖写入 `allowlisted-http` 可信标记，后端拒绝普通 HTTP 标记，不能用伪造 `Host: 127.0.0.1` 绕过。HTTPS 与直达当前 107 Web 服务的 Windows `127.0.0.1` SSH 隧道仍是更安全的密钥入口。
 
-Qoder 使用大陆版 `qodercn-agent-sdk==1.0.14` 和内置 `qoderclicn`；认证状态只保存在 `QODERCN_CONFIG_DIR` 指向的私有目录，PAT 环境变量名为 `QODERCN_PERSONAL_ACCESS_TOKEN`。网页“安装”动作只验证固定版本和 CLI；授权 URL 必须是 `qoder.cn` 或 `qoder.com.cn` 的带 challenge 设备授权页，全球版 `qoder.com` 链接会被拒绝。启用真实 Qoder 前，必须先在 107 计算节点验证外网、完成受控登录并把 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 显式改为 `1`。调度完成只能证明 Worker 运行，不能替代真实 Agent 响应、引用约束和 Viewer 只读验收。
+Qoder 使用大陆版 `qodercn-agent-sdk==1.0.14` 和内置 `qoderclicn`；认证状态只保存在 `QODERCN_CONFIG_DIR` 指向的私有目录，PAT 环境变量名为 `QODERCN_PERSONAL_ACCESS_TOKEN`。网页“安装”动作只验证固定版本和 CLI；授权 URL 必须是 `qoder.cn` 或 `qoder.com.cn` 的带 challenge 设备授权页，全球版 `qoder.com` 链接会被拒绝。启用真实 Qoder 前，必须先在 107 计算节点验证外网、完成受控登录并把 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 显式改为 `1`。该开关关闭、SDK缺失或认证无效时，Qoder 请求在写入队列前返回 `503`。
+
+Qoder 对话使用 SDK 进程内 MCP，不连接网页中可选的 `qoderclicn remote-control` 服务。只挂载五个应用内只读工具，最多 8 次调用；不挂载 Bash、任意文件、网页、网络、Slurm、VASP 执行、提交、取消或修改工具。Qoder 返回的计算参数还要经过 LMateLab 模板白名单和工作流校验，用户必须在“新建计算”页检查并显式确认、启动。Web 和 Worker 必须同时升级到支持逐任务 provider 的同一 commit/manifest，否则不得开放 Qoder 选择。调度完成只能证明 Worker 运行，不能替代真实工具调用、Agent 响应、引用约束和 Viewer 只读验收。
 
 Web 服务启动会在 Alembic 迁移前把两套现有 SQLite 用 Online Backup API 复制到 `backups/pre-migration`，文件名包含 Job ID 和 restart count，且禁止覆盖；迁移后要求两个 Alembic 配置都位于 head，并再次执行 `integrity_check`。候选服务或 Worker 失败时保留旧 `18733` relay 和 `18755`，不得静默重试。只有新 `18733` 通过 Operator/Viewer 和 Agent/Qoder 全流程后，才由进程所有者 `Pzxp` 停止 `18755`。
 

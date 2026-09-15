@@ -15,7 +15,11 @@ from schemas_competition_agent import AgentRunCreate
 from services.competition_agent.catalog import get_template, list_templates
 from services.competition_agent.llm_runtime import OpenAICompatibleRuntime
 from services.competition_agent.literature import retrieve_for_prompt, selected_records
-from services.competition_agent.qoder_runtime import MockQoderRuntime, RealQoderRuntime
+from services.competition_agent.qoder_runtime import (
+    MockQoderRuntime,
+    RealQoderRuntime,
+    qoder_engine_status,
+)
 from services.competition_agent.tools import (
     prepared_structure_workspace,
     sanitized_workflow_summary,
@@ -38,6 +42,10 @@ STEP_TEMPLATE = {
     "dos": "dos",
 }
 LOGGER = logging.getLogger(__name__)
+
+
+class AgentProviderUnavailable(RuntimeError):
+    pass
 
 
 def infer_request_kind(
@@ -200,6 +208,15 @@ def _enrich_citations(
 
 
 def create_run(session: Session, owner_id: int, payload: AgentRunCreate) -> AgentRun:
+    provider = payload.provider or os.environ.get("LMATELAB_COMPETITION_AGENT_PROVIDER", "mock")
+    if provider not in {"mock", "qoder", "llm"}:
+        raise AgentProviderUnavailable("competition Agent provider is unsupported")
+    if provider == "qoder":
+        availability = qoder_engine_status()
+        if availability["engine_available"] is not True:
+            raise AgentProviderUnavailable(
+                f"Qoder engine is unavailable: {availability['engine_unavailable_reason']}"
+            )
     conversation_id = payload.conversation_id or str(uuid.uuid4())
     files: list[dict[str, object]] = []
     if payload.request_kind != "template_recommendation":
@@ -245,7 +262,7 @@ def create_run(session: Session, owner_id: int, payload: AgentRunCreate) -> Agen
     elif request_kind == "calculation_planning":
         tool_input = {
             "files": files,
-            "plan": calculation_plan(payload.prompt, files),
+            "plan": calculation_plan(payload.prompt, files, payload.structure_ids),
         }
     else:
         tool_input = {
@@ -269,7 +286,7 @@ def create_run(session: Session, owner_id: int, payload: AgentRunCreate) -> Agen
         owner_id=owner_id,
         workflow_id=payload.workflow_id,
         request_kind=request_kind,
-        provider=os.environ.get("LMATELAB_COMPETITION_AGENT_PROVIDER", "mock"),
+        provider=provider,
         status="queued",
         prompt_text=payload.prompt,
         input_json=tool_input,
@@ -282,19 +299,18 @@ def create_run(session: Session, owner_id: int, payload: AgentRunCreate) -> Agen
 
 def process_next_run(session: Session, runtime=None) -> AgentRun | None:
     selected_runtime = runtime
-    provider = getattr(selected_runtime, "provider", None)
-    if selected_runtime is None:
-        provider = os.environ.get("LMATELAB_COMPETITION_AGENT_PROVIDER", "mock")
-    if provider not in {"mock", "qoder", "llm"}:
+    injected_provider = getattr(selected_runtime, "provider", None)
+    if selected_runtime is not None and injected_provider not in {"mock", "qoder", "llm"}:
         raise RuntimeError("unsupported competition Agent provider")
-    run = session.scalar(
-        select(AgentRun)
-        .where(AgentRun.status == "queued", AgentRun.provider == provider)
-        .order_by(AgentRun.created_at, AgentRun.id)
-        .limit(1)
-    )
+    query = select(AgentRun).where(AgentRun.status == "queued")
+    if selected_runtime is not None:
+        query = query.where(AgentRun.provider == injected_provider)
+    else:
+        query = query.where(AgentRun.provider.in_(("mock", "qoder", "llm")))
+    run = session.scalar(query.order_by(AgentRun.created_at, AgentRun.id).limit(1))
     if run is None:
         return None
+    provider = run.provider
     run.status = "running"
     session.commit()
     try:

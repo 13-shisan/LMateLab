@@ -8,7 +8,7 @@ from unittest import mock
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from auth_identity import get_current_user
@@ -81,9 +81,20 @@ class CompetitionAgentRouteTests(unittest.TestCase):
             "LMATELAB_COMPETITION_AGENT_PROVIDER": "qoder",
             "LMATELAB_QODER_AUTH_MODE": "cli",
             "LMATELAB_QODER_CONNECTED": "1",
+            "LMATELAB_QODER_REAL_NETWORK_AUTHORIZED": "1",
             "QODERCN_PERSONAL_ACCESS_TOKEN": "must-not-leak",
         }
-        with mock.patch.dict("os.environ", environment, clear=True):
+        engine = {
+            "engine_available": True,
+            "engine_unavailable_reason": None,
+            "network_authorized": True,
+            "engine_authenticated": True,
+            "sdk_installed": True,
+        }
+        with (
+            mock.patch.dict("os.environ", environment, clear=True),
+            mock.patch("routers.competition_agent.qoder_engine_status", return_value=engine),
+        ):
             response = self.client.get("/api/competition/agent/runtime")
         self.assertEqual(200, response.status_code, response.text)
         self.assertEqual(
@@ -91,6 +102,7 @@ class CompetitionAgentRouteTests(unittest.TestCase):
                 "provider": "qoder",
                 "auth_mode": "cli",
                 "connected": True,
+                "llm_available": False,
                 "qoder_available": True,
                 "qoder": {
                     "interface": "qodercn-agent-sdk",
@@ -98,11 +110,89 @@ class CompetitionAgentRouteTests(unittest.TestCase):
                     "connected": True,
                     "auth_mode": "cli",
                     "model": None,
+                    "installed": True,
+                    "authenticated": True,
+                    **engine,
                 },
             },
             response.json(),
         )
         self.assertNotIn("must-not-leak", response.text)
+
+    def test_qoder_run_fails_closed_before_queue_when_engine_is_unavailable(self):
+        environment = {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "llm",
+        }
+        unavailable = {
+            "engine_available": False,
+            "engine_unavailable_reason": "network-not-authorized",
+        }
+        with (
+            mock.patch.dict("os.environ", environment, clear=True),
+            mock.patch("services.competition_agent.service.qoder_engine_status", return_value=unavailable),
+        ):
+            response = self.client.post("/api/competition/agent/runs", json={
+                "provider": "qoder",
+                "request_kind": "auto",
+                "prompt": "计算 MoS2 能带",
+            })
+        self.assertEqual(503, response.status_code, response.text)
+        self.assertEqual("agent_provider_unavailable", response.headers["x-error-code"])
+        with Session(self.engine) as session:
+            self.assertEqual(0, len(list(session.scalars(select(AgentRun)))))
+
+    def test_worker_dispatches_each_queued_run_to_its_persisted_provider(self):
+        class Runtime:
+            def __init__(self, provider):
+                self.provider = provider
+
+            def run(self, **_kwargs):
+                return {
+                    "provider": self.provider,
+                    "summary": f"handled by {self.provider}",
+                    "citations": [],
+                    "tool_calls": [],
+                    "workspace": {},
+                    "advisory_only": True,
+                }
+
+        environment = {
+            "LMATELAB_COMPETITION_AGENT_ENABLED": "1",
+            "LMATELAB_COMPETITION_AGENT_PROVIDER": "llm",
+        }
+        with (
+            mock.patch.dict("os.environ", environment, clear=True),
+            mock.patch(
+                "services.competition_agent.service.qoder_engine_status",
+                return_value={"engine_available": True, "engine_unavailable_reason": None},
+            ),
+        ):
+            qoder = self.client.post("/api/competition/agent/runs", json={
+                "provider": "qoder", "request_kind": "general_qa", "prompt": "Qoder request",
+            })
+            llm = self.client.post("/api/competition/agent/runs", json={
+                "provider": "llm", "request_kind": "general_qa", "prompt": "LLM request",
+            })
+            with (
+                Session(self.engine) as session,
+                mock.patch(
+                    "services.competition_agent.service.RealQoderRuntime",
+                    return_value=Runtime("qoder"),
+                ),
+                mock.patch(
+                    "services.competition_agent.service.OpenAICompatibleRuntime",
+                    return_value=Runtime("llm"),
+                ),
+            ):
+                first = process_next_run(session)
+                first_provider = first.provider
+                second = process_next_run(session)
+                second_provider = second.provider
+        self.assertEqual(201, qoder.status_code, qoder.text)
+        self.assertEqual(201, llm.status_code, llm.text)
+        self.assertEqual("qoder", first_provider)
+        self.assertEqual("llm", second_provider)
 
     def test_operator_can_manage_qoder_through_fixed_actions(self):
         managed = {

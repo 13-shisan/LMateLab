@@ -1184,3 +1184,38 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 新 Web `63134/anode16` 和 Worker `63137/anode17` 的 commit/manifest 一致，公网 `18733`
   live/ready 已切换；运行时 Job `63136` 验证总数20372、Mn筛选723、随机 CIF 三维结构50原子。
 - [ ] 已登录浏览器人工复核 QMOF 列表、元素筛选、详情和三维结构；后端门禁通过不能代替这一项。
+
+### 17.38 受控计算规划 Agent
+
+- Qoder 从“无工具的单轮问答接口”改为可选的受控计算规划引擎。用户可在同一 Agent 对话框中逐条选择
+  `DeepSeek` 或 `受控 Qoder`；默认仍为 DeepSeek，每条 `AgentRun` 保存实际请求的 provider，Worker 按
+  记录分派，不再要求全部排队记录与一个全局 provider 相同。
+- Qoder 初始消息只包含本次请求的文件、结构、工作流和确定性草案索引，不包含上传文件正文、任意服务器路径
+  或完整 VASP 输出。详细信息只能通过进程内 `lmatelab` MCP 的五个工具取得：
+  `search_structure_library`、`inspect_uploaded_structures`、`analyze_vasp_results`、
+  `read_workflow_summary`、`prepare_workflow_draft`。
+- 五个工具全部标记为只读、非破坏、幂等且闭合世界；工具闭包只持有后端已经按当前 Operator 过滤的
+  `tool_payload`。单次最多 8 次调用，结构搜索最多 20 条，文件 ID 最多 12 个；未挂载 ID、额外参数、
+  任意文件、Shell、网络、Slurm、VASP 执行、提交、取消和修改均不可用。
+- 工具调用记录由服务器在 handler 中生成，模型自报的 `tool_calls` 被忽略。计算规划必须真实完成结构库搜索
+  或已上传结构检查，并调用确定性 `prepare_workflow_draft`；结果分析按挂载内容要求真实调用固定 VASP 解析器
+  和/或脱敏工作流摘要。缺少必需调用时失败关闭。
+- Qoder 只能针对模板与现有工作流交接共同支持的 `ENCUT`、`SIGMA` 建议最多 24 项参数变更；非数值、
+  危险字符、固定参数、未知模板和越界值先由 Qoder 输出验证器拒绝，再由既有
+  `apply_parameter_changes()` 二次过滤。结构、步骤、模板、POTCAR/VASPKIT 策略和最终工作流仍由
+  LMateLab 决定。
+- QMOF 或上传结构只有在既有结构解析、最多 200 原子等工作流输入门禁通过后，页面才允许把草案带入
+  “新建计算”。该动作仍只是用户检查入口；之后必须经过 LMateLab 保存草稿、确认校验和显式启动，才会由
+  既有协调器提交 Slurm。Qoder 没有任何直接提交能力。
+- 页面分别显示“Qoder 远程控制服务运行中”和“Qoder 对话引擎可用”。`remote-control` 不是 Agent 对话的数据
+  通路，也不是选择 Qoder 的必要条件；对话引擎必须同时满足固定 SDK 已安装、CLI/PAT 已认证以及
+  `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=1`。条件不足时创建请求立即返回 `503`，不得进入永久排队。
+- [x] 本地纯工具层、权限边界、调用预算、实际调用记录、逐任务 provider 分派和前端引擎选择已实现。
+- [x] 前端全量 `162/162` 通过；后端新增/相关定向测试通过。Windows 复用环境仅有既存的密钥文件
+  `0600` 测试因 Windows chmod 语义失败，必须以 107 Linux Slurm 全量构建结果作为发布门禁。
+- [ ] 合并 Gitea PR 并同步同一提交到公开 GitHub。
+- [ ] 在 107 通过 Slurm 全量构建，Web 与 Worker 必须同时发布同一 commit/manifest。
+- [ ] 使用隔离 Slurm 验收作业把真实网络授权临时设为 `1`，完成一次真实 Qoder 工具调用；成功前不得修改
+  当前生产默认 DeepSeek，也不得停止 Web `63134` 或 Worker `63137`。
+- [ ] 新发布后由 Operator 浏览器复核两种引擎、QMOF/上传结构规划、VASP 结果分析、实际工具记录、草案交接
+  及失败状态；测试通过前不得宣称 Qoder 可用于直接计算或无人审核提交。
