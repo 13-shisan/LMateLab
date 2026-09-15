@@ -1564,9 +1564,14 @@ class CompetitionDeployContractTests(unittest.TestCase):
         ):
             self.assertIn(required, installer)
         self.assertIn("1048576", self.read_required("relay/ensure-forward.sh"))
-        self.assertIn("ControlPersist=96h", reauth)
+        self.assertIn("ControlPersist=yes", reauth)
         self.assertIn("IdentitiesOnly=yes", reauth)
         self.assertIn("id_ed25519_107cup", reauth)
+        self.assertIn("REMOTE_AGENT_RECOVERY", relay)
+        self.assertIn("submit-agent-worker.sh", relay)
+        self.assertIn("remote_agent_recovery_failed", relay)
+        self.assertIn("remote_agent_recovery_invalid", relay)
+        self.assertIn('result["agent_worker_job_id"]', relay)
 
     def test_rollback_smoke_is_isolated_and_exits_after_self_check(self):
         source = self.read_required("rollback-smoke.slurm")

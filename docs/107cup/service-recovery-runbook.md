@@ -1,6 +1,6 @@
 # 107 杯网页服务与转发恢复运行手册
 
-更新时间：`2026-08-21`
+更新时间：`2026-09-15`
 
 ## 1. 目标和边界
 
@@ -9,8 +9,8 @@
 ```text
 4090 用户 cron（每分钟一次短命令）
   -> 已认证 SSH ControlMaster
-  -> 107 登录节点短时 recover-service.sh
-  -> Slurm 服务 Job（计算节点）
+  -> 107 登录节点短时 Web/Agent 恢复命令
+  -> Slurm Web 和 Agent Worker Job（计算节点）
   -> 4090 127.0.0.1:18740
   -> 用户态 Nginx 0.0.0.0:18733
 ```
@@ -18,7 +18,7 @@
 固定边界：
 
 - 107 登录节点没有 Uvicorn、Vite、Celery、Redis 或恢复守护进程。
-- 107 恢复命令只执行文件校验、`scontrol`、最多一次 `sbatch` 和有超时的健康检查。
+- 107 恢复命令只执行文件校验、`squeue`/`scontrol`、最多一个 Web 候选与一个 Worker 候选的 `sbatch`，以及有超时的健康检查。
 - 4090 cron 每次运行有文件锁，不并发，不保存竞赛数据库、输入、输出或证据。
 - 新服务必须先在临时转发端口 `18742` 通过 live/ready 身份检查，才允许切换正式 `18740`。
 - `18740` 切换失败时恢复原节点；未知旧转发、外来 Slurm Job、异常状态文件和耗尽的三次重试预算全部失败关闭。
@@ -31,9 +31,12 @@
 
 ```text
 /home/scc/pb23030683/projects/LMateLab-107Cup/deploy/107cup/recover-service.sh
+/home/scc/pb23030683/projects/LMateLab-107Cup/deploy/107cup/submit-agent-worker.sh
 /home/scc/pb23030683/lmatelab-107cup/runtime/service-state.json
 /home/scc/pb23030683/lmatelab-107cup/runtime/service-recovery-state.json
 /home/scc/pb23030683/lmatelab-107cup/runtime/service-recovery.lock
+/home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
+/home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-recovery-state.json
 ```
 
 4090：
@@ -61,6 +64,8 @@
 | `blocked` | 调度器不可用、归属不匹配、状态损坏或三次重试耗尽 | 不提交、不取消，等待人工检查 |
 
 服务 Job 发布成功时清空候选并重置重试预算。候选终止后至少等待 300 秒才允许重试，连续最多三次；不存在无限 `sbatch` 循环。
+
+Web 服务就绪后，4090 的同一次每分钟守护还会执行一次短时 Agent Worker 恢复。它只复用唯一已归属 Worker，或在完全不存在时提交一个；重复 Worker、归属不匹配、调度查询失败或非单一 Job ID 输出都失败关闭。
 
 4090 转发恢复状态额外包括：
 
@@ -96,6 +101,7 @@ cd /home/scc/pb23030683/projects/LMateLab-107Cup
 bash deploy/107cup/recover-service.sh
 cat /home/scc/pb23030683/lmatelab-107cup/runtime/service-state.json
 squeue -j "$(cat /home/scc/pb23030683/lmatelab-107cup/runtime/service-job-id)"
+cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
 ```
 
 4090 短时检查：
@@ -123,7 +129,7 @@ SSH ControlMaster 有效时，在 4090 执行一次守护即可完成“检查�
 /bin/bash /home/Pwjb/.config/lmatelab-107cup-proxy/bin/reauth-control-master.sh
 ```
 
-该脚本只在旧 master 确认失效后移除陈旧 socket，随后使用固定专用密钥重新建立 96 小时 ControlPersist。每分钟 cron 会持续使用该连接，因此正常运行时不会频繁要求二次验证；4090 重启、网络长时间中断或认证失效后仍必须人工输入一次验证码。
+该脚本只在旧 master 确认失效后移除陈旧 socket，随后使用固定专用密钥建立无固定空闲到期时间的 ControlPersist，并保留 30 秒心跳。正常运行时不再因 96 小时配置主动退出；4090 重启、网络长时间中断或服务端关闭连接后，107 的二次认证仍要求 Operator 人工输入一次验证码。
 
 ## 7. 受控停止
 
@@ -188,6 +194,7 @@ Windows 127.0.0.1:21763 live/ready
 - `retry_budget_exhausted`：检查三个候选 Job 的 `.out/.err`，修复原因后由 Operator 备份并重置恢复状态；不得直接循环 `sbatch`。
 - `unknown_existing_forward`：现有 `18740` 身份未被采纳，禁止猜测取消参数；先核对现有 forward，再执行 `--adopt-current`。
 - `candidate_unavailable` 或 `candidate_identity_mismatch`：旧 `18740` 保持不变。
+- `remote_agent_recovery_failed` 或 `remote_agent_recovery_invalid`：Web 入口保持当前已验证转发，但守护状态失败关闭；检查 Worker 的 `squeue/scontrol` 与专属日志，不得循环提交。
 - `forward_rollback_failed`：公网入口按失败关闭处理，停止自动操作并人工核对 SSH master 上的 forward。
 - `ssh_authentication_required`：运行二次验证脚本；不得复制密码、验证码或私钥到 cron、仓库或状态文件。
 

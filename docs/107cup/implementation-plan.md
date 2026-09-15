@@ -125,7 +125,7 @@
 - 4090 用户态 Nginx：`/home/Pwjb/.config/lmatelab-107cup-proxy/conf/nginx.conf`。
 - Nginx 监听：`0.0.0.0:18733`。
 - 4090 到 107 的正式内部 SSH 转发：`127.0.0.1:18740 -> 11.11.10.17:18731 (anode17)`；临时转发 `18741` 已撤销。
-- 4090 上的 107 SSH 复用主连接使用 `/home/Pwjb/.ssh/cm-107cup`，socket 权限为 `0600`，配置 96 小时 `ControlPersist` 和 30 秒保活；它减少重复二次验证，但不是永久自动恢复机制。
+- 4090 上的 107 SSH 复用主连接使用 `/home/Pwjb/.ssh/cm-107cup`，socket 权限为 `0600`，配置无固定空闲到期时间的 `ControlPersist` 和 30 秒保活；4090 重启或真实断线后仍必须人工完成一次 107 二次验证。
 - 公网入口：`http://222.195.94.37:18733`。
 - 已验证白名单 IP 返回 `200`，未授权 IP 返回 `403`。
 - 运行中的 Nginx 已替换为只读公开入口：登录端点只允许 POST，其余页面和 API 只允许 GET；注册 POST、非登录 POST 和登录端点 PUT 实测均为 `403`。
@@ -1139,3 +1139,12 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 公网 Viewer 真实调用返回 `fresh` 和完整 26 节点快照，且自动检查确认响应不含账号、节点地址、命令、工作目录等敏感字段。`2026-09-05 23:30:42 +08:00` 的浏览器快照为 24 个当前可用节点、172/208 张空闲 GPU；该数字随后会动态变化。生产 Playwright 在 `1440x900` 与 `390x844` 验证 26 行、状态标识、独立双向滚动、页面零横向溢出和控制台 0 error/0 warning；临时 Viewer 认证状态在检查后已清除。
 - [x] 新入口确认健康后，旧 Web `54595/anode16` 与旧 Worker `54612/anode18` 均在核对用户、JobName、账号、QOS、分区、Command、WorkDir 和专属日志后受控停止；旧 Web 日志包含完整 Uvicorn shutdown，旧端口不可达。新 Worker `55070/anode18` 与 Web 的提交和 manifest 一致，最终队列只保留这一组 Web/Worker。
 - [x] Stage 10 只读 Job `55075/anode18` 输出 `STAGE10_ACCEPTANCE_OK`，stderr 为 0 字节；发布、路由范围、两套 SQLite 完整性和固定成功/失败证据包均通过。证据 manifest 与摘要 SHA-256 分别为 `b07b58e4057995dbda93244b7d137b27f5340c164264e657c2c900f0e45e5956`、`d0d10edd78f78675b1e1402eff6f45269d6f58340a91ef93c082dfff8e19885b`。本节动态占用功能已完成生产验收；Stage 10 总状态仍因当前发布的全新 Operator 浏览器复跑和三名成员独立复核而保持 `PARTIAL`。
+
+### 17.36 Web 与 Agent Worker 运行连续性恢复
+
+- `2026-09-15` 公网 `18733` 返回 `502`。分层检查确认 4090 于 `2026-09-14 13:17 +08:00` 重启，用户态 Nginx、`127.0.0.1:18740` 转发与 `/home/Pwjb/.ssh/cm-107cup` 均不存在；每分钟守护持续失败关闭为 `ssh_authentication_required`，没有在无二次认证时绕过安全门禁。
+- Operator 只重新输入一次 107 二次验证码。恢复器随后提交唯一 Web Job `62952/P107-A100/anode17`，完成 direct live/ready 和临时端口身份验证后切换 `18740`，再启动用户态 Nginx。公网首页、`/api/health/live` 与 `/api/health/ready` 均返回 `200`，live 明确返回 Job `62952`、`anode17` 与已验收 release `d0bb2a5b...`。
+- 独立 Agent Worker 也已通过归属控制器恢复为唯一 Job `62954/P107-A100/anode17`，状态文件为 `running`，且 commit/manifest 与 Web 一致。Web 和 Worker 计划结束时间分别为 `2026-09-19 09:25:59` 和 `09:28:50 +08:00`；它们仍受 QOS 4 天时限约束。
+- 稳定性候选将 ControlMaster 改为无固定空闲到期时间，保留 30 秒心跳；每分钟守护在 Web 入口身份完整验证后，额外调用受控 Worker 恢复器。Worker 输出必须是唯一数字 Job ID，失败、歧义或归属不符均写入失败状态，不循环提交也不自动取消。
+- 该修正只改恢复控制和文档，不重建已验收的业务 release，不修改 SQLite、工作流或 VASP 作业。合并后需同步 107 checkout、重新安装 4090 守护，并验证恢复状态同时包含 Web 身份和 Agent Worker Job ID，才能标记完成。
+- 边界保持不变：4090 重启、真实网络断开或 107 服务端关闭 SSH 之后，仍必须由 Operator 人工完成一次二次验证。现有安全策略下不宣称跨 4090 重启的无人值守零中断。

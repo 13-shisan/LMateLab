@@ -3,6 +3,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -214,6 +216,33 @@ class RelayRecoveryTests(unittest.TestCase):
             control.calls,
         )
         self.assertEqual(("11.11.10.17", 18731), control.targets[18740])
+
+    def test_agent_worker_recovery_is_bounded_and_validates_the_job_id(self):
+        completed = SimpleNamespace(returncode=0, stdout="62954\n", stderr="")
+        with mock.patch.object(self.module.subprocess, "run", return_value=completed) as run:
+            job_id = self.module.SubprocessControl().remote_agent_recovery()
+
+        self.assertEqual("62954", job_id)
+        command = run.call_args.args[0]
+        self.assertEqual(self.module.TIMEOUT, command[0])
+        self.assertEqual("45", command[1])
+        self.assertIn("BatchMode=yes", command)
+        self.assertEqual(self.module.REMOTE_AGENT_RECOVERY, command[-1])
+        self.assertEqual(50, run.call_args.kwargs["timeout"])
+        self.assertFalse(run.call_args.kwargs["check"])
+
+    def test_agent_worker_recovery_rejects_failure_or_ambiguous_output(self):
+        cases = (
+            SimpleNamespace(returncode=1, stdout="", stderr="failed"),
+            SimpleNamespace(returncode=0, stdout="not-a-job\n", stderr=""),
+            SimpleNamespace(returncode=0, stdout="62954\n62955\n", stderr=""),
+        )
+        for completed in cases:
+            with self.subTest(completed=completed), mock.patch.object(
+                self.module.subprocess, "run", return_value=completed
+            ):
+                with self.assertRaises(self.module.RelayRecoveryError):
+                    self.module.SubprocessControl().remote_agent_recovery()
 
 
 if __name__ == "__main__":
