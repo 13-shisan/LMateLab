@@ -18,7 +18,7 @@ if ! /usr/bin/ssh -S "$socket" -O check "$remote" >/dev/null 2>&1; then
   fi
   /usr/bin/ssh -MNf \
     -S "$socket" \
-    -o ControlPersist=96h \
+    -o ControlPersist=yes \
     -o ServerAliveInterval=30 \
     -o ServerAliveCountMax=3 \
     -o ExitOnForwardFailure=yes \

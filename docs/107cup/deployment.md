@@ -1,6 +1,6 @@
 # 107 杯部署与恢复说明
 
-更新时间：`2026-09-05`
+更新时间：`2026-09-15`
 
 ## 1. 部署边界
 
@@ -84,7 +84,9 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-当前稳定服务是 Job `55053`、`anode18:18731`、提交 `d0bb2a5b1309b89ec07d2f2e48e5fba5ab1d8527`，release manifest SHA-256 为 `bb4236da973996da7c09f84d297db80854f8fee76fc806de5651cb8df4bd6aaf`；配套 Agent Worker 是 Job `55070/anode18`，两者的提交和 manifest 一致。正式构建 Job `55036/anode01` 通过后端 `611` 项（另有 4 项环境跳过）、前端 `161/161`、Vite `1871` 个模块、`748` 项 release manifest 和双重清单门禁。107 内部、4090 relay 与公网 `18733` 的 `live/ready` 均返回新身份；公网 Viewer 真实读取 `GET /api/competition/cluster-resources` 返回 `fresh` 和 26 个允许节点，桌面/移动浏览器页面无横向溢出或控制台错误。旧 Web `54595` 与旧 Worker `54612` 在逐项核对归属后受控停止，旧 Web 日志包含完整 Uvicorn shutdown，最终只保留一组 Web/Worker。Stage 10 Job `55075/anode18` 输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。4090 Nginx 活动配置未因本次后端功能发布而改动；已登录 Operator 保存真实 API Key 和 Qoder CN 登录仍需单独验收，不能由机器健康检查替代。下一次服务发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能沿用本组 Job 冒充新版本证据。
+截至 `2026-09-15`，当前运行的 Web 是 Job `62952/anode17`，Agent Worker 是 Job `62954/anode17`；两者均运行已验收提交 `d0bb2a5b1309b89ec07d2f2e48e5fba5ab1d8527` 和 release manifest `bb4236da973996da7c09f84d297db80854f8fee76fc806de5651cb8df4bd6aaf`。本次是原 Web/Worker 因 4 天时限结束、且 4090 重启后 ControlMaster 不存在所做的同 release 恢复，不是新功能构建或新 Stage 10 验收。公网首页、`live` 与 `ready` 已重新返回 `200`，4090 `18740` 状态与 Web 身份一致。
+
+该 release 的原始正式构建证据仍是 Job `55036/anode01`：后端 `611` 项（另有 4 项环境跳过）、前端 `161/161`、Vite `1871` 个模块、`748` 项 release manifest 和双重清单门禁均通过。原始 Web `55053`、Worker `55070` 与 Stage 10 Job `55075/anode18` 记录了当时的生产验收，其中 Stage 10 输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。下一次服务发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能把本次同 release 恢复写成新版本证据。
 
 PR #79 已于 `2026-08-31` 把公网 Operator 精确写入门禁合并为 `cf813fe9564b2d29864acce089d21413547b3d94`。该次变更只更新 4090 Nginx，没有重建或重启 FastAPI release；变更完成时服务保持为 Job `46107/anode19`。活动配置 `/home/Pwjb/.config/lmatelab-107cup-proxy/conf/nginx.conf` 为 `0600`，SHA-256 为 `88b62e7331dda744a0d0ede7c94921eeb197a6b83af0667105ed1932816c6b6b`；旧配置备份为 `backups/nginx.conf.before-public-operator-write.20260831T035304Z`，SHA-256 为 `6c6dafe1d3091684e372a3431b562a5d05a829e499479e88ba97bd7f377211dc`。候选、替换前临时文件和活动配置均通过 Nginx `1.18.0` 的 `nginx -t`，reload 后 `live/ready` 身份不变。
 
@@ -120,7 +122,7 @@ cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-recovery-state.jso
 cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
 ```
 
-控制器只在没有活动归属 Worker 时执行一次 `sbatch --parsable`。如果发现多个 Worker、同名但归属字段不匹配、调度查询失败或状态文件身份不一致，必须停止并保留证据，不能循环提交或自动取消。Worker 最长运行 4 天，读取 `config/runtime.env`，解析固定 `current` release 后进入无限空闲等待；它不是登录节点常驻进程。
+控制器只在没有活动归属 Worker 时执行一次 `sbatch --parsable`。如果发现多个 Worker、同名但归属字段不匹配、调度查询失败或状态文件身份不一致，必须停止并保留证据，不能循环提交或自动取消。Worker 最长运行 4 天，读取 `config/runtime.env`，解析固定 `current` release 后进入无限空闲等待；它不是登录节点常驻进程。Web 恢复守护在入口身份就绪后每分钟复用该控制器，因此 Worker 因 4 天时限结束后会自动补起；重启前后仍必须以 Worker 状态文件和归属核对确认成功。
 
 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 是当前默认生产路径，API Key 只写入 `config/secrets/llm-api-key` 且权限必须为 `0600`。公网 `http://222.195.94.37:18733` 没有 TLS，但经 4090 Nginx 的精确来源 IP 白名单后允许 Operator 保存 API Key；页面必须持续提示该链路传输未加密，只应在可信校园网中使用。Nginx 只在 `/api/competition/agent/settings` 精确路由完成 IP 放行后覆盖写入 `allowlisted-http` 可信标记，后端拒绝普通 HTTP 标记，不能用伪造 `Host: 127.0.0.1` 绕过。HTTPS 与直达当前 107 Web 服务的 Windows `127.0.0.1` SSH 隧道仍是更安全的密钥入口。
 

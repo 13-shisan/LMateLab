@@ -25,6 +25,10 @@ CONFIG_ROOT = Path("/home/Pwjb/.config/lmatelab-107cup-proxy")
 CONTROL_SOCKET = Path("/home/Pwjb/.ssh/cm-107cup")
 REMOTE = "pb23030683@107.ustc.edu.cn"
 REMOTE_RECOVERY = "/home/scc/pb23030683/projects/LMateLab-107Cup/deploy/107cup/recover-service.sh"
+REMOTE_AGENT_RECOVERY = (
+    "/home/scc/pb23030683/projects/LMateLab-107Cup/"
+    "deploy/107cup/submit-agent-worker.sh"
+)
 MAIN_PORT = 18740
 PROBE_PORT = 18742
 PUBLIC_PORT = 18733
@@ -287,6 +291,32 @@ class SubprocessControl:
             raise RelayRecoveryError("remote_recovery_failed")
         return completed.stdout
 
+    def remote_agent_recovery(self) -> str:
+        completed = subprocess.run(
+            [
+                TIMEOUT,
+                "45",
+                SSH,
+                "-S",
+                str(CONTROL_SOCKET),
+                "-o",
+                "BatchMode=yes",
+                REMOTE,
+                "/bin/bash",
+                REMOTE_AGENT_RECOVERY,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=50,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RelayRecoveryError("remote_agent_recovery_failed")
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        if len(lines) != 1 or JOB_ID.fullmatch(lines[0]) is None:
+            raise RelayRecoveryError("remote_agent_recovery_invalid")
+        return lines[0]
+
     def forward(self, bind_port: int, target_host: str, target_port: int) -> None:
         specification = f"127.0.0.1:{bind_port}:{target_host}:{target_port}"
         self._control("forward", specification)
@@ -453,6 +483,7 @@ def main(argv=None) -> int:
                 probe=probe_local,
                 gateway=NginxGateway(),
             ).reconcile(desired)
+            result["agent_worker_job_id"] = control.remote_agent_recovery()
             _write_status(result)
             print(json.dumps(result, sort_keys=True, separators=(",", ":")))
             return 0
