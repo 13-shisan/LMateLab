@@ -1145,6 +1145,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - `2026-09-15` 公网 `18733` 返回 `502`。分层检查确认 4090 于 `2026-09-14 13:17 +08:00` 重启，用户态 Nginx、`127.0.0.1:18740` 转发与 `/home/Pwjb/.ssh/cm-107cup` 均不存在；每分钟守护持续失败关闭为 `ssh_authentication_required`，没有在无二次认证时绕过安全门禁。
 - Operator 只重新输入一次 107 二次验证码。恢复器随后提交唯一 Web Job `62952/P107-A100/anode17`，完成 direct live/ready 和临时端口身份验证后切换 `18740`，再启动用户态 Nginx。公网首页、`/api/health/live` 与 `/api/health/ready` 均返回 `200`，live 明确返回 Job `62952`、`anode17` 与已验收 release `d0bb2a5b...`。
 - 独立 Agent Worker 也已通过归属控制器恢复为唯一 Job `62954/P107-A100/anode17`，状态文件为 `running`，且 commit/manifest 与 Web 一致。Web 和 Worker 计划结束时间分别为 `2026-09-19 09:25:59` 和 `09:28:50 +08:00`；它们仍受 QOS 4 天时限约束。
-- 稳定性候选将 ControlMaster 改为无固定空闲到期时间，保留 30 秒心跳；每分钟守护在 Web 入口身份完整验证后，额外调用受控 Worker 恢复器。Worker 输出必须是唯一数字 Job ID，失败、歧义或归属不符均写入失败状态，不循环提交也不自动取消。
-- 该修正只改恢复控制和文档，不重建已验收的业务 release，不修改 SQLite、工作流或 VASP 作业。合并后需同步 107 checkout、重新安装 4090 守护，并验证恢复状态同时包含 Web 身份和 Agent Worker Job ID，才能标记完成。
+- [x] 稳定性修正将 ControlMaster 改为无固定空闲到期时间，保留 30 秒心跳；每分钟守护在 Web 入口身份完整验证后，额外调用受控 Worker 恢复器。Worker 输出必须是唯一数字 Job ID，失败、歧义或归属不符均写入失败状态，不循环提交也不自动取消。恢复器 `8` 项、Web 服务恢复 `9` 项、部署合同 `46` 项、Agent 部署合同 `7` 项，共 `70` 项聚焦测试全部通过；Python 编译、Shell 语法和 diff 检查通过。
+- [x] 功能提交 `249bd3a05e568cf6a0b23ed8d51d910cd8c5f398` 由 Gitea PR #104 合并为 `deb59dd3dd6db252c9f690087dac8a3c56299b9e`，同一合并提交已推送公开 GitHub `main`。107 checkout 已同步该提交，4090 已重新安装合并后守护；`2026-09-15 09:45:01 +08:00` 真实 cron 周期返回 `ready`，同时记录 Web `62952` 和 Worker `62954`，队列未产生重复 Worker，公网 live/ready 仍为 `200`。
+- 该修正只改恢复控制和文档，没有重建已验收的业务 release，也没有修改 SQLite、工作流或 VASP 作业。
 - 边界保持不变：4090 重启、真实网络断开或 107 服务端关闭 SSH 之后，仍必须由 Operator 人工完成一次二次验证。现有安全策略下不宣称跨 4090 重启的无人值守零中断。
