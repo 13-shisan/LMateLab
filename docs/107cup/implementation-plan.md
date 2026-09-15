@@ -1316,8 +1316,24 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
   不允许把该修复实现为任意 KPOINTS 放行，也不把 `16 10 1` 写成新的固定特例。
 - [x] 本地定向回归 `159/159` 通过，另有 `8` 项 Windows/POSIX 条件跳过；覆盖本次 `16 10 1`、旧
   `24 24 1`、哈希绑定和失败关闭路径。
-- [ ] 完成完整后端/前端回归、Gitea PR 与 GitHub 同步。
-- [ ] 在 107 Slurm 计算节点构建候选 release，并对 Job `63082` 的既有不可变证据执行只读验收复核；
-  不回写原 attempt、不伪造历史状态、不重跑 VASP。
-- [ ] 候选服务 live/ready、数据库完整性和回归门禁通过后滚动发布；是否新建一次 DOS retry 由 Operator
-  在修复上线后显式决定。
+- [x] 功能提交 `26235f1...` 经 Gitea PR #119 合并为 `35480058...`。正式构建 Job
+  `63532/anode01` 以 `COMPLETED/0:0` 结束，耗时 `1:51`；后端 `646/646`、前端
+  `162/162` 和 Vite `1871` 个模块构建全部通过，只有 `4` 项 Linux 环境条件跳过。
+- [x] 新 Web Job `63536/anode17` 与 Agent Worker Job `63539/anode16` 均运行
+  `35480058...`，release manifest SHA-256 为
+  `407111dd3fb891290b2e4c52ca42e34c09a53095629dfa468514e5ec45f16886`。内部
+  `verify-runtime.sh`、4090 relay 和公网 `18733` 的 live/ready 身份一致，两套 SQLite
+  `integrity_check=ok`；旧 Web `63454` 与旧 Worker `63451` 在完整归属核对后受控停止。
+- [x] Stage 10 只读 Job `63541/anode17` 为 `COMPLETED/0:0`，输出
+  `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节；证据 manifest 与 summary SHA-256 分别为
+  `e458333d4ea9153e9b64adef04014a89b541fb3171fd923d7ddd676fb8186f91`、
+  `1b0c59249bda69aede81fd1494d5de73a37c328ffb373d640a28d61f986a1d6f`。
+- [x] 一次性只读复核 Job `63542` 因包装器未导出 `runtime.env` 而在 SQLite 打开前失败，
+  未读写 attempt；修正包装器后 Job `63544/anode17` 为 `COMPLETED/0:0`，对原 Job `63082`
+  的 attempt 返回 `accepted=true`。数据库账本与运行目录 KPOINTS 均为
+  `c29036c663b034c92dc2f16e8594255f7ce958607b5a53b0090a1fdaafdb0de3`，同时复核
+  `NEDOS=3000`、VASP `6.4.2`、VASPKIT `1.5.1`。作业仅执行 `PRAGMA query_only=ON`
+  的数据库查询和原文件验收，没有回写原 attempt、伪造历史状态或重跑 VASP。
+- [ ] 本机连接 `github.com:443` 暂时失败，公开 GitHub `main` 仍待同步到同一
+  `35480058...` 合并提交。
+- [ ] 是否新建一次 DOS retry 由 Operator 在修复上线后显式决定；默认不自动提交。

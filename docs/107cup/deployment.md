@@ -116,7 +116,7 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-截至 `2026-09-15`，当前运行的 Web 是 Job `63454/anode16`，Agent Worker 是 Job `63451/anode17`；两者均运行 Gitea PR #116 合并提交 `70c05202c8f46657dda378041a44676435f58f74` 和 release manifest `494b585ac26f16b643831d899915200b3c5b86a2e3c97ca88ab6e39b6c0b0917`。公网 `18733` 的 `live`、`ready` 和 relay 恢复状态均与该身份一致。构建 Job `63434/anode01` 为 `COMPLETED/0:0`，后端 `642` 项通过、另有 `4` 项按环境条件跳过，前端 `162/162` 和 Vite `1871` 模块构建通过。旧 Web `63328` 与旧 Worker `63329` 在新入口和唯一新 Worker 均验证后，经用户、JobName、Command、WorkDir、Account、Partition 和 QOS 逐项核对后受控停止。
+截至 `2026-09-15`，当前运行的 Web 是 Job `63536/anode17`，Agent Worker 是 Job `63539/anode16`；两者均运行 Gitea PR #119 合并提交 `35480058ca6e6047dd70a25ef960e4fdd8539528` 和 release manifest `407111dd3fb891290b2e4c52ca42e34c09a53095629dfa468514e5ec45f16886`。内部验收、4090 relay 和公网 `18733` 的 `live/ready` 均与该身份一致，两套 SQLite 完整性为 `ok`。构建 Job `63532/anode01` 为 `COMPLETED/0:0`，后端 `646/646` 通过、另有 `4` 项按环境条件跳过，前端 `162/162` 和 Vite `1871` 模块构建通过。旧 Web `63454` 与旧 Worker `63451` 在新入口和唯一新 Worker 均验证后，经用户、JobName、Command、WorkDir、Account、Partition、QOS 和专属日志路径逐项核对后受控停止。
 
 本次滚动发布先保留旧 Web/Worker `63238/63244`，新入口和 Worker 状态通过后才逐一核对并停止旧 Job。发布时实际发现旧 Worker 退出会覆盖新 Worker 状态；PR `#112` 增加状态锁和跨 Job 退出保护，Slurm 回归 Job `63249/anode01` 的 `17` 项测试通过。失败 Job `63248` 仅为测试包装器写错完整提交哈希，未进入测试。修复版 Worker 发布后，`runtime/agent-worker-state.json` 和 4090 `forward-state.json` 均保持 Job `63253`，不会再被旧 Job 的退出回调覆盖。
 
