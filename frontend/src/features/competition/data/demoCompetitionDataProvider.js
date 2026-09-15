@@ -178,6 +178,7 @@ export function createDemoCompetitionDataProvider() {
 
     async installQoder() { return rejectMutation('Qoder 安装'); },
     async loginQoder() { return rejectMutation('Qoder 登录'); },
+    async switchQoderAccount() { return rejectMutation('Qoder 账号切换'); },
     async startQoderService() { return rejectMutation('Qoder 服务启动'); },
     async stopQoderService() { return rejectMutation('Qoder 服务停止'); },
 

@@ -215,21 +215,28 @@ class CompetitionAgentRouteTests(unittest.TestCase):
             mock.patch("routers.competition_agent.qoder_status", return_value=managed),
             mock.patch("routers.competition_agent.install_qoder", return_value=managed) as install,
             mock.patch("routers.competition_agent.start_login", return_value=managed) as login,
+            mock.patch(
+                "routers.competition_agent.switch_account",
+                return_value={**managed, "login_pending": True},
+            ) as switch,
             mock.patch("routers.competition_agent.start_service", return_value={**managed, "service_running": True}) as start,
             mock.patch("routers.competition_agent.stop_service", return_value=managed) as stop,
         ):
             runtime = self.client.get("/api/competition/agent/runtime")
             installed = self.client.post("/api/competition/agent/qoder/install")
             logged_in = self.client.post("/api/competition/agent/qoder/login")
+            switched = self.client.post("/api/competition/agent/qoder/account/switch")
             started = self.client.post("/api/competition/agent/qoder/service/start")
             stopped = self.client.post("/api/competition/agent/qoder/service/stop")
         self.assertTrue(runtime.json()["qoder"]["authenticated"])
         self.assertEqual(200, installed.status_code)
         self.assertEqual(200, logged_in.status_code)
+        self.assertTrue(switched.json()["login_pending"])
         self.assertTrue(started.json()["service_running"])
         self.assertEqual(200, stopped.status_code)
         install.assert_called_once_with()
         login.assert_called_once_with()
+        switch.assert_called_once_with()
         start.assert_called_once_with()
         stop.assert_called_once_with()
 

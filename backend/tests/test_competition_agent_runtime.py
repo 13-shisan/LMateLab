@@ -245,6 +245,21 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
         self.assertTrue(status["engine_available"])
         self.assertNotIn("service_running", status)
 
+    def test_qoder_engine_is_unavailable_during_account_login(self):
+        status = qoder_engine_status(
+            {
+                "LMATELAB_QODER_AUTH_MODE": "cli",
+                "LMATELAB_QODER_REAL_NETWORK_AUTHORIZED": "1",
+            },
+            managed_status={
+                "installed": True,
+                "authenticated": True,
+                "login_pending": True,
+            },
+        )
+        self.assertFalse(status["engine_available"])
+        self.assertEqual("account-login-pending", status["engine_unavailable_reason"])
+
     def test_real_runtime_validates_advisory_json_and_citations(self):
         output = RealQoderRuntime._validated_output(
             json.dumps({

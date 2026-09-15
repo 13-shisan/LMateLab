@@ -166,14 +166,14 @@ def _read_login_output(process: subprocess.Popen[str]) -> None:
             _LOGIN_URL = None
 
 
-def start_login() -> dict[str, object]:
+def start_login(*, reauthenticate: bool = False) -> dict[str, object]:
     global _LOGIN_ERROR, _LOGIN_PROCESS, _LOGIN_URL
     _require_enabled()
     cli = _cli_path()
     if cli is None:
         raise QoderManagementError("Install Qoder before login")
     current = qoder_status()
-    if current["authenticated"]:
+    if current["authenticated"] and not reauthenticate:
         return current
     with _LOGIN_LOCK:
         if _LOGIN_PROCESS is None or _LOGIN_PROCESS.poll() is not None:
@@ -201,6 +201,14 @@ def start_login() -> dict[str, object]:
     return qoder_status()
 
 
+def switch_account() -> dict[str, object]:
+    _require_enabled()
+    current = qoder_status()
+    if current["service_running"]:
+        raise QoderManagementError("Stop the Qoder service before switching accounts")
+    return start_login(reauthenticate=True)
+
+
 def start_service() -> dict[str, object]:
     _require_enabled()
     cli = _cli_path()
@@ -209,6 +217,8 @@ def start_service() -> dict[str, object]:
     status = qoder_status()
     if not status["authenticated"]:
         raise QoderManagementError("Login to Qoder before starting the service")
+    if status.get("login_pending"):
+        raise QoderManagementError("Complete Qoder account login before starting the service")
     if status["service_running"]:
         return status
     runtime = _runtime_dir()

@@ -246,16 +246,24 @@ test('Qoder CN settings expose fixed install, login, and service controls', () =
     new URL('../src/features/competition/data/apiCompetitionDataProvider.js', import.meta.url),
     'utf8',
   );
-  for (const token of ['一键安装', '一键登录', '启动服务', '停止 Qoder 服务', '打开 Qoder CN 授权页']) {
+  const styles = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.css', import.meta.url),
+    'utf8',
+  );
+  for (const token of ['一键安装', '一键登录', '切换账号', '启动服务', '停止 Qoder 服务', '打开 Qoder CN 授权页']) {
     assert.match(page, new RegExp(token));
   }
-  for (const route of ['/qoder/install', '/qoder/login', '/qoder/service/start', '/qoder/service/stop']) {
+  for (const route of ['/qoder/install', '/qoder/login', '/qoder/account/switch', '/qoder/service/start', '/qoder/service/stop']) {
     assert.match(provider, new RegExp(route));
   }
   assert.match(page, /api_key_write_allowed/);
   assert.match(page, /api_key_write_transport/);
   assert.match(page, /IP 白名单 HTTP 入口/);
   assert.match(page, /传输未加密/);
+  const apiKeyLabel = page.match(/<label>API Key.*?<\/label>/s)?.[0] || '';
+  assert.match(apiKeyLabel, /API Key/);
+  assert.doesNotMatch(apiKeyLabel, /competition-agent-secret-note/);
+  assert.match(styles, /competition-agent-secret-note\s*\{[^}]*grid-column:\s*3 \/ -1/s);
 });
 
 test('Agent selects a per-run engine and distinguishes Qoder service from engine readiness', () => {

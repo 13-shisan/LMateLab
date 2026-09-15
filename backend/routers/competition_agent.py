@@ -36,6 +36,7 @@ from services.qoder_management import (
     start_login,
     start_service,
     stop_service,
+    switch_account,
 )
 from services.competition_agent.settings import read_settings, write_api_key, write_settings
 from services.competition_agent.structure_library import StructureLibraryError, search_structures
@@ -144,6 +145,11 @@ def install_qoder_endpoint(_user: User = Depends(require_operator)):
 @router.post("/qoder/login", dependencies=[Depends(require_agent_enabled)])
 def login_qoder_endpoint(_user: User = Depends(require_operator)):
     return _qoder_action(start_login)
+
+
+@router.post("/qoder/account/switch", dependencies=[Depends(require_agent_enabled)])
+def switch_qoder_account_endpoint(_user: User = Depends(require_operator)):
+    return _qoder_action(switch_account)
 
 
 @router.post("/qoder/service/start", dependencies=[Depends(require_agent_enabled)])
