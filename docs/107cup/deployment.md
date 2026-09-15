@@ -160,6 +160,8 @@ cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
 
 Qoder 使用大陆版 `qodercn-agent-sdk==1.0.14` 和内置 `qoderclicn`；认证状态只保存在 `QODERCN_CONFIG_DIR` 指向的私有目录，PAT 环境变量名为 `QODERCN_PERSONAL_ACCESS_TOKEN`。网页“安装”动作只验证固定版本和 CLI；授权 URL 必须是 `qoder.cn` 或 `qoder.com.cn` 的带 challenge 设备授权页，全球版 `qoder.com` 链接会被拒绝。启用真实 Qoder 前，必须先在 107 计算节点验证外网、完成受控登录并把 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 显式改为 `1`。该开关关闭、SDK缺失或认证无效时，Qoder 请求在写入队列前返回 `503`。
 
+需要更换 Qoder 账号时，Operator 在 Agent 设置中先停止可选的远程控制服务，再点击“切换账号”。后端只会对固定 `qoderclicn login` 发起一次新的设备授权，不执行任意命令，也不删除、移动或输出认证文件。授权过程中 `login_pending=true`，受控 Qoder 引擎和“启动服务”均失败关闭；页面每 2 秒刷新状态。用户在 `qoder.cn` 授权页选择新账号并完成授权后，CLI 状态中的账号才会更新。直接清空 `QODERCN_CONFIG_DIR`、复制其他人的认证目录或在聊天、Git、日志中传递凭据都不属于支持流程。
+
 Qoder 对话使用 SDK 进程内 MCP，不连接网页中可选的 `qoderclicn remote-control` 服务。只挂载五个应用内只读工具，最多 8 次调用；不挂载 Bash、任意文件、网页、网络、Slurm、VASP 执行、提交、取消或修改工具。Qoder 返回的计算参数还要经过 LMateLab 模板白名单和工作流校验，用户必须在“新建计算”页检查并显式确认、启动。Web 和 Worker 必须同时升级到支持逐任务 provider 的同一 commit/manifest，否则不得开放 Qoder 选择。调度完成只能证明 Worker 运行，不能替代真实工具调用、Agent 响应、引用约束和 Viewer 只读验收。
 
 当前受控规划代码已经发布，但 Qoder CN 账号的真实调用额度已用尽。隔离 Job `63233/anode01` 在网络请求阶段收到官方 `credit usage limit` 错误；Job `63237/anode01` 只输出脱敏字段，确认认证有效、无权限拒绝、在第 1 轮结束且实际工具调用为 0。生产配置因此继续保持 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 和 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=0`，不得把“已安装/已登录”显示成“引擎可用”。运行门禁 Job `63263/anode01` 验证 QMOF 返回记录、内置 MoS2 可用、Qoder 创建请求返回 `503 network-not-authorized`，且活动 Qoder 队列数量不变。恢复额度后必须重新运行隔离真实 MCP 调用；只有服务器记录到结构检索或上传结构检查以及 `prepare_workflow_draft` 两类成功调用，才允许把网络开关改为 `1`。

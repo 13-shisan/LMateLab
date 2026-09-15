@@ -237,6 +237,84 @@ class QoderReleaseRuntimeTests(unittest.TestCase):
         ):
             self.assertIsNone(qoder_management._extract_login_url(rejected))
 
+    def test_account_switch_reuses_fixed_device_login_without_deleting_auth(self):
+        from services import qoder_management
+
+        current = {
+            "authenticated": True,
+            "service_running": False,
+        }
+        pending = {**current, "login_pending": True}
+        with (
+            mock.patch.dict(
+                "os.environ", {"LMATELAB_QODER_MANAGEMENT_ENABLED": "1"}, clear=True
+            ),
+            mock.patch.object(qoder_management, "qoder_status", return_value=current),
+            mock.patch.object(
+                qoder_management, "start_login", return_value=pending
+            ) as login,
+        ):
+            self.assertEqual(pending, qoder_management.switch_account())
+        login.assert_called_once_with(reauthenticate=True)
+
+    def test_reauthentication_starts_fixed_login_for_an_authenticated_account(self):
+        from services import qoder_management
+
+        current = {"authenticated": True, "service_running": False}
+        pending = {**current, "login_pending": True}
+        process = mock.Mock()
+        process.poll.return_value = None
+
+        def release_wait(_seconds):
+            qoder_management._LOGIN_ERROR = "test-pending"
+
+        with (
+            mock.patch.dict(
+                "os.environ", {"LMATELAB_QODER_MANAGEMENT_ENABLED": "1"}, clear=True
+            ),
+            mock.patch.object(qoder_management, "_cli_path", return_value=Path("qoderclicn")),
+            mock.patch.object(
+                qoder_management, "qoder_status", side_effect=[current, pending]
+            ),
+            mock.patch.object(
+                qoder_management.subprocess, "Popen", return_value=process
+            ) as popen,
+            mock.patch.object(qoder_management.threading, "Thread") as thread,
+            mock.patch.object(qoder_management.time, "sleep", side_effect=release_wait),
+        ):
+            qoder_management._LOGIN_PROCESS = None
+            qoder_management._LOGIN_URL = None
+            qoder_management._LOGIN_ERROR = None
+            try:
+                self.assertEqual(
+                    pending, qoder_management.start_login(reauthenticate=True)
+                )
+            finally:
+                qoder_management._LOGIN_PROCESS = None
+                qoder_management._LOGIN_URL = None
+                qoder_management._LOGIN_ERROR = None
+
+        self.assertEqual(["qoderclicn", "login"], popen.call_args.args[0])
+        thread.return_value.start.assert_called_once_with()
+
+    def test_account_switch_requires_remote_control_service_to_stop(self):
+        from services import qoder_management
+
+        with (
+            mock.patch.dict(
+                "os.environ", {"LMATELAB_QODER_MANAGEMENT_ENABLED": "1"}, clear=True
+            ),
+            mock.patch.object(
+                qoder_management,
+                "qoder_status",
+                return_value={"authenticated": True, "service_running": True},
+            ),
+        ):
+            with self.assertRaisesRegex(
+                qoder_management.QoderManagementError, "before switching accounts"
+            ):
+                qoder_management.switch_account()
+
 
 if __name__ == "__main__":
     unittest.main()

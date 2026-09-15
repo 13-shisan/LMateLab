@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Bot, CheckCircle2, ChevronDown, Cpu, Database, Download, ExternalLink, FileCode2, FileText,
   FlaskConical, Folder, FolderOpen, History, KeyRound, Library, ListChecks, LogIn, Play, Plus,
-  Search, Send, Settings2, Square, Trash2, Upload, X,
+  RefreshCw, Search, Send, Settings2, Square, Trash2, Upload, X,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -247,6 +247,13 @@ export default function CompetitionAgent() {
   const currentRun = useCompetitionPollingResource(runLoader, {
     enabled: (item) => Boolean(item && ['queued', 'running'].includes(item.status)), intervalMs: 1200, requestKey: runId,
   });
+
+  useEffect(() => {
+    if (!runtime.data?.qoder?.login_pending) return undefined;
+    const timer = globalThis.setInterval(() => setRuntimeRefresh((value) => value + 1), 2000);
+    return () => globalThis.clearInterval(timer);
+  }, [runtime.data?.qoder?.login_pending]);
+
   const run = currentRun.data;
   const calculationPlan = run?.output?.workspace?.plan || null;
   const preparedStructure = run?.output?.workspace?.structure || null;
@@ -409,6 +416,7 @@ export default function CompetitionAgent() {
       const status = await request();
       setSettingsMessage(
         action === 'install' ? 'Qoder 已安装。'
+          : action === 'switch' ? '请在授权页选择新的 Qoder 账号。'
           : action === 'login' && status.authenticated ? 'Qoder 已登录。'
             : action === 'login' ? '请在授权页完成 Qoder 登录。'
               : status.service_running ? 'Qoder 服务已启动。' : 'Qoder 服务已停止。',
@@ -419,6 +427,11 @@ export default function CompetitionAgent() {
     } finally {
       setQoderAction('');
     }
+  }
+
+  function switchQoderAccount() {
+    if (!globalThis.confirm?.('切换 Qoder 账号前必须停止远程控制服务。继续后，请在授权页选择新的账号。')) return;
+    manageQoder('switch', provider.switchQoderAccount);
   }
 
   async function findLiterature() {
@@ -523,23 +536,28 @@ export default function CompetitionAgent() {
             <strong>普通问答接口</strong>
             <label>API URL<input value={settingsForm.api_url} onChange={(event) => setSettingsForm((value) => ({ ...value, api_url: event.target.value }))} /></label>
             <label>模型<input value={settingsForm.model} onChange={(event) => setSettingsForm((value) => ({ ...value, model: event.target.value }))} /></label>
-            <label>API Key<input type="password" autoComplete="new-password" value={settingsForm.api_key} disabled={!apiKeyWriteAllowed} placeholder={!apiKeyWriteAllowed ? '请通过安全入口配置' : settings.data?.api_key_configured ? '已配置，留空不修改' : '输入 API Key'} onChange={(event) => setSettingsForm((value) => ({ ...value, api_key: event.target.value }))} />{apiKeyWriteTransport === 'allowlisted_http' ? <span className="competition-agent-secret-note">当前为 IP 白名单 HTTP 入口，允许保存密钥，但传输未加密；请仅在可信校园网使用。</span> : !apiKeyWriteAllowed ? <span className="competition-agent-secret-note">此入口不允许传输密钥，请使用 HTTPS、IP 白名单入口或 127.0.0.1 SSH 隧道。</span> : null}</label>
+            <label>API Key<input type="password" autoComplete="new-password" value={settingsForm.api_key} disabled={!apiKeyWriteAllowed} placeholder={!apiKeyWriteAllowed ? '请通过安全入口配置' : settings.data?.api_key_configured ? '已配置，留空不修改' : '输入 API Key'} onChange={(event) => setSettingsForm((value) => ({ ...value, api_key: event.target.value }))} /></label>
             <button type="submit"><KeyRound size={16} />保存</button>
+            {apiKeyWriteTransport === 'allowlisted_http' ? <span className="competition-agent-secret-note">当前为 IP 白名单 HTTP 入口，允许保存密钥，但传输未加密；请仅在可信校园网使用。</span> : !apiKeyWriteAllowed ? <span className="competition-agent-secret-note">此入口不允许传输密钥，请使用 HTTPS、IP 白名单入口或 127.0.0.1 SSH 隧道。</span> : null}
           </section>
           <aside className="competition-agent-qoder-settings" aria-label="Qoder 接口">
             <div><Cpu size={16} /><strong>Qoder CN 接口</strong><span className={`competition-agent-status is-${runtime.data?.qoder?.engine_available ? 'succeeded' : 'failed'}`}>{runtime.data?.qoder?.engine_available ? '引擎可用' : '引擎未就绪'}</span></div>
             <dl>
               <div><dt>接口</dt><dd>{runtime.data?.qoder?.interface || 'qodercn-agent-sdk'}</dd></div>
               <div><dt>用途</dt><dd>受控计算规划</dd></div>
-              <div><dt>认证</dt><dd>{runtime.data?.qoder?.auth_mode || '未配置'}</dd></div>
+              <div><dt>认证</dt><dd>{runtime.data?.qoder?.username ? `${runtime.data.qoder.auth_mode || 'cli'} · ${runtime.data.qoder.username}` : runtime.data?.qoder?.auth_mode || '未配置'}</dd></div>
               <div><dt>模型</dt><dd>{runtime.data?.qoder?.model || '默认'}</dd></div>
               <div><dt>CLI</dt><dd>{runtime.data?.qoder?.installed ? `已安装 ${runtime.data.qoder.version || ''}` : '未安装'}</dd></div>
               <div><dt>远程控制服务</dt><dd>{runtime.data?.qoder?.service_running ? '运行中（独立）' : '未启动（不影响引擎）'}</dd></div>
             </dl>
             <div className="competition-agent-qoder-actions">
               <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.manageable || runtime.data?.qoder?.installed} onClick={() => manageQoder('install', provider.installQoder)}><Download size={14} />一键安装</button>
-              <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.manageable || !runtime.data?.qoder?.installed || runtime.data?.qoder?.authenticated} onClick={() => manageQoder('login', provider.loginQoder)}><LogIn size={14} />一键登录</button>
-              <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.authenticated || runtime.data?.qoder?.service_running} onClick={() => manageQoder('start', provider.startQoderService)}><Play size={14} />启动服务</button>
+              {runtime.data?.qoder?.authenticated ? (
+                <button type="button" title={runtime.data?.qoder?.service_running ? '请先停止 Qoder 远程控制服务' : '切换 Qoder 账号'} disabled={Boolean(qoderAction) || !runtime.data?.qoder?.manageable || runtime.data?.qoder?.service_running || runtime.data?.qoder?.login_pending} onClick={switchQoderAccount}><RefreshCw size={14} />切换账号</button>
+              ) : (
+                <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.manageable || !runtime.data?.qoder?.installed || runtime.data?.qoder?.login_pending} onClick={() => manageQoder('login', provider.loginQoder)}><LogIn size={14} />一键登录</button>
+              )}
+              <button type="button" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.authenticated || runtime.data?.qoder?.login_pending || runtime.data?.qoder?.service_running} onClick={() => manageQoder('start', provider.startQoderService)}><Play size={14} />启动服务</button>
               <button type="button" title="停止 Qoder 服务" disabled={Boolean(qoderAction) || !runtime.data?.qoder?.service_running} onClick={() => manageQoder('stop', provider.stopQoderService)}><Square size={13} /></button>
             </div>
             {runtime.data?.qoder?.login_url ? <a className="competition-agent-qoder-login" href={runtime.data.qoder.login_url} target="_blank" rel="noreferrer">打开 Qoder CN 授权页<ExternalLink size={12} /></a> : null}

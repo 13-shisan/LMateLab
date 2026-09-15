@@ -276,6 +276,10 @@ export function createApiCompetitionDataProvider({
       return request('/api/competition/agent/qoder/login', { method: 'POST' });
     },
 
+    switchQoderAccount() {
+      return request('/api/competition/agent/qoder/account/switch', { method: 'POST' });
+    },
+
     startQoderService() {
       return request('/api/competition/agent/qoder/service/start', { method: 'POST' });
     },

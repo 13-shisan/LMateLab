@@ -71,7 +71,8 @@ def qoder_engine_status(
     else:
         authenticated = False
     network_authorized = values.get("LMATELAB_QODER_REAL_NETWORK_AUTHORIZED") == "1"
-    available = installed and authenticated and network_authorized
+    login_pending = managed_status is not None and managed_status.get("login_pending") is True
+    available = installed and authenticated and network_authorized and not login_pending
     if not installed:
         reason = "sdk-not-installed"
     elif auth_mode not in {"cli", "pat"}:
@@ -80,6 +81,8 @@ def qoder_engine_status(
         reason = "not-authenticated"
     elif not network_authorized:
         reason = "network-not-authorized"
+    elif login_pending:
+        reason = "account-login-pending"
     else:
         reason = None
     return {

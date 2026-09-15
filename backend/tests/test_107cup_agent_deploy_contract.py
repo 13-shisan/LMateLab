@@ -137,6 +137,7 @@ class AgentDeploymentContractTests(unittest.TestCase):
         exact_methods = {
             "/api/competition/agent/qoder/install": "POST",
             "/api/competition/agent/qoder/login": "POST",
+            "/api/competition/agent/qoder/account/switch": "POST",
             "/api/competition/agent/qoder/service/start": "POST",
             "/api/competition/agent/qoder/service/stop": "POST",
             "/api/competition/agent/settings": "GET PUT",
