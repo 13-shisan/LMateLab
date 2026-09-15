@@ -75,6 +75,18 @@ def _atomic_json(path: Path, value: dict[str, object]) -> None:
         raise
 
 
+def _read_json(path: Path) -> dict[str, object] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AgentWorkerControlError("invalid_worker_state") from exc
+    if not isinstance(value, dict) or value.get("schema") != STATE_SCHEMA:
+        raise AgentWorkerControlError("invalid_worker_state")
+    return value
+
+
 @contextmanager
 def _lock():
     runtime = ROOT / "runtime"
@@ -215,7 +227,16 @@ def publish(args: argparse.Namespace) -> None:
     }
     if args.exit_code is not None:
         payload["exit_code"] = args.exit_code
-    _atomic_json(ROOT / "runtime" / "agent-worker-state.json", payload)
+    state_path = ROOT / "runtime" / "agent-worker-state.json"
+    with _lock():
+        current = _read_json(state_path)
+        if (
+            args.status == "stopped"
+            and current is not None
+            and current.get("job_id") != job_id
+        ):
+            return
+        _atomic_json(state_path, payload)
 
 
 def main() -> int:
