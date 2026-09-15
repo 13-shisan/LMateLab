@@ -25,6 +25,7 @@
 | Agent 上传和文献库 | `/home/scc/pb23030683/lmatelab-107cup/data/agent` |
 | Qoder CN 私有配置 | `/home/scc/pb23030683/lmatelab-107cup/runtime/qoder/config` |
 | Qoder workspace | `/home/scc/pb23030683/lmatelab-107cup/data/qoder-workspace` |
+| QMOF 版本、索引和 CIF | `/home/scc/pb23030683/lmatelab-107cup/data/qmof` |
 | Slurm 日志 | `/home/scc/pb23030683/lmatelab-107cup/logs` |
 | 验收证据 | `/home/scc/pb23030683/lmatelab-107cup/evidence` |
 | 私有配置 | `/home/scc/pb23030683/lmatelab-107cup/config` |
@@ -60,6 +61,32 @@ tail -n 80 "$root/logs/build-$job_id.err"
 ```
 
 短作业可能很快从平台记账中消失；此时必须以原始 Slurm 日志、发布清单和运行时状态共同判断，不能把空 `sacct` 写成成功。
+
+### 3.1 安装 QMOF v18
+
+新 release 构建通过并切换 `current` 后，登录节点只提交数据安装作业：
+
+```bash
+cd /home/scc/pb23030683/projects/LMateLab-107Cup
+bash deploy/107cup/submit-qmof-library.sh
+```
+
+脚本要求源码检出无修改、`HEAD=origin/main=current/commit.txt`，然后提交 1 CPU、8 GiB、1 小时的
+`P107-A100` Slurm 作业。下载、哈希、解压、ID 对账、逐 CIF 清单和 SQLite 建库均在计算节点进行。
+登录节点不运行下载或建库。查询范围只限返回的 QMOF Job ID：
+
+```bash
+root=/home/scc/pb23030683/lmatelab-107cup
+job_id=$(<"$root/runtime/qmof-library-job-id")
+squeue -j "$job_id"
+sacct -j "$job_id" --format=JobID,State,ExitCode,Elapsed,NodeList,MaxRSS
+tail -n 80 "$root/logs/qmof-library-$job_id.out"
+tail -n 80 "$root/logs/qmof-library-$job_id.err"
+```
+
+成功日志必须包含 `QMOF_INSTALL_OK version=v18`。同时必须复核 `provenance.json`、
+`cif-manifest.sha256`、`structures.sqlite` 的 `integrity_check=ok`、记录数 `20372` 和 CIF 数 `20372`。
+失败或不完整的 staging 目录不得切换 `current`；已经存在的 `v18` 不覆盖，只执行完整复核。
 
 ## 4. 启动和验证服务
 

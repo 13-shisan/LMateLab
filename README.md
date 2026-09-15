@@ -51,15 +51,16 @@ LLM API Key 优先通过 HTTPS 或直达 107 计算节点 Web 服务的 `127.0.0
 公网 HTTP 入口仅在 4090 Nginx 精确来源 IP 白名单和 Operator 应用权限同时通过时允许保存，并持续提示
 传输未加密；普通公网来源仍被拒绝。API URL 和模型不含密钥，可从已授权入口更新。
 
-公开 QMOF 全量结构和 CIF 文件体积较大，不随 Git 仓库分发。请从
-[QMOF 官方仓库](https://github.com/arosen93/QMOF) 下载数据集，使用仓库提供的 CSV 导入脚本建立只读索引：
+公开 QMOF 全量结构和 CIF 文件体积较大，不随 Git 仓库分发。107 正式数据固定为
+[QMOF Figshare v18](https://figshare.com/articles/dataset/QMOF_Database/13147324/18)
+（DOI `10.6084/m9.figshare.13147324.v18`，CC BY 4.0，20,372 条）。Figshare 是权威来源；部署时仅在
+Figshare 下载端不可用时，使用固定 revision 且与官方文件大小、MD5、SHA-256 全部一致的镜像作为传输通道。
+下载、解压、逐 CIF 哈希、CSV/CIF ID 对账和 SQLite 建库全部在 Slurm 计算节点执行：
 
 ```bash
-python backend/scripts/import_qmof_structure_index.py \
-  /path/to/qmof_database.csv \
-  /path/to/structures.sqlite
+bash deploy/107cup/submit-qmof-library.sh
 ```
 
-部署时设置 `LMATELAB_STRUCTURE_LIBRARY_DB=/path/to/structures.sqlite`；如需在详情页读取 CIF，另设
-`LMATELAB_QMOF_CIF_ROOT=/path/to/qmof_cifs`。CSD 数据受许可证约束，不在仓库中提供；只能由合法
-CSD 用户在部署机上配置个人数据目录或后续导入适配器。
+正式路径为 `data/qmof/current/structures.sqlite` 和 `data/qmof/current/relaxed_structures`；版本、来源、
+传输 revision、归档哈希和安装提交记录在同目录 `provenance.json`。CSD 数据受许可证约束，不在仓库中
+提供；只能由合法 CSD 用户在部署机上配置个人数据目录或后续导入适配器。

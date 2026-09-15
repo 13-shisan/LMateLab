@@ -41,6 +41,10 @@ started_at=$(date --iso-8601=seconds)
 test -f "$source_root/backend/main_107cup.py"
 test -f "$source_root/deploy/107cup/agent_worker_control.py"
 
+export LMATELAB_STRUCTURE_LIBRARY_DB="${LMATELAB_STRUCTURE_LIBRARY_DB:-$root/data/qmof/current/structures.sqlite}"
+export LMATELAB_QMOF_CIF_ROOT="${LMATELAB_QMOF_CIF_ROOT:-$root/data/qmof/current/relaxed_structures}"
+test -f "$LMATELAB_STRUCTURE_LIBRARY_DB"
+test -d "$LMATELAB_QMOF_CIF_ROOT"
 export PYTHONPATH="$source_root/backend"
 source "$python_env/bin/activate"
 cd "$source_root/backend"
