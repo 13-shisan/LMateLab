@@ -27,11 +27,37 @@ EDITABLE_PARAMETER_LIMITS = {
     "SIGMA": (0.01, 0.2),
 }
 EDITABLE_PARAMETERS = frozenset(EDITABLE_PARAMETER_LIMITS)
+NON_MATERIAL_FORMULA_TOKENS = frozenset({
+    "aimd",
+    "band",
+    "cpu",
+    "dft",
+    "dftu",
+    "dos",
+    "gga",
+    "gpu",
+    "hse",
+    "lda",
+    "lmatelab",
+    "md",
+    "neb",
+    "nscf",
+    "paw",
+    "pbe",
+    "pbesol",
+    "qmof",
+    "scf",
+    "soc",
+    "vasp",
+})
 
 
 def _formula(prompt: str) -> str | None:
     matches = re.findall(r"(?<![A-Za-z])(?:[A-Z][a-z]?\d*){2,}(?![A-Za-z])", prompt)
-    return matches[0] if matches else None
+    return next(
+        (match for match in matches if match.casefold() not in NON_MATERIAL_FORMULA_TOKENS),
+        None,
+    )
 
 
 def _steps(prompt: str) -> list[str]:

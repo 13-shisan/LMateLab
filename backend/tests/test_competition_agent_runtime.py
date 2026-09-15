@@ -318,6 +318,15 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
             [item["step"] for item in plan["templates"]],
         )
 
+    def test_calculation_plan_ignores_method_acronyms_before_material_formula(self):
+        plan = calculation_plan(
+            "Plan a standard PBE relax, SCF, band and DOS workflow for MoS2."
+        )
+
+        self.assertEqual("MoS2", plan["material_formula"])
+        self.assertFalse(plan["needs_upload"])
+        self.assertEqual(["relax", "scf", "band", "dos"], plan["steps"])
+
     def test_real_runtime_rejects_out_of_range_or_non_numeric_parameter_changes(self):
         plan = calculation_plan("计算一下 MoS2 体系的能带")
         output = RealQoderRuntime._validated_output(
