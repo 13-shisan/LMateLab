@@ -116,9 +116,9 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-截至 `2026-09-15`，当前运行的 Web 是 Job `62952/anode17`，Agent Worker 是 Job `62954/anode17`；两者均运行已验收提交 `d0bb2a5b1309b89ec07d2f2e48e5fba5ab1d8527` 和 release manifest `bb4236da973996da7c09f84d297db80854f8fee76fc806de5651cb8df4bd6aaf`。本次是原 Web/Worker 因 4 天时限结束、且 4090 重启后 ControlMaster 不存在所做的同 release 恢复，不是新功能构建或新 Stage 10 验收。公网首页、`live` 与 `ready` 已重新返回 `200`，4090 `18740` 状态与 Web 身份一致。
+截至 `2026-09-15`，当前运行的 Web 是 Job `63252/anode16`，Agent Worker 是 Job `63253/anode17`；两者均运行提交 `d1daab7e985b7b6b96801ed8eb10ac830f76665e` 和 release manifest `7df97413a67372769013523ca42da56ed5c5f747d2d27d6cb7fee89f85099de9`。公网 `18733` 的 `live`、`ready` 和 relay 状态均与该身份一致。最终构建 Job `63251/anode01` 为 `COMPLETED/0:0`，后端 `633` 项通过、另有 `4` 项按环境条件跳过，前端测试和 Vite 构建通过。
 
-该 release 的原始正式构建证据仍是 Job `55036/anode01`：后端 `611` 项（另有 4 项环境跳过）、前端 `161/161`、Vite `1871` 个模块、`748` 项 release manifest 和双重清单门禁均通过。原始 Web `55053`、Worker `55070` 与 Stage 10 Job `55075/anode18` 记录了当时的生产验收，其中 Stage 10 输出 `STAGE10_ACCEPTANCE_OK` 且 stderr 为 0 字节。下一次服务发布仍必须重新走 Slurm 构建、候选服务、relay 切换和只读验收，不能把本次同 release 恢复写成新版本证据。
+本次滚动发布先保留旧 Web/Worker `63238/63244`，新入口和 Worker 状态通过后才逐一核对并停止旧 Job。发布时实际发现旧 Worker 退出会覆盖新 Worker 状态；PR `#112` 增加状态锁和跨 Job 退出保护，Slurm 回归 Job `63249/anode01` 的 `17` 项测试通过。失败 Job `63248` 仅为测试包装器写错完整提交哈希，未进入测试。修复版 Worker 发布后，`runtime/agent-worker-state.json` 和 4090 `forward-state.json` 均保持 Job `63253`，不会再被旧 Job 的退出回调覆盖。
 
 PR #79 已于 `2026-08-31` 把公网 Operator 精确写入门禁合并为 `cf813fe9564b2d29864acce089d21413547b3d94`。该次变更只更新 4090 Nginx，没有重建或重启 FastAPI release；变更完成时服务保持为 Job `46107/anode19`。活动配置 `/home/Pwjb/.config/lmatelab-107cup-proxy/conf/nginx.conf` 为 `0600`，SHA-256 为 `88b62e7331dda744a0d0ede7c94921eeb197a6b83af0667105ed1932816c6b6b`；旧配置备份为 `backups/nginx.conf.before-public-operator-write.20260831T035304Z`，SHA-256 为 `6c6dafe1d3091684e372a3431b562a5d05a829e499479e88ba97bd7f377211dc`。候选、替换前临时文件和活动配置均通过 Nginx `1.18.0` 的 `nginx -t`，reload 后 `live/ready` 身份不变。
 
@@ -161,6 +161,20 @@ cat /home/scc/pb23030683/lmatelab-107cup/runtime/agent-worker-state.json
 Qoder 使用大陆版 `qodercn-agent-sdk==1.0.14` 和内置 `qoderclicn`；认证状态只保存在 `QODERCN_CONFIG_DIR` 指向的私有目录，PAT 环境变量名为 `QODERCN_PERSONAL_ACCESS_TOKEN`。网页“安装”动作只验证固定版本和 CLI；授权 URL 必须是 `qoder.cn` 或 `qoder.com.cn` 的带 challenge 设备授权页，全球版 `qoder.com` 链接会被拒绝。启用真实 Qoder 前，必须先在 107 计算节点验证外网、完成受控登录并把 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 显式改为 `1`。该开关关闭、SDK缺失或认证无效时，Qoder 请求在写入队列前返回 `503`。
 
 Qoder 对话使用 SDK 进程内 MCP，不连接网页中可选的 `qoderclicn remote-control` 服务。只挂载五个应用内只读工具，最多 8 次调用；不挂载 Bash、任意文件、网页、网络、Slurm、VASP 执行、提交、取消或修改工具。Qoder 返回的计算参数还要经过 LMateLab 模板白名单和工作流校验，用户必须在“新建计算”页检查并显式确认、启动。Web 和 Worker 必须同时升级到支持逐任务 provider 的同一 commit/manifest，否则不得开放 Qoder 选择。调度完成只能证明 Worker 运行，不能替代真实工具调用、Agent 响应、引用约束和 Viewer 只读验收。
+
+当前受控规划代码已经发布，但 Qoder CN 账号的真实调用额度已用尽。隔离 Job `63233/anode01` 在网络请求阶段收到官方 `credit usage limit` 错误；Job `63237/anode01` 只输出脱敏字段，确认认证有效、无权限拒绝、在第 1 轮结束且实际工具调用为 0。生产配置因此继续保持 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 和 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=0`，不得把“已安装/已登录”显示成“引擎可用”。运行门禁 Job `63263/anode01` 验证 QMOF 返回记录、内置 MoS2 可用、Qoder 创建请求返回 `503 network-not-authorized`，且活动 Qoder 队列数量不变。恢复额度后必须重新运行隔离真实 MCP 调用；只有服务器记录到结构检索或上传结构检查以及 `prepare_workflow_draft` 两类成功调用，才允许把网络开关改为 `1`。
+
+相关运行日志位于：
+
+```text
+/home/scc/pb23030683/lmatelab-107cup/logs/build-63251.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/qoder-controlled-acceptance-63233.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/qoder-controlled-diagnostic-63237.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/worker-race-test-63249.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/qoder-runtime-gate-63263.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/service-63252.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/agent-worker-63253.{out,err}
+```
 
 Web 服务启动会在 Alembic 迁移前把两套现有 SQLite 用 Online Backup API 复制到 `backups/pre-migration`，文件名包含 Job ID 和 restart count，且禁止覆盖；迁移后要求两个 Alembic 配置都位于 head，并再次执行 `integrity_check`。候选服务或 Worker 失败时保留旧 `18733` relay 和 `18755`，不得静默重试。只有新 `18733` 通过 Operator/Viewer 和 Agent/Qoder 全流程后，才由进程所有者 `Pzxp` 停止 `18755`。
 
