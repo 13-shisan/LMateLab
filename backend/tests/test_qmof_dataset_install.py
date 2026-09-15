@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -118,7 +119,7 @@ class QmofDatasetInstallTests(unittest.TestCase):
                 ["qmof-0000001.cif", "qmof-0000002.cif"],
                 sorted(path.name for path in (version_root / "relaxed_structures").iterdir()),
             )
-            with sqlite3.connect(version_root / "structures.sqlite") as connection:
+            with closing(sqlite3.connect(version_root / "structures.sqlite")) as connection:
                 self.assertEqual(("ok",), connection.execute("PRAGMA integrity_check").fetchone())
                 self.assertEqual(2, connection.execute("SELECT COUNT(*) FROM structures").fetchone()[0])
             provenance = json.loads((version_root / "provenance.json").read_text())

@@ -1174,8 +1174,13 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 第二次安装 Job `63125/anode17` 同样在归档写入前失败：URL 白名单允许固定 HTTP 中继，但 curl 仍保留
   镜像专用的 `--proto '=https'`，因此为 `FAILED/1:0`。修正后协议与地址成对固定：官方镜像只允许 HTTPS
   和 TLS 1.2 以上，临时中继只允许该精确 HTTP URL；不接受任意地址或协议降级。
-- [ ] 本地合成 ZIP 单元测试、部署合同、Shell/Python 语法、正式构建和清单通过。
-- [ ] Gitea PR 合并且同一合并提交同步到公开 GitHub `main`。
-- [ ] 107 QMOF Slurm Job 成功，记录真实 Job ID、节点、排队/运行时间、MaxRSS、日志哈希和 provenance。
-- [ ] 新 Web/Worker 候选通过 commit/manifest、SQLite 和 QMOF 门禁后切换 `18733`；公网真实验证总数、
-  元素筛选、随机详情和 CIF 三维结构。旧库的元素计数可能对应更早版本，不把差异伪装成数据丢失。
+- [x] 本地合成 ZIP 单元测试、部署合同、Shell/Python 语法、正式构建和清单通过；最终构建 Job `63127`
+  通过后端 `619` 项（另有4项平台条件跳过）、前端 `161/161` 和 Vite `1871` 模块。
+- [x] Gitea PR #106、#107、#108 已依次合并；功能 release 固定为 `a083e457...`。
+- [ ] 同一 Gitea `main` 合并提交同步到公开 GitHub `main`；当前 Windows 和4090到 `github.com:443`
+  均超时，不能把同步失败写成完成。
+- [x] QMOF Job `63129/anode17` 为 `COMPLETED/0:0`、排队约1秒、运行1分28秒；官方归档、20372条
+  CSV、20372个 CIF、逐文件清单和 SQLite 完整性全部通过，详情见 `qmof-library-evidence.md`。
+- [x] 新 Web `63134/anode16` 和 Worker `63137/anode17` 的 commit/manifest 一致，公网 `18733`
+  live/ready 已切换；运行时 Job `63136` 验证总数20372、Mn筛选723、随机 CIF 三维结构50原子。
+- [ ] 已登录浏览器人工复核 QMOF 列表、元素筛选、详情和三维结构；后端门禁通过不能代替这一项。

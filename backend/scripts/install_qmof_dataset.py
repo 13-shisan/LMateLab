@@ -11,6 +11,7 @@ import sqlite3
 import stat
 import tempfile
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -331,7 +332,7 @@ def verify_version(version_root: Path, spec: DatasetSpec = QMOF_V18) -> dict[str
     database = version_root / "structures.sqlite"
     if database.is_symlink() or not database.is_file():
         raise QmofInstallError("installed structure index is missing or unsafe")
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
         if connection.execute("PRAGMA integrity_check").fetchone() != ("ok",):
             raise QmofInstallError("installed structure index failed integrity_check")
         count = connection.execute("SELECT COUNT(*) FROM structures").fetchone()[0]
