@@ -1213,9 +1213,21 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 本地纯工具层、权限边界、调用预算、实际调用记录、逐任务 provider 分派和前端引擎选择已实现。
 - [x] 前端全量 `162/162` 通过；后端新增/相关定向测试通过。Windows 复用环境仅有既存的密钥文件
   `0600` 测试因 Windows chmod 语义失败，必须以 107 Linux Slurm 全量构建结果作为发布门禁。
-- [ ] 合并 Gitea PR 并同步同一提交到公开 GitHub。
-- [ ] 在 107 通过 Slurm 全量构建，Web 与 Worker 必须同时发布同一 commit/manifest。
+- [x] 功能 PR `#111` 已合并，发布竞态修复 PR `#112` 随后合并；Gitea 与公开 GitHub `main` 均为
+  `d1daab7e985b7b6b96801ed8eb10ac830f76665e`。
+- [x] 107 最终 Slurm 构建 Job `63251/anode01` 为 `COMPLETED/0:0`，后端 `633` 项通过、另有 `4` 项
+  条件跳过，前端测试和构建通过。Web `63252/anode16` 与 Worker `63253/anode17` 正在运行同一 commit
+  和 manifest `7df97413a67372769013523ca42da56ed5c5f747d2d27d6cb7fee89f85099de9`，公网 `18733`
+  的 `live/ready` 已复核。
 - [ ] 使用隔离 Slurm 验收作业把真实网络授权临时设为 `1`，完成一次真实 Qoder 工具调用；成功前不得修改
-  当前生产默认 DeepSeek，也不得停止 Web `63134` 或 Worker `63137`。
-- [ ] 新发布后由 Operator 浏览器复核两种引擎、QMOF/上传结构规划、VASP 结果分析、实际工具记录、草案交接
-  及失败状态；测试通过前不得宣称 Qoder 可用于直接计算或无人审核提交。
+  当前生产默认 DeepSeek。Job `63233/anode01` 已进入真实 Qoder CN 请求，但账号返回 `credit usage limit`；
+  脱敏诊断 Job `63237/anode01` 确认认证有效、无权限拒绝、在第 1 轮结束且工具调用为 0。生产网络开关
+  因此保持 `0`，待账号额度恢复后重跑，不能把这次失败写成 MCP 调用通过。
+- [x] 运行门禁 Job `63263/anode01` 验证 QMOF 返回 `5` 条、内置 MoS2 可用、默认 provider 为 `llm`、
+  Qoder 请求在入队前返回 `503 network-not-authorized`，且活动 Qoder 队列数量不变。
+- [x] 滚动发布暴露的 Worker 状态覆盖竞态已修复：旧 Job 退出时若状态文件已属于新 Job，则不再覆盖；
+  Job `63249/anode01` 的 `17` 项回归通过。失败 Job `63248` 只是包装器完整哈希写错，未开始测试；中间
+  Web/Worker `63238/63244` 已在归属核对后停止。
+- [ ] 账号额度恢复并通过真实 MCP 调用后，由 Operator 浏览器复核两种引擎、QMOF/上传结构规划、VASP
+  结果分析、服务器记录的实际工具调用、草案交接及失败状态。完成前不得宣称 Qoder 可用于直接计算或无人
+  审核提交。
