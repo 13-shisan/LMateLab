@@ -1219,25 +1219,23 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
   条件跳过，前端测试和构建通过。Web `63252/anode16` 与 Worker `63253/anode17` 正在运行同一 commit
   和 manifest `7df97413a67372769013523ca42da56ed5c5f747d2d27d6cb7fee89f85099de9`，公网 `18733`
   的 `live/ready` 已复核。
-- [ ] 使用隔离 Slurm 验收作业把真实网络授权临时设为 `1`，完成一次真实 Qoder 工具调用；成功前不得修改
-  当前生产默认 DeepSeek。Job `63233/anode01` 已进入真实 Qoder CN 请求，但账号返回 `credit usage limit`；
-  脱敏诊断 Job `63237/anode01` 确认认证有效、无权限拒绝、在第 1 轮结束且工具调用为 0。生产网络开关
-  因此保持 `0`，待账号额度恢复后重跑，不能把这次失败写成 MCP 调用通过。
+- [x] 额度恢复后，隔离 Slurm Job `63426/anode01` 完成真实 Qoder CN MCP 验收。服务器实际记录
+  `search_structure_library` 与 `prepare_workflow_draft` 成功调用，返回完整 `relax -> scf -> band -> dos`
+  规划，且 Agent 数据库前后未变。验收通过后才将生产网络开关设为 `1`；默认 provider 继续为
+  `llm`，没有把全局默认改为 Qoder。
 - [x] 运行门禁 Job `63263/anode01` 验证 QMOF 返回 `5` 条、内置 MoS2 可用、默认 provider 为 `llm`、
   Qoder 请求在入队前返回 `503 network-not-authorized`，且活动 Qoder 队列数量不变。
 - [x] 滚动发布暴露的 Worker 状态覆盖竞态已修复：旧 Job 退出时若状态文件已属于新 Job，则不再覆盖；
   Job `63249/anode01` 的 `17` 项回归通过。失败 Job `63248` 只是包装器完整哈希写错，未开始测试；中间
   Web/Worker `63238/63244` 已在归属核对后停止。
-- [ ] 账号额度恢复并通过真实 MCP 调用后，由 Operator 浏览器复核两种引擎、QMOF/上传结构规划、VASP
-  结果分析、服务器记录的实际工具调用、草案交接及失败状态。完成前不得宣称 Qoder 可用于直接计算或无人
-  审核提交。
+- [ ] 已登录 Operator 仍需在当前生产发布上复核两种引擎、QMOF/上传结构规划、VASP 结果分析、
+  服务器记录的实际工具调用、草案交接及失败状态。真实 MCP 后端验收已通过，但 Qoder 仍不可用于直接计算或无人审核提交。
 
 ### 17.39 Qoder 换号与设置栏对齐
 
-- 截图中的“受控 Qoder 未就绪”符合当前生产门禁。Job `63237` 已证明当前 CLI 认证有效且没有权限拒绝，
-  真实请求失败点是账户 `credit usage limit`；但恢复额度只满足调用前提，不自动等于功能验收通过。仍须按
-  17.38 完成真实结构查询或上传结构检查以及 `prepare_workflow_draft` 两类服务器记录的工具调用，才能把
-  `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 从 `0` 改为 `1`。
+- 历史截图中的“受控 Qoder 未就绪”对应当时的额度门禁。额度恢复后，Job `63426` 已按 17.38 完成
+  真实结构搜索与 `prepare_workflow_draft` 两类服务器记录的工具调用；生产
+  `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 现为 `1`，但全局默认 provider 仍为 `llm`。
 - 大陆版 `qoderclicn 1.1.38` 的顶层和 `login --help` 都没有公开 `logout` 子命令。诊断 Job `63297`、
   `63298` 和 `63300` 只在计算节点读取 CLI/SDK 帮助，没有修改认证；SDK 的 `mcp_clear_auth` 仅清除某个
   MCP 服务凭据，不能冒充 Qoder 账号退出。
@@ -1269,4 +1267,25 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
   `eafac4bcdc085a0a4ff3195552f6acb5984446067a35321a86967175545c4688`。无认证 POST 返回后端 `401`，
   证明路由可达但未执行换号。
 - [ ] 已登录生产浏览器仍需刷新后复核当前账号、“切换账号”按钮、桌面设置栏对齐和窄屏单列布局；
-  自动化没有可复用登录态，本次没有绕过认证或修改数据库伪造该项。真实 Qoder MCP 验收仍受额度门禁阻断。
+  自动化没有可复用登录态，本次没有绕过认证或修改数据库伪造该项。真实 Qoder MCP 后端验收已完成，此项只保留交互层验收。
+
+### 17.40 Qoder 真实工具验收与生产切换
+
+- Qoder 额度恢复后，隔离 Job `63426/P107-RTX5090/anode01` 以生产同版代码完成脱敏真实调用，状态为
+  `COMPLETED/0:0`。输出确认 `provider=qoder`、`advisory_only=true`，服务器记录的
+  `search_structure_library` 和 `prepare_workflow_draft` 均成功，生成 `relax -> scf -> band -> dos`
+  四步规划，且 Agent 数据库前后未变。stdout SHA-256 为
+  `a6484a64e7bfe1f0b76405fcd6967b149b5f2e84ae506a516596452e7a77512d`，stderr 为空文件哈希。
+- 生产 `runtime.env` 先备份为 `backups/runtime.env.pre-qoder-live-63426`，再将
+  `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED` 设为 `1`；原文件与备份均保持 `0600`。状态 Job `63452`
+  脱敏确认 SDK、认证、网络授权与引擎可用均为 `true`，且 `login_pending=false`。
+- Gitea PR #116 已自动合并为 `70c05202c8f46657dda378041a44676435f58f74`。合并后构建 Job
+  `63434/anode01` 通过后端 `642` 项（另 `4` 项环境跳过）、前端 `162/162`、Vite `1871`
+  模块和双重 release 清单，manifest 为
+  `494b585ac26f16b643831d899915200b3c5b86a2e3c97ca88ab6e39b6c0b0917`。
+- 新 Web `63454/anode16` 与 Worker `63451/anode17` 运行同一 commit/manifest。4090 relay 切换后，
+  Windows 公网 `18733` 的首页、登录页、Agent 页、`live` 和 `ready` 均返回 `200`，`live`
+  明确返回 Job `63454`。旧 Web `63328` 和 Worker `63329` 经完整归属核对后受控停止，最终仅保留新的一组 Web/Worker。
+- 此次证明 Qoder 已可作为受控草案引擎，不改变安全边界：默认 provider 仍为 `llm`，Qoder 不持有
+  Slurm/VASP 执行工具，用户仍必须在 LMateLab 中检查草案并显式确认提交。当前仍待已登录 Operator
+  完成一次生产页面的 Qoder 对话与草案交接复核。

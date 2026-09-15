@@ -116,7 +116,7 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-截至 `2026-09-15`，当前运行的 Web 是 Job `63328/anode20`，Agent Worker 是 Job `63329/anode20`；两者均运行提交 `a2a7c472b08a6d3f9e53dba7432fcf6213e320d4` 和 release manifest `82d71658ffd316b7a376d0ec848e9cf3978116dec3ccaa46ca6204838d85d613`。公网 `18733` 的 `live`、`ready` 和 relay 恢复状态均与该身份一致。最终构建 Job `63324/anode01` 为 `COMPLETED/0:0`，后端 `637` 项通过、另有 `4` 项按环境条件跳过，前端 `162/162` 和 Vite 构建通过。新 Web 完成迁移前双库备份、两个 Alembic head 和 SQLite 完整性检查；切换前后 Agent `queued/running` 均为空。旧 Web/Worker `63252/63253` 经完整归属核对后受控停止。
+截至 `2026-09-15`，当前运行的 Web 是 Job `63454/anode16`，Agent Worker 是 Job `63451/anode17`；两者均运行 Gitea PR #116 合并提交 `70c05202c8f46657dda378041a44676435f58f74` 和 release manifest `494b585ac26f16b643831d899915200b3c5b86a2e3c97ca88ab6e39b6c0b0917`。公网 `18733` 的 `live`、`ready` 和 relay 恢复状态均与该身份一致。构建 Job `63434/anode01` 为 `COMPLETED/0:0`，后端 `642` 项通过、另有 `4` 项按环境条件跳过，前端 `162/162` 和 Vite `1871` 模块构建通过。旧 Web `63328` 与旧 Worker `63329` 在新入口和唯一新 Worker 均验证后，经用户、JobName、Command、WorkDir、Account、Partition 和 QOS 逐项核对后受控停止。
 
 本次滚动发布先保留旧 Web/Worker `63238/63244`，新入口和 Worker 状态通过后才逐一核对并停止旧 Job。发布时实际发现旧 Worker 退出会覆盖新 Worker 状态；PR `#112` 增加状态锁和跨 Job 退出保护，Slurm 回归 Job `63249/anode01` 的 `17` 项测试通过。失败 Job `63248` 仅为测试包装器写错完整提交哈希，未进入测试。修复版 Worker 发布后，`runtime/agent-worker-state.json` 和 4090 `forward-state.json` 均保持 Job `63253`，不会再被旧 Job 的退出回调覆盖。
 
@@ -164,7 +164,7 @@ Qoder 使用大陆版 `qodercn-agent-sdk==1.0.14` 和内置 `qoderclicn`；认�
 
 Qoder 对话使用 SDK 进程内 MCP，不连接网页中可选的 `qoderclicn remote-control` 服务。只挂载五个应用内只读工具，最多 8 次调用；不挂载 Bash、任意文件、网页、网络、Slurm、VASP 执行、提交、取消或修改工具。Qoder 返回的计算参数还要经过 LMateLab 模板白名单和工作流校验，用户必须在“新建计算”页检查并显式确认、启动。Web 和 Worker 必须同时升级到支持逐任务 provider 的同一 commit/manifest，否则不得开放 Qoder 选择。调度完成只能证明 Worker 运行，不能替代真实工具调用、Agent 响应、引用约束和 Viewer 只读验收。
 
-当前受控规划代码已经发布，但 Qoder CN 账号的真实调用额度已用尽。隔离 Job `63233/anode01` 在网络请求阶段收到官方 `credit usage limit` 错误；Job `63237/anode01` 只输出脱敏字段，确认认证有效、无权限拒绝、在第 1 轮结束且实际工具调用为 0。生产配置因此继续保持 `LMATELAB_COMPETITION_AGENT_PROVIDER=llm` 和 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=0`，不得把“已安装/已登录”显示成“引擎可用”。运行门禁 Job `63263/anode01` 验证 QMOF 返回记录、内置 MoS2 可用、Qoder 创建请求返回 `503 network-not-authorized`，且活动 Qoder 队列数量不变。恢复额度后必须重新运行隔离真实 MCP 调用；只有服务器记录到结构检索或上传结构检查以及 `prepare_workflow_draft` 两类成功调用，才允许把网络开关改为 `1`。
+额度恢复后，隔离 Slurm Job `63426/anode01` 已完成真实 Qoder CN MCP 验收：`provider=qoder`、`advisory_only=true`，服务器实际记录 `search_structure_library` 和 `prepare_workflow_draft` 成功调用，并生成完整 `relax -> scf -> band -> dos` 草案；Agent 数据库验收前后未变。生产 `runtime.env` 已经不可覆盖备份后设置 `LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=1`，默认 provider 仍为 `llm`，Qoder 只是用户逐次选择的受控引擎。状态 Job `63452` 脱敏确认 `sdk_installed`、`engine_authenticated`、`network_authorized` 和 `engine_available` 均为 `true`，`login_pending=false`。Qoder 仍只能生成草案，不能直接提交、取消 Slurm 或执行 VASP。
 
 相关运行日志位于：
 
@@ -177,6 +177,11 @@ Qoder 对话使用 SDK 进程内 MCP，不连接网页中可选的 `qoderclicn r
 /home/scc/pb23030683/lmatelab-107cup/logs/build-63324.{out,err}
 /home/scc/pb23030683/lmatelab-107cup/logs/service-63328.{out,err}
 /home/scc/pb23030683/lmatelab-107cup/logs/agent-worker-63329.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/qoder-acceptance-63426.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/build-63434.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/qoder-status-63452.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/agent-worker-63451.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/service-63454.{out,err}
 ```
 
 Web 服务启动会在 Alembic 迁移前把两套现有 SQLite 用 Online Backup API 复制到 `backups/pre-migration`，文件名包含 Job ID 和 restart count，且禁止覆盖；迁移后要求两个 Alembic 配置都位于 head，并再次执行 `integrity_check`。候选服务或 Worker 失败时保留旧 `18733` relay 和 `18755`，不得静默重试。只有新 `18733` 通过 Operator/Viewer 和 Agent/Qoder 全流程后，才由进程所有者 `Pzxp` 停止 `18755`。
