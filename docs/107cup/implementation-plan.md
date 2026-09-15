@@ -1250,5 +1250,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - 普通问答设置把 API Key 的传输警告移到独立网格行；API URL、模型、API Key 与保存按钮不再因警告高度
   不同而错位。窄屏继续单列显示，提示文字不挤压输入框。
 - [x] 本地前端全量 `162/162`、定向 ESLint、Vite 生产构建和 `git diff --check` 通过。
-- [ ] 107 Linux Slurm 后端全量测试、正式构建、候选 Web/Worker、4090 relay 和桌面/窄屏真实浏览器验收
-  尚未完成；这些通过前不得把本节写成已部署。
+- [x] 107 Linux 正式构建 Job `63318/anode01` 完成：后端 `637` 项通过、另有 `4` 项平台条件跳过，
+  前端 `162/162`、Vite 生产构建和 release 双重清单通过；候选 release 为 `f1688c6...`，manifest
+  SHA-256 为 `dc83fd944f0a275d41ae0c24689a1b5eb1be7971cb6485ed9de4e77690b0dbc9`。
+- [x] 本地 Playwright 以模拟 Operator 接口完成 `1440x900` 和 `390x844` 两种视口检查：桌面三个输入框
+  与保存按钮的 top、bottom 和 `36px` 高度完全一致；窄屏整页宽度等于视口宽度，控制台错误和警告为 `0`。
+- [ ] Gitea PR 合并、合并后主线构建、候选 Web/Worker、4090 relay 和真实生产浏览器复核尚未完成；
+  这些通过前不得把本节写成已部署。
