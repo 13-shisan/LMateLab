@@ -51,6 +51,7 @@ Figshare 文件完全一致。正式 provenance 如实记录本次实际从
 | `63135` | A100 profile, 1 CPU, 2 GiB | 失败 | 验收预估 Mn 为718，真实返回723；数据未修改 |
 | `63136` | `anode17`, 1 CPU, 2 GiB | `COMPLETED/0:0`, 1 s | 后端总数、Mn筛选和 CIF 解析通过 |
 | `63137` | `anode17`, 1 CPU, 2 GiB | `RUNNING` | 新 Agent Worker，与 Web 同 commit/manifest |
+| `63154` | `anode17`, 2 CPU, 8 GiB | `COMPLETED/0:0`, 25 s | 合并后只读 Stage 10 回归通过 |
 
 Job `63129` 于 `12:21:11` 提交、`12:21:12` 开始、`12:22:40 +08:00` 结束，排队约1秒。运行中
 `sstat` 观测 `MaxRSS=86600K`、读 `1017041636` 字节、写 `745840948` 字节；这是运行中快照，不冒充
@@ -68,6 +69,8 @@ Job `63129` 于 `12:21:11` 提交、`12:21:12` 开始、`12:22:40 +08:00` 结束
 | `qmof-library-63129.err` | `e3b0c44298fc1c149afbf4e8996fb92427ae41e4649b934ca495991b7852b855` |
 | `qmof-runtime-acceptance-63136.out` | `86f358c68b26de66f832aba76001c50e6e3d04d2353ac4cc2eb6222c2de7ecdd` |
 | `qmof-runtime-acceptance-63136.err` | `e3b0c44298fc1c149afbf4e8996fb92427ae41e4649b934ca495991b7852b855` |
+| `stage10-acceptance-63154.out` | `b63b0adf4642a8ced49ca0b6a31c84c48a8e8846ba8f40dbb0725030a2e02d4c` |
+| `stage10-acceptance-63154.err` | `e3b0c44298fc1c149afbf4e8996fb92427ae41e4649b934ca495991b7852b855` |
 
 失败日志也保留为 `0600`：`63109.err` 为
 `dd48c9b191c2f0a6a676e0b19d62d237f5bedf7254440a973a17fc22fcb4f9f2`，`63125.err` 为
@@ -88,6 +91,13 @@ Job `63129` 于 `12:21:11` 提交、`12:21:12` 开始、`12:22:40 +08:00` 结束
 `8a0dec827061ec080e0872472bf80611b23d17b7245217ef4fcadcbbb37a7de9`；ready 返回 `ready`。新 Worker
 `63137/anode17` 的 commit/manifest 完全一致。旧 Web `62952` 和 Worker `62954` 在归属及活动 Agent 队列
 检查后受控停止；最终队列只保留新 Web/Worker，没有操作同一共享账号下的其他作业。
+
+证据 PR #109 合并为 `444a8e92f4370cc009dbbba84001b4075876ee6b` 后，107 源码检出已快进到该提交；运行服务仍固定在
+已验收的功能 release `a083e457...`。只读 Stage 10 Job `63154/anode17` 明确针对该运行 release，复核
+`eln.db` 为 `integrity_check=ok`、工作流数为 `11`、路由数为 `46`，成功/失败结果包哈希保持一致，输出
+`STAGE10_ACCEPTANCE_OK`。作业于 `12:47:02` 提交、`12:47:03` 开始、`12:47:28 +08:00` 结束；日志和
+证据均收紧为 `0600`。这证明证据合并和 QMOF 接入没有破坏既有数据库与工作流，但不把文档提交冒充为
+新的 Web release。
 
 已登录浏览器对列表、元素筛选、详情和三维结构的人工复核仍保留为最终 UI 门禁；后端实际数据接入已完成，
 不能用尚未点击页面否定已经通过的安装与运行时证据，也不能反过来用后端证据替代人工页面验收。
