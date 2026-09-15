@@ -257,3 +257,17 @@ test('Qoder CN settings expose fixed install, login, and service controls', () =
   assert.match(page, /IP 白名单 HTTP 入口/);
   assert.match(page, /传输未加密/);
 });
+
+test('Agent selects a per-run engine and distinguishes Qoder service from engine readiness', () => {
+  const page = readFileSync(
+    new URL('../src/features/competition/agent/CompetitionAgent.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(page, /provider:\s*agentProvider/);
+  assert.match(page, /DeepSeek/);
+  assert.match(page, /受控 Qoder/);
+  assert.match(page, /engine_available/);
+  assert.match(page, /service_running/);
+  assert.match(page, /当前引擎/);
+});

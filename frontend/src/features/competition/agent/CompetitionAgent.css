@@ -61,10 +61,17 @@
 .competition-agent-response > p { margin: 4px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .competition-agent-response { max-width: 94%; padding-left: 11px; border-left: 3px solid #d4dae4; }
 .competition-agent-response-meta { display: flex; align-items: center; gap: 8px; }
+.competition-agent-response-meta small { color: #68758a; font-size: 10px; font-weight: 700; }
 .competition-agent-status { padding: 3px 6px; border-radius: 4px; color: #4b5870; background: #e7ebf0; font-size: 10px; font-weight: 800; }
 .competition-agent-status.is-succeeded { color: #22613c; background: #e3f4e9; }
 .competition-agent-status.is-failed { color: #9a2f2f; background: #fbe8e8; }
 .competition-agent-composer { display: grid; gap: 8px; padding: 11px; border-top: 1px solid #d7dee9; background: #fff; }
+.competition-agent-engine-picker { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.competition-agent-engine-picker > span { color: #536076; font-size: 11px; font-weight: 800; }
+.competition-agent-engine-picker > div { display: grid; grid-template-columns: repeat(2, minmax(86px, 1fr)); padding: 2px; border: 1px solid #cbd3df; border-radius: 6px; background: #f1f3f6; }
+.competition-agent-engine-picker button { min-height: 28px; padding: 0 9px; border: 0; border-radius: 4px; color: #536076; background: transparent; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.competition-agent-engine-picker button.is-active { color: #174f9f; background: #fff; box-shadow: 0 1px 3px rgba(23, 32, 51, .12); }
+.competition-agent-engine-picker button:disabled { color: #9aa4b3; cursor: not-allowed; }
 .competition-agent-prompt-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px; gap: 8px; }
 .competition-agent-prompt-row textarea { min-height: 68px; box-sizing: border-box; padding: 9px; border: 1px solid #c8d1df; border-radius: 6px; font: inherit; resize: none; }
 .competition-agent-prompt-row button { display: grid; place-items: center; border: 0; border-radius: 6px; color: #fff; background: #1f5fce; cursor: pointer; }

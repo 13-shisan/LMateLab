@@ -20,6 +20,7 @@ from schemas_competition_agent import (
 )
 from services.competition_agent.catalog import list_templates
 from services.competition_agent.llm_runtime import llm_configured
+from services.competition_agent.qoder_runtime import qoder_engine_status
 from services.competition_agent.examples import ExampleBundleError, build_example_bundle, list_examples
 from services.competition_agent.literature import (
     LiteratureError,
@@ -38,7 +39,13 @@ from services.qoder_management import (
 )
 from services.competition_agent.settings import read_settings, write_api_key, write_settings
 from services.competition_agent.structure_library import StructureLibraryError, search_structures
-from services.competition_agent.service import approve_run, create_run, delete_conversation, run_view
+from services.competition_agent.service import (
+    AgentProviderUnavailable,
+    approve_run,
+    create_run,
+    delete_conversation,
+    run_view,
+)
 from services.competition_agent.structures import (
     StructureBuildError,
     build_structure,
@@ -99,20 +106,25 @@ def runtime_status(_user: User = Depends(require_viewer_or_operator)):
         if managed_qoder is not None
         else os.environ.get("LMATELAB_QODER_CONNECTED", "0") == "1"
     )
+    qoder_engine = qoder_engine_status(managed_status=managed_qoder)
     return {
         "provider": provider,
         "auth_mode": auth_mode if provider == "qoder" else None,
         "connected": llm_key_configured if provider == "llm" else (
-            provider == "qoder" and qoder_connected
+            provider == "qoder" and qoder_engine["engine_available"]
         ),
-        "qoder_available": qoder_connected,
+        "llm_available": llm_key_configured,
+        "qoder_available": qoder_engine["engine_available"],
         "qoder": {
             "interface": "qodercn-agent-sdk",
-            "enabled": provider == "qoder",
+            "enabled": qoder_engine["engine_available"],
             "connected": qoder_connected,
             "auth_mode": auth_mode,
             "model": os.environ.get("LMATELAB_QODER_MODEL") or None,
+            "installed": qoder_engine["sdk_installed"],
+            "authenticated": qoder_connected,
             **(managed_qoder or {}),
+            **qoder_engine,
         },
     }
 
@@ -346,6 +358,12 @@ def create_agent_run(
 ):
     try:
         return run_view(create_run(db, current_user.id, payload))
+    except AgentProviderUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            headers={"X-Error-Code": "agent_provider_unavailable"},
+        ) from None
     except (AgentToolError, AgentUploadError, LiteratureError, StructureLibraryError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found") from exc
 
