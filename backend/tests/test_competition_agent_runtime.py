@@ -274,6 +274,32 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("qoder", output["provider"])
 
+    def test_real_runtime_accepts_one_json_fence_after_qoder_explanation(self):
+        output = RealQoderRuntime._validated_output(
+            "Qoder completed the controlled tool calls.\n"
+            "```json\n"
+            '{"summary":"Prepared a read-only draft.","citations":[],'
+            '"parameter_changes":[],"advisory_only":true}'
+            "\n```\n",
+            "template_recommendation",
+            {},
+        )
+
+        self.assertEqual("Prepared a read-only draft.", output["summary"])
+
+    def test_real_runtime_rejects_ambiguous_multiple_json_fences(self):
+        raw = (
+            '```json\n{"summary":"first","advisory_only":true}\n```\n'
+            '```json\n{"summary":"second","advisory_only":true}\n```'
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "invalid JSON"):
+            RealQoderRuntime._validated_output(
+                raw,
+                "template_recommendation",
+                {},
+            )
+
     def test_real_runtime_uses_server_recorded_tool_calls_not_model_claims(self):
         plan = calculation_plan("计算一下 MoS2 体系的能带")
         output = RealQoderRuntime._validated_output(
