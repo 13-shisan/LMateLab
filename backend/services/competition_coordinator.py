@@ -171,6 +171,61 @@ class CompetitionCoordinator:
         )
 
     @staticmethod
+    def _attempt_input_sha256(
+        session: Session,
+        run: WorkflowRun,
+        step: WorkflowStep,
+        attempt: WorkflowAttempt,
+        logical_path: str,
+    ) -> str:
+        relative_path = f"{run.id}/attempts/{attempt.id}/{logical_path}"
+        row = session.scalar(
+            select(WorkflowFile).where(
+                WorkflowFile.workflow_id == run.id,
+                WorkflowFile.attempt_id == attempt.id,
+                WorkflowFile.relative_path == relative_path,
+                WorkflowFile.source_kind == "attempt_input",
+            )
+        )
+        try:
+            metadata = json.loads(row.metadata_json) if row is not None else None
+        except (TypeError, json.JSONDecodeError):
+            metadata = None
+        required_metadata = {
+            "logical_path",
+            "step_key",
+            "input_role",
+            "source_workflow_id",
+            "source_attempt_id",
+            "source_file_id",
+            "source_sha256",
+            "template_version",
+            "release_commit",
+        }
+        if (
+            row is None
+            or row.owner_id != run.owner_id
+            or row.size_bytes <= 0
+            or type(row.sha256) is not str
+            or len(row.sha256) != 64
+            or any(character not in "0123456789abcdef" for character in row.sha256)
+            or not isinstance(metadata, dict)
+            or set(metadata) != required_metadata
+            or metadata.get("logical_path") != logical_path
+            or metadata.get("step_key") != step.step_key
+            or metadata.get("input_role") != "stage5_kpoints"
+            or metadata.get("source_workflow_id") != run.id
+            or metadata.get("source_sha256") != row.sha256
+            or metadata.get("template_version") != run.template_version
+            or metadata.get("release_commit") != run.release_commit
+        ):
+            raise CoordinatorError(
+                "acceptance_input_ledger_invalid",
+                "attempt input ledger is not trusted for acceptance",
+            )
+        return row.sha256
+
+    @staticmethod
     def _latest_attempt(session: Session, workflow_id: str) -> WorkflowAttempt | None:
         return session.scalar(
             select(WorkflowAttempt)
@@ -879,11 +934,24 @@ class CompetitionCoordinator:
                     "acceptance_scheduler_untrusted",
                     "scheduler evidence is not trusted for acceptance",
                 )
+            acceptance_options = {
+                "scheduler_state": observation["raw_state"],
+                "scheduler_exit_code": observation["exit_code"],
+            }
+            if step.step_key == "dos":
+                acceptance_options["expected_kpoints_sha256"] = (
+                    self._attempt_input_sha256(
+                        session,
+                        run,
+                        step,
+                        attempt,
+                        "KPOINTS",
+                    )
+                )
             report = self._accept_attempt(
                 Path(attempt.working_directory),
                 step.step_key,
-                scheduler_state=observation["raw_state"],
-                scheduler_exit_code=observation["exit_code"],
+                **acceptance_options,
             )
             if not isinstance(report, AcceptanceReport):
                 raise CoordinatorError(

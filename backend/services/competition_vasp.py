@@ -65,9 +65,6 @@ _EFERMI_RE: Final = re.compile(
 _BAND_KPOINTS_SHA256: Final = (
     "70415ce261ae121768664a9e2477c418846a1fbe9799209030f25f9cdccd778c"
 )
-_DOS_KPOINTS_SHA256: Final = (
-    "97e52b91d674b9d4ca7dc81c0fcb5ec5af614c71ec5317e13489ecb62298e1b8"
-)
 _COMMON_ACCEPTANCE_EVIDENCE: Final = (
     "vasp-exit-code.txt",
     "runtime-time.txt",
@@ -1380,6 +1377,34 @@ def _parse_nedos(content: bytes) -> int:
     return nedos
 
 
+def _parse_dos_gamma_mesh(content: bytes) -> tuple[int, int, int]:
+    try:
+        lines = content.decode("ascii").splitlines()
+    except UnicodeDecodeError:
+        raise VaspPolicyError("dos_kpoints_invalid", "DOS KPOINTS is invalid") from None
+    if (
+        len(lines) != 5
+        or lines[0] != "Automatic mesh"
+        or lines[1] != "0"
+        or lines[2] != "Gamma"
+        or lines[4] != "0 0 0"
+    ):
+        raise VaspPolicyError("dos_kpoints_invalid", "DOS KPOINTS is invalid")
+    fields = lines[3].split(" ")
+    if (
+        len(fields) != 3
+        or any(
+            len(value) > 2 or re.fullmatch(r"[1-9][0-9]*", value) is None
+            for value in fields
+        )
+    ):
+        raise VaspPolicyError("dos_kpoints_invalid", "DOS KPOINTS is invalid")
+    mesh = tuple(int(value) for value in fields)
+    if any(value > 60 for value in mesh):
+        raise VaspPolicyError("dos_kpoints_invalid", "DOS KPOINTS is outside policy")
+    return mesh
+
+
 def _validate_generated_band_path(
     kpoints_content: bytes,
     policy_content: bytes,
@@ -1439,6 +1464,7 @@ def accept_vasp_attempt(
     vasprun_loader: Callable[[Path], object] | None = None,
     structure_loader: Callable[[Path], object] | None = None,
     potcar_contract: PotcarContract | None = None,
+    expected_kpoints_sha256: str | None = None,
 ) -> AcceptanceReport:
     """Read and scientifically accept one fixed-stage VASP attempt."""
     checks: list[dict[str, object]] = []
@@ -1683,10 +1709,33 @@ def accept_vasp_attempt(
         if stage == "dos":
             kpoints = next(item for item in artifacts if item["name"] == "KPOINTS")
             measurements["kpoints_sha256"] = kpoints["sha256"]
-            if kpoints["sha256"] != _DOS_KPOINTS_SHA256:
+            try:
+                _parse_dos_gamma_mesh(
+                    _read_acceptance_metadata(opened_files["KPOINTS"])
+                )
+            except VaspPolicyError as error:
                 return _failed_acceptance(
-                    check_name="dos_kpoints", reason_code="dos_kpoints_invalid", checks=checks,
+                    check_name="dos_kpoints", reason_code=error.code, checks=checks,
                     measurements=measurements, artifacts=artifacts,
+                )
+            if (
+                type(expected_kpoints_sha256) is not str
+                or _SHA256_RE.fullmatch(expected_kpoints_sha256) is None
+            ):
+                return _failed_acceptance(
+                    check_name="dos_kpoints",
+                    reason_code="dos_kpoints_contract_invalid",
+                    checks=checks,
+                    measurements=measurements,
+                    artifacts=artifacts,
+                )
+            if kpoints["sha256"] != expected_kpoints_sha256:
+                return _failed_acceptance(
+                    check_name="dos_kpoints",
+                    reason_code="dos_kpoints_mismatch",
+                    checks=checks,
+                    measurements=measurements,
+                    artifacts=artifacts,
                 )
             _passed_check(checks, "dos_kpoints")
             try:

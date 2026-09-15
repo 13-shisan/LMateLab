@@ -1128,6 +1128,10 @@ class ScientificAcceptanceTests(unittest.TestCase):
     def accept(self, stage: str, **kwargs):
         scheduler_state = kwargs.pop("scheduler_state", "COMPLETED")
         scheduler_exit_code = kwargs.pop("scheduler_exit_code", "0:0")
+        if stage == "dos" and "expected_kpoints_sha256" not in kwargs:
+            kwargs["expected_kpoints_sha256"] = hashlib.sha256(
+                self.dos_kpoints
+            ).hexdigest()
         vasprun_loader = kwargs.pop(
             "vasprun_loader",
             lambda _path: self.fake_vasprun(
@@ -2308,15 +2312,55 @@ class ScientificAcceptanceTests(unittest.TestCase):
 
                 self.assert_rejected("band_kpoints_invalid", "band")
 
-    def test_dos_requires_exact_fixed_gamma_mesh_hash(self):
+    def test_dos_accepts_reviewed_gamma_mesh_bound_to_input_hash(self):
         self.write_complete_outputs("dos")
+        reviewed = self.dos_kpoints.replace(b"24 24 1", b"16 10 1")
+        self.write("KPOINTS", reviewed)
+
+        report = self.accept(
+            "dos",
+            expected_kpoints_sha256=hashlib.sha256(reviewed).hexdigest(),
+        )
+
+        self.assertTrue(report.accepted, report.as_dict())
+
+    def test_dos_rejects_invalid_or_out_of_policy_gamma_mesh(self):
         for content in (
-            self.dos_kpoints.replace(b"24 24 1", b"24 24 2"),
+            self.dos_kpoints.replace(b"24 24 1", b"24 24 0"),
+            self.dos_kpoints.replace(b"24 24 1", b"61 24 1"),
+            self.dos_kpoints.replace(b"24 24 1", b"9" * 5000 + b" 24 1"),
             self.dos_kpoints.replace(b"Gamma", b"Monkhorst-Pack"),
+            self.dos_kpoints.replace(b"0 0 0\n", b"0 0 0\nextra\n"),
         ):
             with self.subTest(content=content):
+                self.write_complete_outputs("dos")
                 self.write("KPOINTS", content)
-                self.assert_rejected("dos_kpoints_invalid", "dos")
+                self.assert_rejected(
+                    "dos_kpoints_invalid",
+                    "dos",
+                    expected_kpoints_sha256=hashlib.sha256(content).hexdigest(),
+                )
+
+    def test_dos_rejects_kpoints_changed_after_input_publication(self):
+        self.write_complete_outputs("dos")
+        reviewed = self.dos_kpoints.replace(b"24 24 1", b"16 10 1")
+        self.write("KPOINTS", reviewed)
+
+        self.assert_rejected(
+            "dos_kpoints_mismatch",
+            "dos",
+            expected_kpoints_sha256=hashlib.sha256(self.dos_kpoints).hexdigest(),
+        )
+
+    def test_dos_rejects_missing_or_invalid_kpoints_contract(self):
+        for expected in (None, "not-a-sha256"):
+            with self.subTest(expected=expected):
+                self.write_complete_outputs("dos")
+                self.assert_rejected(
+                    "dos_kpoints_contract_invalid",
+                    "dos",
+                    expected_kpoints_sha256=expected,
+                )
 
     def test_dos_nedos_is_bounded_unambiguous_and_matches_effective_parameter(self):
         for incar, parameter, code in (
