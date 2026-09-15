@@ -1177,8 +1177,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 本地合成 ZIP 单元测试、部署合同、Shell/Python 语法、正式构建和清单通过；最终构建 Job `63127`
   通过后端 `619` 项（另有4项平台条件跳过）、前端 `161/161` 和 Vite `1871` 模块。
 - [x] Gitea PR #106、#107、#108 已依次合并；功能 release 固定为 `a083e457...`。
-- [ ] 同一 Gitea `main` 合并提交同步到公开 GitHub `main`；当前 Windows 和4090到 `github.com:443`
-  均超时，不能把同步失败写成完成。
+- [x] 公开 GitHub 同步链路已通过官方 Git Data API 恢复；所有上传 blob、tree 和 commit
+  的返回 SHA 均与 Gitea 本地对象完全一致，且仅在全部精确匹配后才以非强制方式更新
+  GitHub `main`。Windows 和 4090 到 `github.com:443` 的 Git/SSH 直连仍超时，不影响本次
+  已验证的 API 精确同步。
 - [x] QMOF Job `63129/anode17` 为 `COMPLETED/0:0`、排队约1秒、运行1分28秒；官方归档、20372条
   CSV、20372个 CIF、逐文件清单和 SQLite 完整性全部通过，详情见 `qmof-library-evidence.md`。
 - [x] 新 Web `63134/anode16` 和 Worker `63137/anode17` 的 commit/manifest 一致，公网 `18733`
@@ -1334,6 +1336,7 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
   `c29036c663b034c92dc2f16e8594255f7ce958607b5a53b0090a1fdaafdb0de3`，同时复核
   `NEDOS=3000`、VASP `6.4.2`、VASPKIT `1.5.1`。作业仅执行 `PRAGMA query_only=ON`
   的数据库查询和原文件验收，没有回写原 attempt、伪造历史状态或重跑 VASP。
-- [ ] 本机连接 `github.com:443` 暂时失败，公开 GitHub `main` 仍待同步到同一
-  `35480058...` 合并提交。
+- [x] DOS 修复与上线证据截至 Gitea PR #120 的完整历史已通过 GitHub 官方 Git Data API
+  精确同步；公开 GitHub `main` 已确认为同一 `f1f6775...` 合并提交。同步过程没有强制
+  更新，也没有生成与 Gitea 不同 SHA 的替代历史。
 - [ ] 是否新建一次 DOS retry 由 Operator 在修复上线后显式决定；默认不自动提交。
