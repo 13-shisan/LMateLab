@@ -1171,6 +1171,9 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
   `FAILED/6:0`、运行 `12` 秒；没有创建 `v18` 或切换 `current`。短时探测 Job `63111/anode17` 随后确认
   计算节点可从4090固定临时端口读取长度 `392088304` 的归档，状态为 `COMPLETED/0:0`。补丁只允许官方
   哈希一致镜像或该固定临时 URL，并把实际传输通道写入 provenance；安装成功后必须停服并删除临时副本。
+- 第二次安装 Job `63125/anode17` 同样在归档写入前失败：URL 白名单允许固定 HTTP 中继，但 curl 仍保留
+  镜像专用的 `--proto '=https'`，因此为 `FAILED/1:0`。修正后协议与地址成对固定：官方镜像只允许 HTTPS
+  和 TLS 1.2 以上，临时中继只允许该精确 HTTP URL；不接受任意地址或协议降级。
 - [ ] 本地合成 ZIP 单元测试、部署合同、Shell/Python 语法、正式构建和清单通过。
 - [ ] Gitea PR 合并且同一合并提交同步到公开 GitHub `main`。
 - [ ] 107 QMOF Slurm Job 成功，记录真实 Job ID、节点、排队/运行时间、MaxRSS、日志哈希和 provenance。
