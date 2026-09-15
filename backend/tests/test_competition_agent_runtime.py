@@ -384,19 +384,30 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
             output["parameter_changes"],
         )
 
-    def test_real_runtime_rejects_unauthorized_citation(self):
-        with self.assertRaisesRegex(RuntimeError, "unauthorized data"):
-            RealQoderRuntime._validated_output(
-                json.dumps({
-                    "summary": "Unsafe citation.",
-                    "citations": [{"kind": "template", "id": "unknown"}],
-                    "tool_calls": [],
-                    "workspace": {},
-                    "advisory_only": True,
-                }),
-                "template_recommendation",
-                {"templates": [{"id": "2d_relax"}]},
-            )
+    def test_real_runtime_replaces_model_citations_with_server_exposed_sources(self):
+        output = RealQoderRuntime._validated_output(
+            json.dumps({
+                "summary": "Controlled citation.",
+                "citations": ["invented", {"kind": "template", "id": "unknown"}],
+                "tool_calls": [],
+                "workspace": {},
+                "advisory_only": True,
+            }),
+            "template_recommendation",
+            {"templates": [{"id": "not-actually-exposed"}]},
+            allowed_ids={
+                ("structure", "MoS2_monolayer"),
+                ("template", "2d_relax"),
+            },
+        )
+
+        self.assertEqual(
+            [
+                {"kind": "structure", "id": "MoS2_monolayer"},
+                {"kind": "template", "id": "2d_relax"},
+            ],
+            output["citations"],
+        )
 
     def test_llm_runtime_replaces_model_citations_with_server_authorized_sources(self):
         output = OpenAICompatibleRuntime._validated_output(

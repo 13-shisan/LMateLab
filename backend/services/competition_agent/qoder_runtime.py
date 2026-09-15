@@ -211,7 +211,8 @@ class RealQoderRuntime:
             "claim that a calculation ran. Never submit, cancel, mutate, execute VASP, use a "
             "scheduler, access arbitrary files, use shell, or use the web. Return exactly one "
             "JSON object with summary, citations, parameter_changes, and advisory_only. "
-            "advisory_only must be true. parameter_changes may use only editable parameters "
+            "advisory_only must be true and citations must be an empty list because LMateLab "
+            "attaches server-recorded sources. parameter_changes may use only editable parameters "
             "returned by prepare_workflow_draft. The user and LMateLab must validate every draft."
         )
         tool_session = ControlledQoderToolSession(tool_payload)
@@ -292,15 +293,12 @@ class RealQoderRuntime:
             raise RuntimeError("Qoder response has no summary")
         if len(value["summary"]) > 8000:
             raise RuntimeError("Qoder response summary is too long")
-        citations = value.get("citations", [])
-        if not isinstance(citations, list) or not all(isinstance(item, dict) for item in citations):
-            raise RuntimeError("Qoder response citations are invalid")
         if allowed_ids is None:
             allowed_ids = RealQoderRuntime._authorized_ids(tool_payload)
-        for citation in citations:
-            key = (str(citation.get("kind") or ""), str(citation.get("id") or ""))
-            if key not in allowed_ids:
-                raise RuntimeError("Qoder response cites unauthorized data")
+        citations = [
+            {"kind": kind, "id": identifier}
+            for kind, identifier in sorted(allowed_ids)
+        ]
         actual_calls = [dict(item) for item in (tool_calls or [])]
         succeeded_tools = {
             str(item.get("name")) for item in actual_calls if item.get("status") == "succeeded"
