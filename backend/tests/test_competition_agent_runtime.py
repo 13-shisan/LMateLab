@@ -309,6 +309,15 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
                 tool_calls=[],
             )
 
+    def test_calculation_plan_keeps_band_and_dos_when_both_are_requested(self):
+        plan = calculation_plan("为 MoS2 生成 relax、SCF、能带和态密度计算方案")
+
+        self.assertEqual(["relax", "scf", "band", "dos"], plan["steps"])
+        self.assertEqual(
+            ["relax", "scf", "band", "dos"],
+            [item["step"] for item in plan["templates"]],
+        )
+
     def test_real_runtime_rejects_out_of_range_or_non_numeric_parameter_changes(self):
         plan = calculation_plan("计算一下 MoS2 体系的能带")
         output = RealQoderRuntime._validated_output(

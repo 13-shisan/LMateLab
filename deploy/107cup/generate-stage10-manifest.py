@@ -89,6 +89,8 @@ STAGE10_MANIFEST_PATHS = (
     "deploy/107cup/service_recovery.py",
     "deploy/107cup/service.slurm",
     "deploy/107cup/slurm/generic-vaspkit-preflight.slurm",
+    "deploy/107cup/slurm/qoder-live-acceptance.py",
+    "deploy/107cup/slurm/qoder-live-acceptance.slurm",
     "deploy/107cup/slurm/stage8-acceptance.py",
     "deploy/107cup/slurm/stage8-acceptance.slurm",
     "deploy/107cup/slurm/vasp-stage.slurm",

@@ -36,11 +36,16 @@ def _formula(prompt: str) -> str | None:
 
 def _steps(prompt: str) -> list[str]:
     lowered = prompt.casefold()
-    if "能带" in prompt or "band" in lowered:
-        return ["relax", "scf", "band"]
-    if "态密度" in prompt or "dos" in lowered:
-        return ["relax", "scf", "dos"]
-    return ["relax"]
+    wants_band = "能带" in prompt or "band" in lowered
+    wants_dos = "态密度" in prompt or "dos" in lowered
+    if not wants_band and not wants_dos:
+        return ["relax"]
+    steps = ["relax", "scf"]
+    if wants_band:
+        steps.append("band")
+    if wants_dos:
+        steps.append("dos")
+    return steps
 
 
 def _template_root() -> Path:

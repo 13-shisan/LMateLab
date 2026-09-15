@@ -119,6 +119,39 @@ class AgentDeploymentContractTests(unittest.TestCase):
         self.assertIn("not 0 <= args.max_idle_cycles <= 10000", worker)
         self.assertIn("args.max_idle_cycles and idle_cycles >= args.max_idle_cycles", worker)
 
+    def test_qoder_live_acceptance_is_isolated_read_only_and_sanitized(self):
+        slurm = self.read(DEPLOY / "slurm" / "qoder-live-acceptance.slurm")
+        harness = self.read(DEPLOY / "slurm" / "qoder-live-acceptance.py")
+        runtime_example = self.read(DEPLOY / "runtime.env.example")
+
+        for required in (
+            "#SBATCH --job-name=lmatelab-qoder-acceptance",
+            "#SBATCH --partition=P107-RTX5090",
+            "#SBATCH --time=00:10:00",
+            'source "$runtime_env"',
+            "export LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=1",
+        ):
+            self.assertIn(required, slurm)
+        self.assertIn("LMATELAB_QODER_REAL_NETWORK_AUTHORIZED=0", runtime_example)
+
+        for required in (
+            'REQUIRED_TOOLS = {"search_structure_library", "prepare_workflow_draft"}',
+            'EXPECTED_STEPS = ["relax", "scf", "band", "dos"]',
+            '"agent_database_unchanged": before == after',
+            '"only_controlled_tools_called"',
+            '"summary_sha256"',
+        ):
+            self.assertIn(required, harness)
+        for forbidden in (
+            "QODERCN_PERSONAL_ACCESS_TOKEN",
+            "subprocess",
+            "sbatch",
+            "scancel",
+            "os.environ.items",
+            "str(exc)[:",
+        ):
+            self.assertNotIn(forbidden, harness)
+
     def test_service_backs_up_and_validates_databases_around_migrations(self):
         service = self.read(DEPLOY / "service.slurm")
         helper = self.read(DEPLOY / "prepare-databases.py")
