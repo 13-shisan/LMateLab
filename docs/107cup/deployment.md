@@ -75,6 +75,11 @@ bash deploy/107cup/submit-qmof-library.sh
 `P107-A100` Slurm 作业。下载、哈希、解压、ID 对账、逐 CIF 清单和 SQLite 建库均在计算节点进行。
 登录节点不运行下载或建库。查询范围只限返回的 QMOF Job ID：
 
+默认传输 URL 是固定 revision 的哈希一致镜像。若107计算节点无法解析该域名，可由 Operator 在4090
+临时提供固定 URL `http://222.195.94.37:18757/qmof_database-v18.zip`，并以环境变量
+`LMATELAB_QMOF_TRANSFER_URL` 提交；脚本拒绝任何其他 URL。安装器仍验证官方大小、MD5 和 SHA-256，
+并把实际 URL 写入 `provenance.json`。成功后必须立即停止临时 HTTP 服务并删除4090归档副本。
+
 ```bash
 root=/home/scc/pb23030683/lmatelab-107cup
 job_id=$(<"$root/runtime/qmof-library-job-id")

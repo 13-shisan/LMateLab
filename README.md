@@ -54,7 +54,9 @@ LLM API Key 优先通过 HTTPS 或直达 107 计算节点 Web 服务的 `127.0.0
 公开 QMOF 全量结构和 CIF 文件体积较大，不随 Git 仓库分发。107 正式数据固定为
 [QMOF Figshare v18](https://figshare.com/articles/dataset/QMOF_Database/13147324/18)
 （DOI `10.6084/m9.figshare.13147324.v18`，CC BY 4.0，20,372 条）。Figshare 是权威来源；部署时仅在
-Figshare 下载端不可用时，使用固定 revision 且与官方文件大小、MD5、SHA-256 全部一致的镜像作为传输通道。
+Figshare 下载端不可用时，使用固定 revision 且与官方文件大小、MD5、SHA-256 全部一致的镜像作为传输通道；
+若107计算节点也无法解析该镜像域名，可临时通过4090固定端口中继同一归档，实际 URL 必须写入 provenance，
+传输后立即停用并删除临时副本。
 下载、解压、逐 CIF 哈希、CSV/CIF ID 对账和 SQLite 建库全部在 Slurm 计算节点执行：
 
 ```bash

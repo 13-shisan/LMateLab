@@ -1167,6 +1167,10 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - Web 与 Agent Worker 使用相同的 `LMATELAB_STRUCTURE_LIBRARY_DB` 和 `LMATELAB_QMOF_CIF_ROOT`，且启动前
   要求索引和 CIF 根目录存在。下载、解压和建库只能通过短时提交的 `qmof-library.slurm` 在计算节点执行，
   登录节点只提交和查询明确 Job ID。
+- 首次安装 Job `63109/anode17` 在任何归档字节写入前因计算节点无法解析 `huggingface.co` 失败，状态为
+  `FAILED/6:0`、运行 `12` 秒；没有创建 `v18` 或切换 `current`。短时探测 Job `63111/anode17` 随后确认
+  计算节点可从4090固定临时端口读取长度 `392088304` 的归档，状态为 `COMPLETED/0:0`。补丁只允许官方
+  哈希一致镜像或该固定临时 URL，并把实际传输通道写入 provenance；安装成功后必须停服并删除临时副本。
 - [ ] 本地合成 ZIP 单元测试、部署合同、Shell/Python 语法、正式构建和清单通过。
 - [ ] Gitea PR 合并且同一合并提交同步到公开 GitHub `main`。
 - [ ] 107 QMOF Slurm Job 成功，记录真实 Job ID、节点、排队/运行时间、MaxRSS、日志哈希和 provenance。

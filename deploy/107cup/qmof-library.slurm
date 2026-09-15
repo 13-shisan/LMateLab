@@ -22,7 +22,13 @@ project=/home/scc/pb23030683/projects/LMateLab-107Cup
 data_root="$root/data/qmof"
 downloads="$data_root/downloads"
 archive="$downloads/qmof_database-v18.zip"
-download_url='https://huggingface.co/datasets/StructureCloud/QMOF/resolve/24fc459339583e2f7b876296b6daec8d6d0a22a5/raw/qmof_database.zip?download=true'
+default_download_url='https://huggingface.co/datasets/StructureCloud/QMOF/resolve/24fc459339583e2f7b876296b6daec8d6d0a22a5/raw/qmof_database.zip?download=true'
+temporary_relay_url='http://222.195.94.37:18757/qmof_database-v18.zip'
+download_url="${LMATELAB_QMOF_TRANSFER_URL:-$default_download_url}"
+case "$download_url" in
+  "$default_download_url"|"$temporary_relay_url") ;;
+  *) printf 'unapproved QMOF transfer URL\n' >&2; exit 2 ;;
+esac
 
 chmod 600 "$root/logs/qmof-library-$SLURM_JOB_ID.out" \
   "$root/logs/qmof-library-$SLURM_JOB_ID.err"
@@ -64,7 +70,8 @@ flock -n 9
 "$python_env/bin/python" "$installer" \
   --archive "$archive" \
   --data-root "$data_root" \
-  --source-commit "$commit"
+  --source-commit "$commit" \
+  --transport-url-used "$download_url"
 "$python_env/bin/python" "$installer" \
   --archive "$archive" \
   --data-root "$data_root" \
