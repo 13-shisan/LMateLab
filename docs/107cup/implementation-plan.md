@@ -1255,5 +1255,18 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
   SHA-256 为 `dc83fd944f0a275d41ae0c24689a1b5eb1be7971cb6485ed9de4e77690b0dbc9`。
 - [x] 本地 Playwright 以模拟 Operator 接口完成 `1440x900` 和 `390x844` 两种视口检查：桌面三个输入框
   与保存按钮的 top、bottom 和 `36px` 高度完全一致；窄屏整页宽度等于视口宽度，控制台错误和警告为 `0`。
-- [ ] Gitea PR 合并、合并后主线构建、候选 Web/Worker、4090 relay 和真实生产浏览器复核尚未完成；
-  这些通过前不得把本节写成已部署。
+- [x] 功能提交 `f1688c6...` 和验证文档提交 `7893eb1...` 已由 Gitea PR #114 合并为
+  `a2a7c472b08a6d3f9e53dba7432fcf6213e320d4`，Gitea 与公开 GitHub `main` 已同步。
+- [x] 合并后主线构建 Job `63324/anode01` 为 `COMPLETED/0:0`，运行 `77` 秒；后端 `637` 项通过、
+  另有 `4` 项平台条件跳过，前端 `162/162`、Vite 生产构建和 release 双重清单通过。稳定 release
+  manifest SHA-256 为 `82d71658ffd316b7a376d0ec848e9cf3978116dec3ccaa46ca6204838d85d613`。
+- [x] 新 Web `63328/anode20` 和 Worker `63329/anode20` 运行同一合并提交与 manifest。Web 完成迁移前
+  双库备份、两个 Alembic head、两套 SQLite 完整性和 direct live/ready；切换前后两次只读 Agent
+  门禁均确认 `queued/running` 为空。4090 relay 和公网 `18733` 已返回新身份，旧 Web `63252` 与旧
+  Worker `63253` 经完整归属核对后受控停止。
+- [x] 4090 活动 Nginx 仅增加精确 `POST /api/competition/agent/qoder/account/switch` 路由，保留来源
+  IP 白名单和其余方法边界；候选与活动配置均通过 `nginx -t`，活动配置保持 `0600`，SHA-256 为
+  `eafac4bcdc085a0a4ff3195552f6acb5984446067a35321a86967175545c4688`。无认证 POST 返回后端 `401`，
+  证明路由可达但未执行换号。
+- [ ] 已登录生产浏览器仍需刷新后复核当前账号、“切换账号”按钮、桌面设置栏对齐和窄屏单列布局；
+  自动化没有可复用登录态，本次没有绕过认证或修改数据库伪造该项。真实 Qoder MCP 验收仍受额度门禁阻断。

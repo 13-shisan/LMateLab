@@ -116,7 +116,7 @@ printf '%s\n' "$candidate_job"
 
 正式状态以 `runtime/service-state.json` 为原子来源，同时与 `service-job-id`、`service-node`、`service-port`、`service-commit` 和 `service-manifest-sha256` 逐项一致。健康检查必须同时满足 `/api/health/live` 身份一致和 `/api/health/ready` 返回 `ready`。
 
-截至 `2026-09-15`，当前运行的 Web 是 Job `63252/anode16`，Agent Worker 是 Job `63253/anode17`；两者均运行提交 `d1daab7e985b7b6b96801ed8eb10ac830f76665e` 和 release manifest `7df97413a67372769013523ca42da56ed5c5f747d2d27d6cb7fee89f85099de9`。公网 `18733` 的 `live`、`ready` 和 relay 状态均与该身份一致。最终构建 Job `63251/anode01` 为 `COMPLETED/0:0`，后端 `633` 项通过、另有 `4` 项按环境条件跳过，前端测试和 Vite 构建通过。
+截至 `2026-09-15`，当前运行的 Web 是 Job `63328/anode20`，Agent Worker 是 Job `63329/anode20`；两者均运行提交 `a2a7c472b08a6d3f9e53dba7432fcf6213e320d4` 和 release manifest `82d71658ffd316b7a376d0ec848e9cf3978116dec3ccaa46ca6204838d85d613`。公网 `18733` 的 `live`、`ready` 和 relay 恢复状态均与该身份一致。最终构建 Job `63324/anode01` 为 `COMPLETED/0:0`，后端 `637` 项通过、另有 `4` 项按环境条件跳过，前端 `162/162` 和 Vite 构建通过。新 Web 完成迁移前双库备份、两个 Alembic head 和 SQLite 完整性检查；切换前后 Agent `queued/running` 均为空。旧 Web/Worker `63252/63253` 经完整归属核对后受控停止。
 
 本次滚动发布先保留旧 Web/Worker `63238/63244`，新入口和 Worker 状态通过后才逐一核对并停止旧 Job。发布时实际发现旧 Worker 退出会覆盖新 Worker 状态；PR `#112` 增加状态锁和跨 Job 退出保护，Slurm 回归 Job `63249/anode01` 的 `17` 项测试通过。失败 Job `63248` 仅为测试包装器写错完整提交哈希，未进入测试。修复版 Worker 发布后，`runtime/agent-worker-state.json` 和 4090 `forward-state.json` 均保持 Job `63253`，不会再被旧 Job 的退出回调覆盖。
 
@@ -174,8 +174,9 @@ Qoder 对话使用 SDK 进程内 MCP，不连接网页中可选的 `qoderclicn r
 /home/scc/pb23030683/lmatelab-107cup/logs/qoder-controlled-diagnostic-63237.{out,err}
 /home/scc/pb23030683/lmatelab-107cup/logs/worker-race-test-63249.{out,err}
 /home/scc/pb23030683/lmatelab-107cup/logs/qoder-runtime-gate-63263.{out,err}
-/home/scc/pb23030683/lmatelab-107cup/logs/service-63252.{out,err}
-/home/scc/pb23030683/lmatelab-107cup/logs/agent-worker-63253.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/build-63324.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/service-63328.{out,err}
+/home/scc/pb23030683/lmatelab-107cup/logs/agent-worker-63329.{out,err}
 ```
 
 Web 服务启动会在 Alembic 迁移前把两套现有 SQLite 用 Online Backup API 复制到 `backups/pre-migration`，文件名包含 Job ID 和 restart count，且禁止覆盖；迁移后要求两个 Alembic 配置都位于 head，并再次执行 `integrity_check`。候选服务或 Worker 失败时保留旧 `18733` relay 和 `18755`，不得静默重试。只有新 `18733` 通过 Operator/Viewer 和 Agent/Qoder 全流程后，才由进程所有者 `Pzxp` 停止 `18755`。
