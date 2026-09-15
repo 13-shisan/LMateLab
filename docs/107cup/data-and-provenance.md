@@ -88,9 +88,11 @@ Stage 7 证据记录 VASP 四步科学门禁；Stage 8 证据记录结构/BAND/D
 `0d89aaf66f2c306e86e47fd91cb1346e`，SHA-256 为
 `97d23c0b4f9e5a30888e53dc16222b90443ad7167c3284d2258615d9f44eceef`。
 
-Figshare 下载节点在接入时对107返回 `403`，因此使用 `StructureCloud/QMOF` 固定 revision
-`24fc459339583e2f7b876296b6daec8d6d0a22a5` 传输逐字节相同的归档。镜像不是数据权威来源：安装器必须
-同时匹配上述官方大小、MD5、SHA-256，否则拒绝解压和建库。
+Figshare 下载节点在接入时对107返回 `403`；`StructureCloud/QMOF` 固定 revision
+`24fc459339583e2f7b876296b6daec8d6d0a22a5` 的文件经核对与官方归档逐字节相同。107计算节点随后又因
+DNS 无法直接解析镜像域名，因此允许4090在固定端口短时中继该已验证归档。镜像和临时中继都不是数据
+权威来源：安装器必须同时匹配上述官方大小、MD5、SHA-256，并在 provenance 记录实际传输 URL，否则
+拒绝解压和建库。传输完成后停止临时服务并删除4090副本。
 
 安装器只读取归档中的 `qmof.csv` 和 `relaxed_structures.zip`，并验证：CSV 共 `20372` 条无重复规范 ID，
 内层归档共 `20372` 个 CIF，二者 ID 集合完全一致；CSV SHA-256 为

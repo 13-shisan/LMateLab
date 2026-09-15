@@ -107,6 +107,7 @@ class QmofDatasetInstallTests(unittest.TestCase):
                 data_root,
                 spec=spec,
                 source_commit="a" * 40,
+                transport_url_used="http://222.195.94.37:18757/qmof_database-v18.zip",
                 switch_current=False,
             )
 
@@ -123,6 +124,11 @@ class QmofDatasetInstallTests(unittest.TestCase):
             provenance = json.loads((version_root / "provenance.json").read_text())
             self.assertEqual(spec.doi, provenance["doi"])
             self.assertEqual("a" * 40, provenance["source_commit"])
+            self.assertEqual(
+                "http://222.195.94.37:18757/qmof_database-v18.zip",
+                provenance["transport_url"],
+            )
+            self.assertIn("Temporary relay", provenance["transport_note"])
 
             reused = install_dataset(
                 archive,
@@ -220,6 +226,10 @@ class QmofDatasetInstallTests(unittest.TestCase):
             "--verify-installed",
             "flock -n",
             "QMOF_INSTALL_OK",
+            "LMATELAB_QMOF_TRANSFER_URL",
+            "temporary_relay_url",
+            "unapproved QMOF transfer URL",
+            "--transport-url-used",
         ):
             self.assertIn(required, slurm)
         for forbidden in (

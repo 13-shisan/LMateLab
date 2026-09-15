@@ -369,6 +369,7 @@ def install_dataset(
     *,
     spec: DatasetSpec = QMOF_V18,
     source_commit: str = "unknown",
+    transport_url_used: str | None = None,
     switch_current: bool = True,
 ) -> dict[str, object]:
     archive_metadata = verify_archive(archive, spec)
@@ -430,6 +431,7 @@ def install_dataset(
                 "source_commit": source_commit,
             },
         )
+        actual_transport_url = transport_url_used or spec.transport_url
         provenance = {
             "schema": "lmatelab-qmof-install-v1",
             "dataset": "QMOF",
@@ -438,9 +440,13 @@ def install_dataset(
             "doi": spec.doi,
             "figshare_file_id": spec.figshare_file_id,
             "authority_url": spec.authority_url,
-            "transport_url": spec.transport_url,
+            "transport_url": actual_transport_url,
             "transport_revision": spec.transport_revision,
-            "transport_note": "Hash-identical mirror used only as the transfer channel.",
+            "transport_note": (
+                "Hash-identical mirror used only as the transfer channel."
+                if actual_transport_url == spec.transport_url
+                else "Temporary relay used only as the transfer channel; official hashes verified."
+            ),
             "archive_name": spec.archive_name,
             "archive_size": archive_metadata["size"],
             "archive_md5": archive_metadata["md5"],
@@ -473,6 +479,7 @@ def main() -> int:
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--source-commit", default="unknown")
+    parser.add_argument("--transport-url-used")
     parser.add_argument("--verify-archive-only", action="store_true")
     parser.add_argument("--verify-installed", action="store_true")
     args = parser.parse_args()
@@ -489,6 +496,7 @@ def main() -> int:
             args.archive,
             args.data_root,
             source_commit=args.source_commit,
+            transport_url_used=args.transport_url_used,
         )
     print(json.dumps(result, sort_keys=True))
     return 0
