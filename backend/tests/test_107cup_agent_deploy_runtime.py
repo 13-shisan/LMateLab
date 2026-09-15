@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import os
 import sqlite3
 import tempfile
@@ -72,6 +73,11 @@ class DatabasePreparationRuntimeTests(unittest.TestCase):
 class AgentWorkerControlRuntimeTests(unittest.TestCase):
     def setUp(self):
         self.module = load_script("agent_worker_control_under_test", "agent_worker_control.py")
+        self.temporary = tempfile.TemporaryDirectory()
+        self.module.ROOT = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
 
     @staticmethod
     def owned_job(job_id: str = "123") -> dict[str, str]:
@@ -127,6 +133,59 @@ class AgentWorkerControlRuntimeTests(unittest.TestCase):
             ):
                 self.module.recover()
         run.assert_not_called()
+
+    def test_stopping_old_worker_does_not_overwrite_new_worker_state(self):
+        state_path = self.module.ROOT / "runtime" / "agent-worker-state.json"
+        state_path.parent.mkdir(parents=True)
+        current = {
+            "schema": self.module.STATE_SCHEMA,
+            "job_id": "124",
+            "status": "running",
+        }
+        state_path.write_text(json.dumps(current), encoding="utf-8")
+        arguments = SimpleNamespace(
+            job_id="123",
+            node="anode17",
+            commit="a" * 40,
+            manifest_sha256="b" * 64,
+            started_at="2026-09-15T12:30:44+08:00",
+            status="stopped",
+            exit_code=143,
+        )
+
+        with mock.patch.object(self.module, "_lookup", return_value=self.owned_job("123")):
+            self.module.publish(arguments)
+
+        self.assertEqual(current, json.loads(state_path.read_text(encoding="utf-8")))
+
+    def test_stopping_current_worker_updates_its_own_state(self):
+        state_path = self.module.ROOT / "runtime" / "agent-worker-state.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "schema": self.module.STATE_SCHEMA,
+                "job_id": "123",
+                "status": "running",
+            }),
+            encoding="utf-8",
+        )
+        arguments = SimpleNamespace(
+            job_id="123",
+            node="anode17",
+            commit="a" * 40,
+            manifest_sha256="b" * 64,
+            started_at="2026-09-15T12:30:44+08:00",
+            status="stopped",
+            exit_code=143,
+        )
+
+        with mock.patch.object(self.module, "_lookup", return_value=self.owned_job("123")):
+            self.module.publish(arguments)
+
+        updated = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual("123", updated["job_id"])
+        self.assertEqual("stopped", updated["status"])
+        self.assertEqual(143, updated["exit_code"])
 
 
 class QoderReleaseRuntimeTests(unittest.TestCase):
