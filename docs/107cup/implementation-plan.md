@@ -1149,3 +1149,26 @@ Viewer 只读查看真实状态、日志和 BAND/DOS 结果
 - [x] 功能提交 `249bd3a05e568cf6a0b23ed8d51d910cd8c5f398` 由 Gitea PR #104 合并为 `deb59dd3dd6db252c9f690087dac8a3c56299b9e`，同一合并提交已推送公开 GitHub `main`。107 checkout 已同步该提交，4090 已重新安装合并后守护；`2026-09-15 09:45:01 +08:00` 真实 cron 周期返回 `ready`，同时记录 Web `62952` 和 Worker `62954`，队列未产生重复 Worker，公网 live/ready 仍为 `200`。
 - 该修正只改恢复控制和文档，没有重建已验收的业务 release，也没有修改 SQLite、工作流或 VASP 作业。
 - 边界保持不变：4090 重启、真实网络断开或 107 服务端关闭 SSH 之后，仍必须由 Operator 人工完成一次二次验证。现有安全策略下不宣称跨 4090 重启的无人值守零中断。
+
+### 17.37 QMOF v18 索引与 CIF 正式接入
+
+- 已确认旧 `18755` 的结构库导入代码指向 QMOF 官方公开数据集；Pzxp 是旧服务运行用户，不是 20,372 条
+  QMOF 结构的人工数据作者。由于旧用户目录不可读且旧实例已经返回 `502`，107 不复制来源不明的运行库，
+  而是从可公开复核的官方版本重新安装。
+- 数据权威版本固定为 Figshare v18：DOI `10.6084/m9.figshare.13147324.v18`、file ID `59573735`、
+  CC BY 4.0、归档大小 `392088304`、MD5 `0d89aaf66f2c306e86e47fd91cb1346e`、SHA-256
+  `97d23c0b4f9e5a30888e53dc16222b90443ad7167c3284d2258615d9f44eceef`。Figshare 对107返回 `403` 时，
+  只允许从固定 revision `24fc459339583e2f7b876296b6daec8d6d0a22a5` 的镜像传输哈希完全相同的文件；
+  镜像不替代 Figshare 的权威地位。
+- 安装器对 ZIP 路径穿越、符号链接、重复成员、异常大小、哈希差异、非法/重复 QMOF ID、非有限数值、
+  CSV/CIF ID 不一致和 SQLite 损坏全部失败关闭。通过后生成 `data/qmof/v18/{structures.sqlite,
+  qmof.csv,relaxed_structures.zip,relaxed_structures/,cif-manifest.sha256,provenance.json}`，文件为私有权限，
+  再原子切换 `data/qmof/current`；不修改 `eln.db`、`digests.db`、用户、工作流或 Agent 历史。
+- Web 与 Agent Worker 使用相同的 `LMATELAB_STRUCTURE_LIBRARY_DB` 和 `LMATELAB_QMOF_CIF_ROOT`，且启动前
+  要求索引和 CIF 根目录存在。下载、解压和建库只能通过短时提交的 `qmof-library.slurm` 在计算节点执行，
+  登录节点只提交和查询明确 Job ID。
+- [ ] 本地合成 ZIP 单元测试、部署合同、Shell/Python 语法、正式构建和清单通过。
+- [ ] Gitea PR 合并且同一合并提交同步到公开 GitHub `main`。
+- [ ] 107 QMOF Slurm Job 成功，记录真实 Job ID、节点、排队/运行时间、MaxRSS、日志哈希和 provenance。
+- [ ] 新 Web/Worker 候选通过 commit/manifest、SQLite 和 QMOF 门禁后切换 `18733`；公网真实验证总数、
+  元素筛选、随机详情和 CIF 三维结构。旧库的元素计数可能对应更早版本，不把差异伪装成数据丢失。

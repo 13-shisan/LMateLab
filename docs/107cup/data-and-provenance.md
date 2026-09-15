@@ -12,6 +12,7 @@
 | Python/Node 环境 | `envs/python`、`envs/node-*` | 构建 Job 和可执行文件路径 |
 | 用户和工作流数据库 | `data/db/eln.db` | SQLite `query_only`、`integrity_check`、工作流 ID |
 | 摘要数据库 | `data/db/digests.db` | SQLite `integrity_check` |
+| QMOF v18 索引与 CIF | `data/qmof/current` | 官方归档哈希、CSV/CIF ID 对账、逐 CIF 清单、SQLite `integrity_check` |
 | 工作流输入和 attempt | `data/workflows/<workflow-id>` | 文件账本、attempt、Job ID 和 SHA-256 |
 | VASP 原始输出 | 各 attempt 的固定输出目录 | OUTCAR/vasprun.xml、正常结束和科学门禁 |
 | 结果与证据包 | 数据库记录、attempt、`evidence` | 确定性导出及清单 |
@@ -79,3 +80,24 @@ Stage 7 证据记录 VASP 四步科学门禁；Stage 8 证据记录结构/BAND/D
 交付清单和证据文档可以提交 Git；JWT、密码、Gitea Token、SSH key、二次验证码、完整私有数据库、运行环境文件和未裁剪日志不能提交。Viewer 下载只包含固定白名单工件和受限日志。
 
 三名成员最终分别记录自己的 Gitea 身份、复核日期、固定 `main` 提交和 `artifacts/manifest.sha256` 文件哈希。任何一人发现哈希、Job ledger、路由范围或页面角色与文档不一致，Stage 10 保持 `PARTIAL` 并停止签字。
+
+## 8. QMOF 结构库
+
+正式结构库采用 QMOF Figshare v18，DOI 为 `10.6084/m9.figshare.13147324.v18`，Figshare file ID 为
+`59573735`，许可证为 CC BY 4.0。权威归档 `qmof_database.zip` 固定为 `392088304` 字节，官方 MD5 为
+`0d89aaf66f2c306e86e47fd91cb1346e`，SHA-256 为
+`97d23c0b4f9e5a30888e53dc16222b90443ad7167c3284d2258615d9f44eceef`。
+
+Figshare 下载节点在接入时对107返回 `403`，因此使用 `StructureCloud/QMOF` 固定 revision
+`24fc459339583e2f7b876296b6daec8d6d0a22a5` 传输逐字节相同的归档。镜像不是数据权威来源：安装器必须
+同时匹配上述官方大小、MD5、SHA-256，否则拒绝解压和建库。
+
+安装器只读取归档中的 `qmof.csv` 和 `relaxed_structures.zip`，并验证：CSV 共 `20372` 条无重复规范 ID，
+内层归档共 `20372` 个 CIF，二者 ID 集合完全一致；CSV SHA-256 为
+`9991b2d51d71a6cc4c97affd8ca36ac18d5b75554b4f3f1ac9ebb35bc9995f26`，内层 CIF 归档 SHA-256 为
+`c7b18fbb042900a91fc481405dabda81196f88eff004c3a092ecaff393521211`。每个解压 CIF 另写入
+`cif-manifest.sha256`，索引和来源写入 `structures.sqlite`、`provenance.json`。只有全部检查通过才原子安装
+`data/qmof/v18` 并把 `data/qmof/current` 切到 `v18`；已有版本只复核，不覆盖。
+
+旧 `18755` 页面使用官方 QMOF 数据导入代码，不是 Pzxp 手工建立的结构记录。旧页面截图中的元素计数与
+v18 可能不同，因此107只声明采用可复核的最新 v18，不宣称与旧运行库逐字节一致。

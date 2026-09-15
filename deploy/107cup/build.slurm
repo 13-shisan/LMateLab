@@ -159,6 +159,7 @@ python -m unittest \
   tests.test_competition_agent_runtime \
   tests.test_competition_agent_security \
   tests.test_competition_agent_structures \
+  tests.test_qmof_dataset_install \
   tests.test_competition_agent_tools \
   tests.test_107cup_stage8_acceptance_contract \
   tests.test_107cup_stage10_delivery_contract \
