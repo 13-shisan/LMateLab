@@ -1739,6 +1739,25 @@ class CompetitionDeployContractTests(unittest.TestCase):
         self.assertIn("proxy_temp_path /home/Pwjb/.config/lmatelab-107cup-proxy/proxy-temp", relay)
         self.assertIn("proxy_http_version 1.1", relay)
         self.assertIn("proxy_buffering off", relay)
+        allowlist = relay.split("client_max_body_size 21m", 1)[1].split(
+            "location = /api/auth/login", 1
+        )[0]
+        for network in (
+            "114.214.160.0/19",
+            "114.214.192.0/18",
+            "202.38.64.0/19",
+            "210.45.64.0/20",
+            "210.45.112.0/20",
+            "211.86.144.0/20",
+            "222.195.64.0/19",
+            "210.72.22.0/24",
+            "202.141.160.0/19",
+            "218.22.21.0/27",
+            "218.104.71.160/28",
+        ):
+            rule = f"allow {network};"
+            self.assertEqual(1, allowlist.count(rule))
+            self.assertLess(allowlist.index(rule), allowlist.index("deny all;"))
         self.assertIn("location = /api/auth/login", relay)
         self.assertIn("location = /api/auth/change-password", relay)
         change_password = relay.split("location = /api/auth/change-password", 1)[1].split(
