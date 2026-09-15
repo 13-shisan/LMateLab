@@ -169,9 +169,16 @@ class FakeAcceptancePolicy:
         *,
         scheduler_state,
         scheduler_exit_code,
+        expected_kpoints_sha256=None,
     ):
         self.calls.append(
-            (Path(attempt_directory), stage, scheduler_state, scheduler_exit_code)
+            (
+                Path(attempt_directory),
+                stage,
+                scheduler_state,
+                scheduler_exit_code,
+                expected_kpoints_sha256,
+            )
         )
         if stage in self.exceptions:
             raise self.exceptions[stage]
@@ -319,9 +326,41 @@ class CoordinatorTestCase(unittest.TestCase):
 
     def prepare_inputs(self, session, workflow_root, **values):
         self.prepared_steps.append(values["step_key"])
-        return self.slurm.prepare_attempt_directory(
+        attempt_directory = self.slurm.prepare_attempt_directory(
             values["workflow_id"], values["attempt_id"]
         )
+        if values["step_key"] == "dos":
+            content = b"Automatic mesh\n0\nGamma\n16 10 1\n0 0 0\n"
+            digest = hashlib.sha256(content).hexdigest()
+            (attempt_directory / "KPOINTS").write_bytes(content)
+            session.add(
+                WorkflowFile(
+                    id=str(uuid.uuid4()),
+                    workflow_id=values["workflow_id"],
+                    attempt_id=values["attempt_id"],
+                    owner_id=values["owner_id"],
+                    relative_path=(
+                        f"{values['workflow_id']}/attempts/"
+                        f"{values['attempt_id']}/KPOINTS"
+                    ),
+                    size_bytes=len(content),
+                    sha256=digest,
+                    source_kind="attempt_input",
+                    metadata_json={
+                        "logical_path": "KPOINTS",
+                        "step_key": "dos",
+                        "input_role": "stage5_kpoints",
+                        "source_workflow_id": values["workflow_id"],
+                        "source_attempt_id": None,
+                        "source_file_id": str(uuid.uuid4()),
+                        "source_sha256": digest,
+                        "template_version": values["template_version"],
+                        "release_commit": values["release_commit"],
+                    },
+                )
+            )
+            session.commit()
+        return attempt_directory
 
     def new_coordinator(self, *, acceptance=None, prepare_inputs=None, personal_result_index=None):
         return CompetitionCoordinator(
@@ -443,6 +482,34 @@ class CoordinatorTestCase(unittest.TestCase):
 
 class CompetitionCoordinatorTests(CoordinatorTestCase):
 
+    def test_dos_acceptance_requires_published_kpoints_input_ledger(self):
+        self.start()
+        for step in ("relax", "scf", "band"):
+            self.complete(step)
+        dos = self.latest_attempt("dos")
+        with self.SessionLocal() as session:
+            row = session.scalar(
+                select(WorkflowFile).where(
+                    WorkflowFile.attempt_id == dos.id,
+                    WorkflowFile.source_kind == "attempt_input",
+                    WorkflowFile.relative_path.endswith("/KPOINTS"),
+                )
+            )
+            session.delete(row)
+            session.commit()
+        self.slurm.set_state(
+            dos.id,
+            "succeeded",
+            raw_state="COMPLETED",
+            exit_code="0:0",
+        )
+
+        result = self.coordinator.tick_once()
+
+        self.assertEqual(1, result.failures)
+        self.assertEqual("awaiting_acceptance", self.latest_attempt("dos").status)
+        self.assertNotEqual("dos", self.acceptance.calls[-1][1])
+
     def test_success_terminal_transition_triggers_personal_result_index_once(self):
         class TrackingIndex:
             def __init__(self):
@@ -512,6 +579,12 @@ class CompetitionCoordinatorTests(CoordinatorTestCase):
         self.complete("dos")
 
         self.assertEqual("succeeded", self.run_status())
+        self.assertEqual(
+            hashlib.sha256(
+                b"Automatic mesh\n0\nGamma\n16 10 1\n0 0 0\n"
+            ).hexdigest(),
+            self.acceptance.calls[-1][4],
+        )
         self.assertEqual({step: "succeeded" for step in FIXED_STEPS}, self.step_statuses())
         self.assertEqual(0, self.active_count())
         with self.SessionLocal() as session:
