@@ -19,6 +19,26 @@ from services.competition_agent.planning import validated_parameter_changes
 DISABLED_BUILTIN_TOOLS = ("Bash", "Write", "Edit", "Read", "Glob", "WebFetch")
 
 
+def _decode_qoder_json(raw: str) -> object:
+    candidate = raw.strip()
+    try:
+        return json.loads(candidate)
+    except (TypeError, json.JSONDecodeError):
+        pass
+
+    decoded_blocks = []
+    for block in re.findall(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL | re.IGNORECASE):
+        try:
+            value = json.loads(block.strip())
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            decoded_blocks.append(value)
+    if len(decoded_blocks) != 1:
+        raise RuntimeError("Qoder returned invalid JSON")
+    return decoded_blocks[0]
+
+
 @dataclass(frozen=True)
 class QoderRuntimeConfig:
     permission_mode: str = "dontAsk"
@@ -191,7 +211,8 @@ class RealQoderRuntime:
             "claim that a calculation ran. Never submit, cancel, mutate, execute VASP, use a "
             "scheduler, access arbitrary files, use shell, or use the web. Return exactly one "
             "JSON object with summary, citations, parameter_changes, and advisory_only. "
-            "advisory_only must be true. parameter_changes may use only editable parameters "
+            "advisory_only must be true and citations must be an empty list because LMateLab "
+            "attaches server-recorded sources. parameter_changes may use only editable parameters "
             "returned by prepare_workflow_draft. The user and LMateLab must validate every draft."
         )
         tool_session = ControlledQoderToolSession(tool_payload)
@@ -265,29 +286,19 @@ class RealQoderRuntime:
         allowed_ids: set[tuple[str, str]] | None = None,
         tool_calls: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        candidate = raw.strip()
-        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
-        if fenced:
-            candidate = fenced.group(1)
-        try:
-            value = json.loads(candidate)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise RuntimeError("Qoder returned invalid JSON") from exc
+        value = _decode_qoder_json(raw)
         if not isinstance(value, dict) or value.get("advisory_only") is not True:
             raise RuntimeError("Qoder response is not advisory-only")
         if not isinstance(value.get("summary"), str) or not value["summary"].strip():
             raise RuntimeError("Qoder response has no summary")
         if len(value["summary"]) > 8000:
             raise RuntimeError("Qoder response summary is too long")
-        citations = value.get("citations", [])
-        if not isinstance(citations, list) or not all(isinstance(item, dict) for item in citations):
-            raise RuntimeError("Qoder response citations are invalid")
         if allowed_ids is None:
             allowed_ids = RealQoderRuntime._authorized_ids(tool_payload)
-        for citation in citations:
-            key = (str(citation.get("kind") or ""), str(citation.get("id") or ""))
-            if key not in allowed_ids:
-                raise RuntimeError("Qoder response cites unauthorized data")
+        citations = [
+            {"kind": kind, "id": identifier}
+            for kind, identifier in sorted(allowed_ids)
+        ]
         actual_calls = [dict(item) for item in (tool_calls or [])]
         succeeded_tools = {
             str(item.get("name")) for item in actual_calls if item.get("status") == "succeeded"

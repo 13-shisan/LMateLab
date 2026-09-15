@@ -274,6 +274,32 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("qoder", output["provider"])
 
+    def test_real_runtime_accepts_one_json_fence_after_qoder_explanation(self):
+        output = RealQoderRuntime._validated_output(
+            "Qoder completed the controlled tool calls.\n"
+            "```json\n"
+            '{"summary":"Prepared a read-only draft.","citations":[],'
+            '"parameter_changes":[],"advisory_only":true}'
+            "\n```\n",
+            "template_recommendation",
+            {},
+        )
+
+        self.assertEqual("Prepared a read-only draft.", output["summary"])
+
+    def test_real_runtime_rejects_ambiguous_multiple_json_fences(self):
+        raw = (
+            '```json\n{"summary":"first","advisory_only":true}\n```\n'
+            '```json\n{"summary":"second","advisory_only":true}\n```'
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "invalid JSON"):
+            RealQoderRuntime._validated_output(
+                raw,
+                "template_recommendation",
+                {},
+            )
+
     def test_real_runtime_uses_server_recorded_tool_calls_not_model_claims(self):
         plan = calculation_plan("计算一下 MoS2 体系的能带")
         output = RealQoderRuntime._validated_output(
@@ -309,6 +335,24 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
                 tool_calls=[],
             )
 
+    def test_calculation_plan_keeps_band_and_dos_when_both_are_requested(self):
+        plan = calculation_plan("为 MoS2 生成 relax、SCF、能带和态密度计算方案")
+
+        self.assertEqual(["relax", "scf", "band", "dos"], plan["steps"])
+        self.assertEqual(
+            ["relax", "scf", "band", "dos"],
+            [item["step"] for item in plan["templates"]],
+        )
+
+    def test_calculation_plan_ignores_method_acronyms_before_material_formula(self):
+        plan = calculation_plan(
+            "Plan a standard PBE relax, SCF, band and DOS workflow for MoS2."
+        )
+
+        self.assertEqual("MoS2", plan["material_formula"])
+        self.assertFalse(plan["needs_upload"])
+        self.assertEqual(["relax", "scf", "band", "dos"], plan["steps"])
+
     def test_real_runtime_rejects_out_of_range_or_non_numeric_parameter_changes(self):
         plan = calculation_plan("计算一下 MoS2 体系的能带")
         output = RealQoderRuntime._validated_output(
@@ -340,19 +384,30 @@ class CompetitionAgentRuntimeTests(unittest.TestCase):
             output["parameter_changes"],
         )
 
-    def test_real_runtime_rejects_unauthorized_citation(self):
-        with self.assertRaisesRegex(RuntimeError, "unauthorized data"):
-            RealQoderRuntime._validated_output(
-                json.dumps({
-                    "summary": "Unsafe citation.",
-                    "citations": [{"kind": "template", "id": "unknown"}],
-                    "tool_calls": [],
-                    "workspace": {},
-                    "advisory_only": True,
-                }),
-                "template_recommendation",
-                {"templates": [{"id": "2d_relax"}]},
-            )
+    def test_real_runtime_replaces_model_citations_with_server_exposed_sources(self):
+        output = RealQoderRuntime._validated_output(
+            json.dumps({
+                "summary": "Controlled citation.",
+                "citations": ["invented", {"kind": "template", "id": "unknown"}],
+                "tool_calls": [],
+                "workspace": {},
+                "advisory_only": True,
+            }),
+            "template_recommendation",
+            {"templates": [{"id": "not-actually-exposed"}]},
+            allowed_ids={
+                ("structure", "MoS2_monolayer"),
+                ("template", "2d_relax"),
+            },
+        )
+
+        self.assertEqual(
+            [
+                {"kind": "structure", "id": "MoS2_monolayer"},
+                {"kind": "template", "id": "2d_relax"},
+            ],
+            output["citations"],
+        )
 
     def test_llm_runtime_replaces_model_citations_with_server_authorized_sources(self):
         output = OpenAICompatibleRuntime._validated_output(
