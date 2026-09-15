@@ -26,7 +26,8 @@ default_download_url='https://huggingface.co/datasets/StructureCloud/QMOF/resolv
 temporary_relay_url='http://222.195.94.37:18757/qmof_database-v18.zip'
 download_url="${LMATELAB_QMOF_TRANSFER_URL:-$default_download_url}"
 case "$download_url" in
-  "$default_download_url"|"$temporary_relay_url") ;;
+  "$default_download_url") curl_protocol='=https'; curl_tls=(--tlsv1.2) ;;
+  "$temporary_relay_url") curl_protocol='=http'; curl_tls=() ;;
   *) printf 'unapproved QMOF transfer URL\n' >&2; exit 2 ;;
 esac
 
@@ -54,7 +55,7 @@ if ! test -f "$archive"; then
   test ! -e "$temporary"
   curl --fail --location --silent --show-error \
     --retry 3 --retry-all-errors --connect-timeout 30 \
-    --proto '=https' --tlsv1.2 \
+    --proto "$curl_protocol" "${curl_tls[@]}" \
     --user-agent 'LMateLab-107Cup-QMOF-v18/1.0' \
     "$download_url" --output "$temporary"
   chmod 600 "$temporary"

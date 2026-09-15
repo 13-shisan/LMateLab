@@ -230,6 +230,10 @@ class QmofDatasetInstallTests(unittest.TestCase):
             "temporary_relay_url",
             "unapproved QMOF transfer URL",
             "--transport-url-used",
+            "curl_protocol='=https'",
+            "curl_protocol='=http'",
+            'curl_tls=(--tlsv1.2)',
+            "curl_tls=()",
         ):
             self.assertIn(required, slurm)
         for forbidden in (
